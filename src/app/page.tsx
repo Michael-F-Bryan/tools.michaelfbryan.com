@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { catalogueItems } from "@/lib/catalogue";
+import { entries } from "@/entries";
 
 export default function Home() {
   return (
@@ -13,24 +13,24 @@ export default function Home() {
 
       <section aria-label="Catalogue" className="pb-24">
         <ol className="border-t border-rule">
-          {catalogueItems.map((item) => (
-            <li key={item.href}>
+          {entries.map((entry) => (
+            <li key={entry.href}>
               <Link
-                href={item.href}
+                href={entry.href}
                 className="group grid gap-4 border-b border-rule py-7 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:grid-cols-[1fr_auto] sm:px-4"
               >
                 <span>
                   <span className="block text-xl font-bold tracking-[-0.015em] group-hover:text-accent">
-                    {item.title}
+                    {entry.title}
                   </span>
                   <span className="mt-2 block max-w-[45rem] leading-7 text-secondary">
-                    {item.description}
+                    {entry.description}
                   </span>
                 </span>
                 <span className="flex items-start gap-3 font-mono text-xs uppercase tracking-[0.1em] text-muted sm:justify-end">
-                  <span>{item.kind}</span>
+                  <span>{entry.kind}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{item.status}</span>
+                  <span>{entry.status}</span>
                 </span>
               </Link>
             </li>

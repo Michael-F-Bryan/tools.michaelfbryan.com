@@ -8,14 +8,17 @@ The project is currently at the skeleton stage. It contains the catalogue and a 
 
 ## Repository structure
 
-- `src/app/page.tsx` renders the catalogue.
-- `src/app/tools/<slug>/page.tsx` is the convention for browser-based tools.
-- `src/app/explainers/<slug>/page.tsx` is the convention for visual explainers.
-- `src/lib/catalogue.ts` contains the entries displayed on the home page.
+- `src/app/page.tsx` renders the catalogue from the discovered entries.
+- `src/app/[collection]/[slug]/page.tsx` generates each entry's route, metadata, and shared page chrome.
+- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title, description, and publication status.
+- `src/entries/<collection>/<slug>/content.tsx` contains the tool or explainer itself.
+- `src/entries/index.ts` discovers entries and derives their kind, slug, and URL from the directory structure.
 - `src/app/globals.css` contains the shared design tokens and global styles.
 - `tests/` contains browser-level tests for public routes.
 
-Pages are React Server Components by default and are statically rendered where possible. Interactive tools use narrow Client Component boundaries and should process user input in the browser unless a server dependency is genuinely required. Explainers are written in TSX so each one can use a layout and visual language suited to its subject.
+Pages are React Server Components and are generated statically. Interactive tools use narrow Client Component boundaries and should process user input in the browser unless a server dependency is genuinely required. Explainers are written in TSX so each one can use a layout suited to its subject.
+
+Entry discovery uses Turbopack's `import.meta.glob()` support. Both development and production builds must use Turbopack.
 
 ## Development
 
@@ -53,10 +56,12 @@ PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
 
 ## Adding a tool or explainer
 
-1. Add a route under `src/app/tools/` or `src/app/explainers/`.
-2. Give the page its own metadata and keep it server-rendered unless it needs browser interaction.
-3. Add its title, description, kind, status, and route to `src/lib/catalogue.ts`.
-4. Extend the Playwright coverage to prove the new catalogue entry opens the rendered page.
+1. Create `src/entries/tools/<slug>/` or `src/entries/explainers/<slug>/`.
+2. Export an `EntryDefinition` named `definition` from `definition.ts`.
+3. Default-export the tool or explainer body from `content.tsx`.
+4. Extend the Playwright coverage to prove the discovered catalogue entry opens the rendered page.
+
+The build discovers the new entry automatically. Its definition supplies the catalogue, document metadata, and visible page chrome; no separate route or catalogue registration is required.
 
 Shared components should represent behaviour or meaning that has already appeared in more than one published item. shadcn/ui is configured with Base UI primitives for accessible controls, while the site's visual identity remains in repository-owned components and design tokens.
 
