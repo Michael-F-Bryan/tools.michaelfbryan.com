@@ -3,8 +3,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Reliable AI-assisted transcription",
-  description:
-    "An upcoming visual explainer about the engineering principles behind trustworthy AI-assisted transcription.",
+  description: "An explainer about reliable AI-assisted transcription.",
 };
 
 export default function ReliableTranscriptionExplainer() {
@@ -36,15 +35,6 @@ export default function ReliableTranscriptionExplainer() {
           trustworthy transcription pipeline, using a synthetic interview as a
           concrete case study.
         </p>
-
-        <div className="mt-14 border-l-2 border-accent bg-surface px-5 py-5 sm:px-7">
-          <p className="font-bold">Reader outcome</p>
-          <p className="mt-2 leading-7 text-secondary">
-            Understand how evidence, uncertainty, human judgement, and durable
-            intermediate artefacts fit together—and apply those principles to
-            another transcription system.
-          </p>
-        </div>
       </article>
     </main>
   );

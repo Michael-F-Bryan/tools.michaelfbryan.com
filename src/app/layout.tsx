@@ -18,8 +18,7 @@ export const metadata: Metadata = {
     default: "Tools by Michael F. Bryan",
     template: "%s · Tools by Michael F. Bryan",
   },
-  description:
-    "Small, useful tools and visual explainers that expose the engineering judgement behind them.",
+  description: "Tools and explainers by Michael F. Bryan.",
   openGraph: {
     siteName: "Tools by Michael F. Bryan",
     type: "website",
@@ -35,24 +34,17 @@ export default function RootLayout({
     <html lang="en-AU" className={sans.variable}>
       <body className="min-h-screen bg-paper text-ink antialiased">
         <header className="border-b border-rule">
-          <div className="mx-auto flex max-w-[70rem] items-baseline justify-between gap-6 px-5 py-5 sm:px-8">
+          <div className="mx-auto max-w-[70rem] px-5 py-5 sm:px-8">
             <Link
               href="/"
               className="font-bold tracking-[-0.015em] underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
             >
               Michael F. Bryan <span className="text-muted">/ Tools</span>
             </Link>
-            <span className="hidden font-mono text-xs uppercase tracking-[0.12em] text-muted sm:inline">
-              Built to be used
-            </span>
           </div>
         </header>
 
         {children}
-
-        <footer className="mx-auto max-w-[70rem] border-t border-rule px-5 py-8 text-sm text-muted sm:px-8">
-          Small tools, concrete explanations, and the decisions behind them.
-        </footer>
 
         {googleAnalyticsId ? (
           <GoogleAnalytics gaId={googleAnalyticsId} />
