@@ -23,7 +23,9 @@ test("the catalogue opens the first explainer", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Reliable AI-assisted transcription" }),
   ).toBeVisible();
-  await expect(page.getByText("In development", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("In development", { exact: true }),
+  ).not.toBeVisible();
   await expect(page.getByText(description, { exact: true })).toBeVisible();
   await expect(page.locator('meta[name="description"]')).toHaveAttribute(
     "content",

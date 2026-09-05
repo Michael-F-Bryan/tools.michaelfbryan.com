@@ -29,8 +29,6 @@ export default function Home() {
                 </span>
                 <span className="flex items-start gap-3 font-mono text-xs uppercase tracking-[0.1em] text-muted sm:justify-end">
                   <span>{entry.kind}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{entry.status}</span>
                 </span>
               </Link>
             </li>

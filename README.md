@@ -10,7 +10,7 @@ The project is currently at the skeleton stage. It contains the catalogue and a 
 
 - `src/app/page.tsx` renders the catalogue from the discovered entries.
 - `src/app/[collection]/[slug]/page.tsx` generates each entry's route, metadata, and shared page chrome.
-- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title, description, and publication status.
+- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title and description.
 - `src/entries/<collection>/<slug>/content.tsx` contains the tool or explainer itself.
 - `src/entries/index.ts` discovers entries and derives their kind, slug, and URL from the directory structure.
 - `src/app/globals.css` contains the shared design tokens and global styles.
