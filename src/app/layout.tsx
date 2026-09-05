@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { Atkinson_Hyperlegible } from "next/font/google";
 import Link from "next/link";
@@ -27,7 +28,9 @@ export const metadata: Metadata = {
 
 const googleAnalyticsId = process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID;
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en-AU" className={sans.variable}>
       <body className="min-h-screen bg-paper text-ink antialiased">
