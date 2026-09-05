@@ -1,0 +1,84 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+  --font-sans: var(--font-atkinson);
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", monospace;
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-rule: var(--rule);
+  --color-accent: var(--accent);
+
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--paper);
+  --color-secondary-foreground: var(--ink);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--error);
+  --color-border: var(--rule);
+  --color-input: var(--rule);
+  --color-ring: var(--accent);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+:root {
+  --paper: #f7f4ec;
+  --surface: #fffcf4;
+  --ink: #171717;
+  --text-secondary: #414853;
+  --text-muted: #5f6b7a;
+  --rule: #b8b0a2;
+  --accent: #245c7a;
+  --error: #a33a2b;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--paper);
+  --secondary: #ece6d8;
+  --secondary-foreground: var(--ink);
+  --muted: #ece6d8;
+  --muted-foreground: var(--text-muted);
+  --accent-foreground: var(--ink);
+  --destructive: var(--error);
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--accent);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply bg-paper font-sans;
+  }
+
+  body {
+    @apply bg-paper text-ink;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
