@@ -1,72 +1,42 @@
 # tools.michaelfbryan.com
 
-A personal collection of small, useful tools and visual explainers by Michael F. Bryan.
+[![CI](https://github.com/Michael-F-Bryan/tools.michaelfbryan.com/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-F-Bryan/tools.michaelfbryan.com/actions/workflows/ci.yml)
 
-The site is intended to make experimentation easy to finish and share. Each item should solve a real problem, stand on its own, and expose some of the engineering judgement behind it without requiring a substantial article or a long-running project.
+Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The eventual site will live at [tools.michaelfbryan.com](https://tools.michaelfbryan.com).
+The project is currently at the skeleton stage. It contains the catalogue and a placeholder for the first explainer, which will examine the engineering principles behind reliable AI-assisted transcription.
 
-## What belongs here
+## Repository structure
 
-The catalogue will contain two kinds of work:
+- `src/app/page.tsx` renders the catalogue.
+- `src/app/tools/<slug>/page.tsx` is the convention for browser-based tools.
+- `src/app/explainers/<slug>/page.tsx` is the convention for visual explainers.
+- `src/lib/catalogue.ts` contains the entries displayed on the home page.
+- `src/app/globals.css` contains the shared design tokens and global styles.
+- `tests/` contains browser-level tests for public routes.
 
-- **Tools** — focused browser-based utilities that produce a useful result without unnecessary server-side processing.
-- **Explainers** — bespoke visual artefacts that help capable engineers understand how a system works or why particular design choices matter.
-
-The first explainer will use a reliable interview-transcription pipeline as a concrete case study. Its primary job is to show the engineering principles behind trustworthy AI-assisted transcription so readers can apply them to their own systems.
-
-## Working principles
-
-- Build the smallest complete vertical slice and publish it.
-- Prefer real needs and working artefacts over speculative platforms.
-- Render pages on the server by default, with static output wherever possible.
-- Keep interactive tools in narrow Client Components and process their inputs in the browser by default.
-- Build explainers as ordinary TSX so their information structure, diagrams, and interactions can fit the subject.
-- Add shared components only after multiple real pages demonstrate the same need.
-- Treat shadcn/ui as a source of owned UI primitives, not the site's visual identity.
-- Keep all published examples public-safe and synthetic; private source material does not belong in this repository.
-- Design for accessible desktop and mobile use from the start.
-
-## Technical direction
-
-- [Next.js](https://nextjs.org/) with the App Router
-- Strict TypeScript
-- Tailwind CSS
-- shadcn/ui with Base UI primitives
-- React Server Components by default
-- Client Components for interactive tools
-- Google Analytics 4, isolated from tool inputs and outputs
-- Vercel deployment with GitHub preview deployments
-- pnpm for package management
-
-The initial site does not need a CMS, database, authentication, monorepo, Storybook, separate component package, or generic plugin system. Those should only be introduced if a published tool creates a concrete need for them.
-
-## Initial shape
-
-The first release is deliberately small:
-
-1. A catalogue at `/`.
-2. One explainer under `/explainers/`.
-3. Only the brand tokens and components required by those pages.
-4. Social metadata suitable for sharing.
-5. A production deployment at `tools.michaelfbryan.com`.
-
-Future tools will live under `/tools/`, with each tool owning its interface and browser-side behaviour inside the shared site shell.
-
-## Status
-
-The application skeleton includes a server-rendered catalogue and a placeholder route for the first explainer. The explainer itself has not been designed or written yet.
+Pages are React Server Components by default and are statically rendered where possible. Interactive tools use narrow Client Component boundaries and should process user input in the browser unless a server dependency is genuinely required. Explainers are written in TSX so each one can use a layout and visual language suited to its subject.
 
 ## Development
 
-Install dependencies and start the local development server:
+This project uses Node.js 22 and pnpm.
 
 ```console
 pnpm install
 pnpm dev
 ```
 
-Run the repository checks with:
+The development server is available at http://localhost:3000.
+
+### Checks
+
+Install Playwright's Chromium browser once:
+
+```console
+pnpm exec playwright install chromium
+```
+
+Then run the same checks used by CI:
 
 ```console
 pnpm lint
@@ -75,4 +45,23 @@ pnpm test:e2e
 pnpm build
 ```
 
-Google Analytics is disabled unless `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is set. Configure it only for the production Vercel environment so local and preview traffic does not pollute the production property.
+Playwright starts its own development server on port 3107. To test a server that is already running, provide its URL explicitly:
+
+```console
+PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
+```
+
+## Adding a tool or explainer
+
+1. Add a route under `src/app/tools/` or `src/app/explainers/`.
+2. Give the page its own metadata and keep it server-rendered unless it needs browser interaction.
+3. Add its title, description, kind, status, and route to `src/lib/catalogue.ts`.
+4. Extend the Playwright coverage to prove the new catalogue entry opens the rendered page.
+
+Shared components should represent behaviour or meaning that has already appeared in more than one published item. shadcn/ui is configured with Base UI primitives for accessible controls, while the site's visual identity remains in repository-owned components and design tokens.
+
+## Google Analytics
+
+Google Analytics is disabled unless `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is set. Configure the variable only in Vercel's Production environment so local and preview traffic does not pollute the production property.
+
+Tool inputs and outputs must not be sent to Google Analytics.
