@@ -5,47 +5,52 @@ import { Section, SectionTitle } from "@/components/section";
 import { Step, Steps } from "@/components/steps";
 
 const components = [
-  ["Container", "The centred page frame and responsive gutters."],
-  ["PageTitle", "The display heading above this specimen."],
-  ["Label", "Kickers and quiet entry metadata."],
-  ["Section", "A repeatable heading and body rhythm."],
-  ["SectionTitle", "A heading for layouts that need their own composition."],
-  ["Prose", "Readable text at base, large and standfirst sizes."],
-  ["Steps / Step", "A true ordered sequence with automatic numbering."],
-  ["Figure", "An illustration boundary with a consistent caption."],
+  ["Container", "Centres the page and adds the side gutters."],
+  ["PageTitle", "Renders the large heading and keeps each word together."],
+  ["Label", "Small monospace text for entry types and section kickers."],
+  ["Section", "Pairs a kicker and heading with the usual vertical spacing."],
+  ["SectionTitle", "Provides the same heading. The surrounding layout is up to the page."],
+  ["Prose", "Caps the line length and offers base, large and extra-large text."],
+  ["Steps / Step", "Turns an ordered list into numbered columns or rows."],
+  ["Figure", "Wraps an illustration and, when needed, its caption."],
 ] as const;
 
 export default function ComponentKitchenSink() {
   return (
     <div className="space-y-24 sm:space-y-32">
       <section
-        aria-labelledby="how-to-read-this-page"
+        aria-labelledby="why-this-page-exists"
         className="border-y border-rule bg-surface px-6 py-10 sm:px-10 sm:py-14"
       >
-        <Label>Live specimen</Label>
-        <SectionTitle id="how-to-read-this-page" className="mt-4">
-          The page is the demonstration
+        <Label>Why this exists</Label>
+        <SectionTitle id="why-this-page-exists" className="mt-4">
+          Opening seven files is a lousy way to check a design
         </SectionTitle>
         <Prose size="xl" className="mt-7">
           <p>
-            The shared <code>Container</code>, <code>Label</code>,{" "}
-            <code>PageTitle</code> and <code>Prose</code> components already form
-            the frame above. The sections below exercise the remaining pieces
-            with real content rather than showing disconnected swatches.
+            Fable pulled the repeated layout from the first explainers into a
+            handful of shared components. I wanted one page where I could see
+            them together, try them at different widths, and decide whether
+            they still belong in the shared layer.
+          </p>
+          <p>
+            This page is that test. The <code>Container</code>,{" "}
+            <code>Label</code>, <code>PageTitle</code> and <code>Prose</code> above
+            are already part of it.
           </p>
         </Prose>
       </section>
 
       <Section
         id="component-inventory"
-        kicker="The parts"
-        title="One small vocabulary for explainers"
+        kicker="What Fable made"
+        title="The shared parts"
       >
         <Prose>
           <p>
-            These components name repeated reading structures. Subject-specific
-            diagrams and layouts remain local to each explainer until there is
-            evidence that they deserve a shared abstraction.
+            Fable found eight things worth naming. Everything else stayed in
+            the explainer that needed it, including one-off diagrams and
+            page-specific layouts.
           </p>
         </Prose>
 
@@ -64,37 +69,44 @@ export default function ComponentKitchenSink() {
 
       <Section
         id="prose-scale"
-        kicker="Reading hierarchy"
-        title="Prose changes emphasis, not personality"
+        kicker="Prose sizes"
+        title="How the three prose sizes differ"
       >
-        <div className="space-y-10">
+        <Prose>
+          <p>
+            The size changes, but the typeface, colour and maximum line length
+            don’t. That keeps an opening paragraph and a quiet note recognisably
+            part of the same page.
+          </p>
+        </Prose>
+
+        <div className="mt-10 space-y-10">
           <div>
-            <Label tone="muted">XL · standfirst</Label>
+            <Label tone="muted">XL · opening or closing</Label>
             <Prose size="xl" className="mt-3">
               <p>
-                Use the largest prose sparingly: to establish the argument or
-                land its conclusion.
+                Use this when a paragraph needs to carry more weight than the
+                body copy around it.
               </p>
             </Prose>
           </div>
 
           <div>
-            <Label tone="muted">LG · running text</Label>
+            <Label tone="muted">LG · normal reading</Label>
             <Prose className="mt-3">
               <p>
-                This is the default reading voice. It gives an explanation
-                enough room to breathe without mistaking body copy for display
-                type.
+                Most of an explainer should look like this. It’s large enough to
+                read comfortably without every paragraph announcing itself.
               </p>
             </Prose>
           </div>
 
           <div>
-            <Label tone="muted">Base · supporting note</Label>
+            <Label tone="muted">Base · supporting detail</Label>
             <Prose size="base" className="mt-3">
               <p>
-                Quieter context can follow the main point without competing
-                with it.
+                This suits a caveat or follow-up detail that matters but isn’t
+                the main point.
               </p>
             </Prose>
           </div>
@@ -103,60 +115,66 @@ export default function ComponentKitchenSink() {
 
       <Section
         id="ordered-sequence"
-        kicker="Ordered work"
-        title="Steps are for sequences that really have an order"
+        kicker="Steps"
+        title="Don’t make a component after seeing something once"
       >
         <Prose>
           <p>
-            A process earns numbers when changing the order would change the
-            result. The counter and directional markers are presentation; the
-            list remains an ordinary ordered list.
+            This is an actual sequence, so numbering helps. Swapping the middle
+            steps would change the advice rather than merely rearranging four
+            equal ideas.
           </p>
         </Prose>
 
         <Steps className="mt-10">
-          <Step title="Notice">Find a repeated structure in a real explainer.</Step>
-          <Step title="Name">Give the pattern one clear responsibility.</Step>
-          <Step title="Reuse">Apply it where the same reading job appears.</Step>
-          <Step title="Refine">Change the shared rule once evidence accumulates.</Step>
+          <Step title="Build the page">Solve the explainer in front of you.</Step>
+          <Step title="Spot the repeat">
+            Wait until the same layout job appears again.
+          </Step>
+          <Step title="Pull it out">
+            Name the job rather than copying a pile of CSS.
+          </Step>
+          <Step title="Try to break it">
+            Use it somewhere awkward, such as this page.
+          </Step>
         </Steps>
       </Section>
 
       <Section
         id="figures"
-        kicker="Visual evidence"
-        title="A figure frames an explanation"
+        kicker="Figures"
+        title="What Figure does and what it leaves alone"
       >
         <Prose>
           <p>
-            The figure owns its illustration and surface. The shared component
-            supplies the semantic boundary and caption, without forcing every
-            subject into one diagram style.
+            <code>Figure</code> provides a real <code>figure</code> element and a
+            consistent caption. It doesn’t choose the border, background,
+            padding or artwork. Those decisions belong to the explainer.
           </p>
         </Prose>
 
         <Figure
           className="mt-10 border border-rule bg-surface px-5 py-8 sm:px-9"
-          caption="The caption explains why the picture matters instead of restating its labels."
+          caption="The boxes show three pages at different stages. Only the middle one produces shared code."
         >
           <div className="grid gap-4 sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-center">
             <div className="border border-rule bg-paper p-5">
-              <Label tone="muted">Source</Label>
-              <strong className="mt-3 block text-lg">Repeated decision</strong>
+              <Label tone="muted">First page</Label>
+              <strong className="mt-3 block text-lg">Draw what it needs</strong>
             </div>
             <span aria-hidden="true" className="hidden text-2xl text-accent sm:block">
               →
             </span>
             <div className="border border-accent bg-sand p-5">
-              <Label>Shared structure</Label>
-              <strong className="mt-3 block text-lg">Named component</strong>
+              <Label>After repetition</Label>
+              <strong className="mt-3 block text-lg">Share the wrapper</strong>
             </div>
             <span aria-hidden="true" className="hidden text-2xl text-accent sm:block">
               →
             </span>
             <div className="border border-rule bg-paper p-5">
-              <Label tone="muted">Outcome</Label>
-              <strong className="mt-3 block text-lg">Consistent reading</strong>
+              <Label tone="muted">Next page</Label>
+              <strong className="mt-3 block text-lg">Draw something else</strong>
             </div>
           </div>
         </Figure>
@@ -171,17 +189,16 @@ export default function ComponentKitchenSink() {
           className="absolute -bottom-16 -right-10 h-52 w-52 rounded-full border-[28px] border-surface/70"
         />
         <div className="relative max-w-measure">
-          <Label>Composition escape hatch</Label>
+          <Label>When Section is wrong</Label>
           <SectionTitle id="custom-composition" className="mt-4">
-            Shared pieces, subject-shaped layout
+            Use the pieces when Section doesn’t fit
           </SectionTitle>
           <Prose className="mt-7">
             <p>
-              <code>Section</code> is a useful default, not a cage. When an idea
-              needs a different surface or composition, combine{" "}
-              <code>Label</code>, <code>SectionTitle</code> and <code>Prose</code>{" "}
-              directly while keeping the same hierarchy and accessible heading
-              relationship.
+              This coloured block is built directly from <code>Label</code>,{" "}
+              <code>SectionTitle</code> and <code>Prose</code>. The heading
+              structure stays intact, even though this section doesn’t match
+              the others.
             </p>
           </Prose>
         </div>

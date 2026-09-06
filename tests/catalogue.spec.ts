@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const description =
-  "A living specimen of the shared structures used to build visual explainers on this site.";
+  "Every shared explainer component on one page, so I can compare them without hunting through old entries.";
 
 test("the catalogue contains only the component kitchen sink", async ({ page }) => {
   await page.goto("/");
@@ -40,16 +40,16 @@ test("the kitchen sink renders every shared explainer structure", async ({
   await page.goto("/explainers/component-kitchen-sink");
 
   await expect(
-    page.getByRole("heading", { name: "The page is the demonstration" }),
-  ).toBeVisible();
-  await expect(
     page.getByRole("heading", {
-      name: "One small vocabulary for explainers",
+      name: "Opening seven files is a lousy way to check a design",
     }),
   ).toBeVisible();
   await expect(
+    page.getByRole("heading", { name: "The shared parts" }),
+  ).toBeVisible();
+  await expect(
     page.getByRole("heading", {
-      name: "Steps are for sequences that really have an order",
+      name: "Don’t make a component after seeing something once",
     }),
   ).toBeVisible();
   await expect(page.getByRole("listitem")).toHaveCount(4);
@@ -58,7 +58,7 @@ test("the kitchen sink renders every shared explainer structure", async ({
   await expect(page.locator("dt").filter({ hasText: /^Steps \/ Step$/ })).toBeVisible();
   await expect(
     page.getByText(
-      "The caption explains why the picture matters instead of restating its labels.",
+      "The boxes show three pages at different stages. Only the middle one produces shared code.",
       { exact: true },
     ),
   ).toBeVisible();
