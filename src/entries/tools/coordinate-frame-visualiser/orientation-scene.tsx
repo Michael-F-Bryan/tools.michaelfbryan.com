@@ -91,6 +91,10 @@ export function OrientationScene({
     (event.target as Element).releasePointerCapture(event.pointerId);
   }
 
+  function handlePointerCancel() {
+    dragState.current = null;
+  }
+
   const body = transformBody(rotation, origin, BODY);
   const ghost = transformBody(ghostRotation, origin, BODY);
   const localNames = convention === "ned" ? (["N", "E", "D"] as const) : (["E", "N", "U"] as const);
@@ -152,7 +156,7 @@ export function OrientationScene({
       node: (
         <g key={`local-axis-${index}`}>
           <line x1={start.x} y1={start.y} x2={tip.x} y2={tip.y} className="stroke-ink" strokeWidth={1.5} />
-          <text x={tip.x} y={tip.y} className="fill-ink font-mono text-sm font-bold" dy={-4}>
+          <text x={tip.x} y={tip.y} className="fill-ink font-mono text-sm max-sm:text-[22px] font-bold" dy={-4}>
             {localNames[index]}
           </text>
         </g>
@@ -217,7 +221,7 @@ export function OrientationScene({
       node: (
         <g key={`body-axis-${index}`}>
           <line x1={bodyOrigin.x} y1={bodyOrigin.y} x2={tip.x} y2={tip.y} className="stroke-accent" strokeWidth={2} />
-          <text x={tip.x} y={tip.y} dy={-4} className="fill-accent font-mono text-sm font-bold">
+          <text x={tip.x} y={tip.y} dy={-4} className="fill-accent font-mono text-sm max-sm:text-[22px] font-bold">
             {bodyLabels[index]}
           </text>
         </g>
@@ -240,7 +244,7 @@ export function OrientationScene({
       <g key="probe">
         <line x1={legOrigin.x} y1={legOrigin.y} x2={probeScenePoint.x} y2={probeScenePoint.y} className="stroke-ink" strokeWidth={1} />
         <circle cx={probeScenePoint.x} cy={probeScenePoint.y} r={4} className="fill-ink" />
-        <text x={probeScenePoint.x} y={probeScenePoint.y} dy={-6} className="fill-ink font-mono text-sm font-bold">
+        <text x={probeScenePoint.x} y={probeScenePoint.y} dy={-6} className="fill-ink font-mono text-sm max-sm:text-[22px] font-bold">
           P
         </text>
       </g>
@@ -259,14 +263,15 @@ export function OrientationScene({
       viewBox="-220 -170 440 340"
       role="img"
       aria-label="Orthographic scene: a local tangent frame in ink, a body frame in cobalt, and a probe point. Drag to orbit the camera."
-      className="block w-full touch-none select-none"
+      className="block w-full touch-pan-y select-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       {ordered.map((p) => p.node)}
       {pinAxes.length > 0 ? (
-        <text x={-205} y={-150} className="fill-accent font-mono text-xs font-bold">
+        <text x={-205} y={-150} className="fill-accent font-mono text-xs max-sm:text-base font-bold">
           {pinLabel}
         </text>
       ) : null}

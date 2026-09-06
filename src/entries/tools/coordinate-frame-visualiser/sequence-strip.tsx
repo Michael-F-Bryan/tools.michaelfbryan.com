@@ -33,13 +33,13 @@ export function SequenceStrip({
     <div className="border-t border-rule px-4 py-4 sm:px-6">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Sequence</span>
-        <label className="flex items-center gap-2 text-sm text-secondary">
+        <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-secondary">
           Order
           <select
             aria-label="Rotation order"
             value={order}
             onChange={(event) => onOrderChange(event.target.value as TaitBryanOrder)}
-            className="border border-rule bg-surface px-2 py-1 font-mono text-sm"
+            className="min-w-0 max-w-full border border-rule bg-surface px-2 py-1 font-mono text-sm"
           >
             {ALL_ORDERS.map((candidate) => (
               <option key={candidate} value={candidate}>

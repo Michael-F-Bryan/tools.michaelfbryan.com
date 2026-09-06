@@ -8,7 +8,7 @@ type ScrollHintState = "hidden" | "visible";
  * a focusable, named scroll region plus a "scroll -->" hint that disappears
  * once the region has actually been scrolled.
  */
-function ScrollableMatrix({
+export function ScrollableMatrix({
   ariaLabel,
   children,
 }: Readonly<{ ariaLabel: string; children: React.ReactNode }>) {
@@ -119,7 +119,7 @@ export function RotationTable({
           <tr>
             <th scope="col" />
             {columnHeaders.map((header) => (
-              <th key={header} scope="col" className="px-3 pb-1 text-xs font-normal uppercase tracking-label text-muted">
+              <th key={header} scope="col" className="px-3 pb-1 text-xs font-normal tracking-label text-muted">
                 {header}
               </th>
             ))}
@@ -132,7 +132,7 @@ export function RotationTable({
                 {rowHeaders[r]}
               </th>
               {row.map((cell, c) => (
-                <td key={`${rowHeaders[r]}-${c}`} className="px-3 py-0.5 text-right">
+                <td key={`${rowHeaders[r]}-${c}`} className="whitespace-nowrap px-3 py-0.5 text-right">
                   {cell}
                 </td>
               ))}
@@ -199,7 +199,7 @@ export function TransformTable({
             <tr>
               <th scope="col" />
               {columnHeaders.map((header) => (
-                <th key={header} scope="col" className="px-3 pb-1 text-xs font-normal uppercase tracking-label text-muted">
+                <th key={header} scope="col" className="px-3 pb-1 text-xs font-normal tracking-label text-muted">
                   {header}
                 </th>
               ))}
@@ -216,8 +216,8 @@ export function TransformTable({
                     key={`${rowHeaders[r]}-${c}`}
                     className={
                       c < 3
-                        ? "bg-accent/10 px-3 py-0.5 text-right"
-                        : "border-l border-dashed border-rule px-3 py-0.5 text-right text-secondary"
+                        ? "whitespace-nowrap bg-accent/10 px-3 py-0.5 text-right"
+                        : "whitespace-nowrap border-l border-dashed border-rule px-3 py-0.5 text-right text-secondary"
                     }
                   >
                     {cell}
@@ -227,10 +227,10 @@ export function TransformTable({
             ))}
             <tr>
               <th scope="row" />
-              <td className="px-3 py-0.5 text-right text-muted">0</td>
-              <td className="px-3 py-0.5 text-right text-muted">0</td>
-              <td className="px-3 py-0.5 text-right text-muted">0</td>
-              <td className="border-l border-dashed border-rule px-3 py-0.5 text-right text-muted">1</td>
+              <td className="whitespace-nowrap px-3 py-0.5 text-right text-muted">0</td>
+              <td className="whitespace-nowrap px-3 py-0.5 text-right text-muted">0</td>
+              <td className="whitespace-nowrap px-3 py-0.5 text-right text-muted">0</td>
+              <td className="whitespace-nowrap border-l border-dashed border-rule px-3 py-0.5 text-right text-muted">1</td>
             </tr>
           </tbody>
         </table>

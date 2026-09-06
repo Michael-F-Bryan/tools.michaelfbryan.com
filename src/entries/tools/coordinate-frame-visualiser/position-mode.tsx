@@ -12,10 +12,16 @@ export type PositionModeProps = Readonly<{
   onAnchorCommit: (anchor: Geodetic) => void;
 }>;
 
+// "reset" is deliberately the same as "anchor": at this fixture's anchor
+// (southern hemisphere, east of the prime meridian) the plain default
+// camera (az 35, el 22) puts the anchor on the far hemisphere, so the load
+// view faced away from the very thing the scene exists to show.
+export const ANCHOR_VIEW: Camera = { azimuthDeg: 115, elevationDeg: -22, scale: 150 };
+
 const VIEW_PRESETS: Record<string, Camera> = {
-  anchor: { azimuthDeg: 115, elevationDeg: -22, scale: 150 },
+  anchor: ANCHOR_VIEW,
   pole: { azimuthDeg: 0, elevationDeg: 89, scale: 150 },
-  reset: { azimuthDeg: 35, elevationDeg: 22, scale: 150 },
+  reset: ANCHOR_VIEW,
 };
 
 export function PositionMode({ anchor, convention, camera, onCameraChange, onConventionChange, onAnchorCommit }: PositionModeProps) {

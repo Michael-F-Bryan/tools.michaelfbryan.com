@@ -1,16 +1,9 @@
 import { cn } from "@/lib/utils";
 
-import {
-  composeTransforms,
-  type Geodetic,
-  invertTransform,
-  type LocalConvention,
-  type Mat3,
-  transformEcefFromLocal,
-  transformFromRotation,
-  type Vec3,
-} from "./math";
-import { formatSigned } from "./format";
+import { formatMetres, formatSigned } from "./format";
+import { type Geodetic, type LocalConvention, type Mat3, type Vec3 } from "./math";
+import { ScrollableMatrix } from "./matrix-table";
+import { wholeChain } from "./pose";
 
 export type Mode = "orientation" | "position";
 
@@ -23,18 +16,41 @@ type ChainRailProps = Readonly<{
   originNed: Vec3;
 }>;
 
-function matrixRows(m: readonly (readonly number[])[]): string {
-  return m.map((row) => row.map((v) => formatSigned(v, 4)).join("  ")).join("\n");
+/** Rotation block at 4 dp, translation column in metres; the bottom `0 0 0 1` row is printed plainly. */
+function matrixRows(m: readonly (readonly number[])[]): readonly string[] {
+  return m.map((row, r) =>
+    r < 3
+      ? [formatSigned(row[0], 4), formatSigned(row[1], 4), formatSigned(row[2], 4), formatMetres(row[3])].join("  ")
+      : row.map((v) => v.toString()).join("  "),
+  );
+}
+
+function MatrixLines({ m }: Readonly<{ m: readonly (readonly number[])[] }>) {
+  return (
+    <div className="mt-1 font-mono text-sm text-secondary">
+      {matrixRows(m).map((row, i) => (
+        <div key={i} className="whitespace-nowrap">
+          {row}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A compact "→" shown only at narrow widths, standing in for the full link name that's hidden there. */
+function MobileLinkArrow() {
+  return (
+    <span aria-hidden="true" className="sm:hidden">
+      →
+    </span>
+  );
 }
 
 export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, originNed }: ChainRailProps) {
   const localLabel = convention === "ned" ? "local NED" : "local ENU";
   const bodyLinkName = convention === "ned" ? "T[ned←body]" : "T[enu←body]";
 
-  const ecefFromLocal = transformEcefFromLocal(anchor, convention);
-  const localFromBody = transformFromRotation({ to: convention, from: "body" as const, m: rNedBody }, originNed);
-  const ecefFromBody = composeTransforms(ecefFromLocal, localFromBody);
-  const bodyFromEcef = invertTransform(ecefFromBody);
+  const { ecefFromBody, bodyFromEcef } = wholeChain(anchor, convention, rNedBody, originNed);
 
   return (
     <nav aria-label="Transform chain" className="border-b border-rule">
@@ -75,8 +91,9 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
             geodetic
           </button>
         </li>
-        <li className={cn("mx-2 hidden font-mono text-xs sm:inline", mode === "position" ? "text-accent" : "text-muted")}>
-          f(φ, λ, h) →
+        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "position" ? "text-accent" : "text-muted")}>
+          <span className="hidden sm:inline">f(φ, λ, h) →</span>
+          <MobileLinkArrow />
         </li>
         <li>
           <button
@@ -91,8 +108,9 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
             ECEF
           </button>
         </li>
-        <li className={cn("mx-2 hidden font-mono text-xs sm:inline", mode === "position" ? "text-accent" : "text-muted")}>
-          T[ecef←{convention}] ↔
+        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "position" ? "text-accent" : "text-muted")}>
+          <span className="hidden sm:inline">T[ecef←{convention}] ↔</span>
+          <MobileLinkArrow />
         </li>
         <li>
           <button
@@ -107,8 +125,9 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
             {localLabel}
           </button>
         </li>
-        <li className={cn("mx-2 hidden font-mono text-xs sm:inline", mode === "orientation" ? "text-accent" : "text-muted")}>
-          {bodyLinkName} ↔
+        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "orientation" ? "text-accent" : "text-muted")}>
+          <span className="hidden sm:inline">{bodyLinkName} ↔</span>
+          <MobileLinkArrow />
         </li>
         <li>
           <button
@@ -135,17 +154,17 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
         <div className="space-y-4 px-4 pb-4 sm:px-6">
           <div>
             <span className="block font-mono text-sm font-bold text-ink">T[ecef←body]</span>
-            <pre className="mt-1 overflow-x-auto whitespace-pre font-mono text-sm text-secondary">
-              {matrixRows(ecefFromBody.m)}
-            </pre>
+            <ScrollableMatrix ariaLabel="T[ecef←body] matrix, scrollable">
+              <MatrixLines m={ecefFromBody.m} />
+            </ScrollableMatrix>
           </div>
           <div>
             <span className="block font-mono text-sm font-bold text-ink">
               T[body←ecef] — factors inverted, order reversed
             </span>
-            <pre className="mt-1 overflow-x-auto whitespace-pre font-mono text-sm text-secondary">
-              {matrixRows(bodyFromEcef.m)}
-            </pre>
+            <ScrollableMatrix ariaLabel="T[body←ecef] matrix, scrollable">
+              <MatrixLines m={bodyFromEcef.m} />
+            </ScrollableMatrix>
           </div>
         </div>
       </details>

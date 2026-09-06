@@ -1,15 +1,14 @@
 import { useRef } from "react";
 
-import { geodeticToEcef, type Geodetic, type LocalConvention, rotationEcefFromLocal, WGS84_A, WGS84_B } from "./math";
+import { cn } from "@/lib/utils";
+
+import { type Geodetic, type LocalConvention, WGS84_A, WGS84_B } from "./math";
+import { anchorScenePoint, localTriadTips } from "./position-geometry";
 import { type Camera, orbitCamera, project, type ScenePoint } from "./projection";
 
 const SCALE = 150;
 const TRIAD_LENGTH = 0.16;
 const AXIS_TIP = 1.3;
-
-function ecefToScene(ecef: { x: number; y: number; z: number }): ScenePoint {
-  return [ecef.x / WGS84_A, ecef.y / WGS84_A, ecef.z / WGS84_A];
-}
 
 /** Samples a unit circle in a plane and splits it into front/back runs relative to the camera. */
 function circleRuns(
@@ -66,6 +65,9 @@ export function PositionScene({ anchor, convention, camera, onCameraChange }: Po
     dragState.current = null;
     (event.target as Element).releasePointerCapture(event.pointerId);
   }
+  function handlePointerCancel() {
+    dragState.current = null;
+  }
 
   const b = WGS84_B;
   const earthRadius = SCALE;
@@ -85,9 +87,8 @@ export function PositionScene({ anchor, convention, camera, onCameraChange }: Po
     [[0, 0, 1], "Z"],
   ];
 
-  const anchorEcef = geodeticToEcef({ ...anchor, heightM: 0 });
-  const anchorScene = ecefToScene(anchorEcef);
-  const anchorRotation = rotationEcefFromLocal(anchor, convention);
+  const anchorScene = anchorScenePoint(anchor);
+  const triadTips = localTriadTips(anchor, convention, TRIAD_LENGTH);
   const anchorNames = convention === "ned" ? (["N", "E", "D"] as const) : (["E", "N", "U"] as const);
 
   function project2(p: ScenePoint) {
@@ -96,16 +97,21 @@ export function PositionScene({ anchor, convention, camera, onCameraChange }: Po
 
   const centre = project2([0, 0, 0]);
   const anchorP = project2(anchorScene);
+  // The anchor can be on the far side of the ellipsoid from the current
+  // camera (e.g. right after an orbit drag); draw it with the hidden-side
+  // treatment rather than claiming a point behind the Earth is visible.
+  const anchorHidden = anchorP.depth < 0;
 
   return (
     <svg
       viewBox="-220 -220 440 440"
       role="img"
       aria-label="The WGS84 ellipsoid with ECEF axes from its centre, the equator, the anchor's meridian, and the anchor's local frame. Drag to orbit the camera."
-      className="block w-full touch-none select-none"
+      className="block w-full touch-pan-y select-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       <circle cx={centre.x} cy={centre.y} r={earthRadius} className="fill-surface stroke-ink" strokeWidth={1} />
 
@@ -136,7 +142,7 @@ export function PositionScene({ anchor, convention, camera, onCameraChange }: Po
           <g key={label}>
             <line x1={centre.x} y1={centre.y} x2={surface.x} y2={surface.y} className="stroke-ink" strokeWidth={1.25} strokeDasharray="3 3" />
             <line x1={surface.x} y1={surface.y} x2={tip.x} y2={tip.y} className="stroke-ink" strokeWidth={1.25} />
-            <text x={tip.x} y={tip.y} dy={-6} className="fill-ink font-mono text-sm font-bold">
+            <text x={tip.x} y={tip.y} dy={-6} className="fill-ink font-mono text-sm max-sm:text-[22px] font-bold">
               {label}
             </text>
           </g>
@@ -145,24 +151,46 @@ export function PositionScene({ anchor, convention, camera, onCameraChange }: Po
       <circle cx={centre.x} cy={centre.y} r={2.5} className="fill-ink" />
 
       {anchorNames.map((name, index) => {
-        const m = anchorRotation.m;
-        const direction: ScenePoint = [m[0][index] / WGS84_A, m[1][index] / WGS84_A, m[2][index] / WGS84_A];
-        const tip = project2([
-          anchorScene[0] + direction[0] * TRIAD_LENGTH,
-          anchorScene[1] + direction[1] * TRIAD_LENGTH,
-          anchorScene[2] + direction[2] * TRIAD_LENGTH,
-        ]);
+        const tip = project2(triadTips[index]);
         return (
           <g key={name}>
-            <line x1={anchorP.x} y1={anchorP.y} x2={tip.x} y2={tip.y} className="stroke-accent" strokeWidth={2} />
-            <text x={tip.x} y={tip.y} dy={-5} className="fill-accent font-mono text-sm font-bold">
+            <line
+              x1={anchorP.x}
+              y1={anchorP.y}
+              x2={tip.x}
+              y2={tip.y}
+              className={anchorHidden ? "stroke-rule" : "stroke-accent"}
+              strokeWidth={2}
+              strokeDasharray={anchorHidden ? "3 3" : undefined}
+            />
+            <text
+              x={tip.x}
+              y={tip.y}
+              dy={-5}
+              className={cn(
+                "font-mono text-sm max-sm:text-[22px] font-bold",
+                anchorHidden ? "fill-muted" : "fill-accent",
+              )}
+            >
               {name}
             </text>
           </g>
         );
       })}
-      <circle cx={anchorP.x} cy={anchorP.y} r={5} className="fill-accent" />
-      <text x={anchorP.x} y={anchorP.y} dy={18} className="fill-accent font-mono text-sm font-bold">
+      <circle
+        cx={anchorP.x}
+        cy={anchorP.y}
+        r={5}
+        className={anchorHidden ? "fill-none stroke-rule" : "fill-accent"}
+        strokeWidth={anchorHidden ? 1.5 : undefined}
+        strokeDasharray={anchorHidden ? "2 2" : undefined}
+      />
+      <text
+        x={anchorP.x}
+        y={anchorP.y}
+        dy={18}
+        className={cn("font-mono text-sm max-sm:text-[22px] font-bold", anchorHidden ? "fill-muted" : "fill-accent")}
+      >
         anchor
       </text>
     </svg>

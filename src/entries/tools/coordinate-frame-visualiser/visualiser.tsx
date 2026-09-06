@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ChainRail, type Mode } from "./chain-rail";
 import type { EulerAngles, Geodetic, LocalConvention, Quaternion } from "./math";
 import { OrientationMode } from "./orientation-mode";
-import { PositionMode } from "./position-mode";
+import { ANCHOR_VIEW, PositionMode } from "./position-mode";
 import type { Camera } from "./projection";
 import {
   initialPoseState,
@@ -25,14 +25,19 @@ export function Visualiser() {
   const [pose, setPose] = useState(initialPoseState);
   const [anchor, setAnchor] = useState<Geodetic>(OPENING_ANCHOR);
   const [orientationCamera, setOrientationCamera] = useState<Camera>({ azimuthDeg: -35, elevationDeg: 26, scale: 55 });
-  const [positionCamera, setPositionCamera] = useState<Camera>({ azimuthDeg: 35, elevationDeg: 22, scale: 150 });
+  const [positionCamera, setPositionCamera] = useState<Camera>(ANCHOR_VIEW);
 
   function handleConventionChange(convention: LocalConvention) {
     setPose((prev) => withConvention(prev, convention));
   }
 
   return (
-    <div className="border border-rule bg-surface">
+    // `contain: inline-size` isolates this workspace from the shared entry-page
+    // grid's intrinsic-width calculation: without it, a single wide, unwrapped
+    // row anywhere inside (e.g. the mobile chain rail with its "→" separators)
+    // makes the page's outer grid track grow to fit it instead of letting the
+    // row's own horizontal scroll affordance handle the overflow.
+    <div className="border border-rule bg-surface [contain:inline-size]">
       <ChainRail
         mode={mode}
         onModeChange={setMode}

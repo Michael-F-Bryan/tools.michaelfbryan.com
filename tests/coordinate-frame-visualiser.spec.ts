@@ -39,9 +39,9 @@ test.describe("Coordinate frame visualiser", () => {
   test("2. opening state is the non-identity fixture", async ({ page }) => {
     await page.goto(TOOL_URL);
 
-    await expect(page.getByLabel("first degrees")).toHaveValue("35.0");
-    await expect(page.getByLabel("second degrees")).toHaveValue("20.0");
-    await expect(page.getByLabel("third degrees")).toHaveValue("-15.0");
+    await expect(page.getByLabel("first angle, degrees")).toHaveValue("35.0");
+    await expect(page.getByLabel("second angle, degrees")).toHaveValue("20.0");
+    await expect(page.getByLabel("third angle, degrees")).toHaveValue("-15.0");
 
     const r00 = await cellText(page, /Rotation matrix/, "N", 0);
     expect(num(r00)).toBeCloseTo(0.7698, 3);
@@ -74,7 +74,7 @@ test.describe("Coordinate frame visualiser", () => {
     const localN = page.getByLabel("local N");
     await expect(localN).toHaveValue("1.50");
 
-    const firstAngle = page.getByLabel("first degrees");
+    const firstAngle = page.getByLabel("first angle, degrees");
     await firstAngle.fill("70");
     await firstAngle.blur();
 
@@ -119,7 +119,7 @@ test.describe("Coordinate frame visualiser", () => {
 
     await page.getByRole("button", { name: "ENU", exact: true }).click();
 
-    await expect(page.getByLabel("first degrees")).not.toHaveValue("35.0");
+    await expect(page.getByLabel("first angle, degrees")).not.toHaveValue("35.0");
 
     const eCol0 = num(await cellText(page, /Rotation matrix/, "E", 0));
     const nCol0 = num(await cellText(page, /Rotation matrix/, "N", 0));
@@ -148,7 +148,7 @@ test.describe("Coordinate frame visualiser", () => {
   test("8. gimbal lock at pitch 90 shows the explanation and both pins", async ({ page }) => {
     await page.goto(TOOL_URL);
 
-    const second = page.getByLabel("second degrees");
+    const second = page.getByLabel("second angle, degrees");
     await second.fill("90");
     await second.blur();
 
@@ -165,14 +165,14 @@ test.describe("Coordinate frame visualiser", () => {
     await page.getByLabel("z", { exact: true }).fill("0");
     await page.getByLabel("z", { exact: true }).blur();
 
-    await expect(page.getByText(/Normalised from \|q\| = 2/)).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Normalised from \|q\| = 2/ })).toBeVisible();
     const identityCell = await cellText(page, /Rotation matrix/, "N", 0);
     expect(num(identityCell)).toBeCloseTo(1, 2);
 
     await page.getByLabel("w", { exact: true }).fill("0");
     await page.getByLabel("w", { exact: true }).blur();
 
-    await expect(page.getByText(/zero quaternion/i)).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: /zero quaternion/i })).toBeVisible();
     const afterRejection = await cellText(page, /Rotation matrix/, "N", 0);
     expect(num(afterRejection)).toBeCloseTo(1, 2);
   });
@@ -258,6 +258,44 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(scrollRegion).toHaveAttribute("tabindex", "0");
   });
 
+  test("15. position mode: the anchor is drawn solid (visible hemisphere) at the default camera", async ({ page }) => {
+    await page.goto(TOOL_URL);
+    await page.getByRole("button", { name: "Position", exact: true }).click();
+
+    const scene = page.getByRole("img", { name: /WGS84 ellipsoid/ });
+    const anchorDot = scene.locator('circle[r="5"]');
+    await expect(anchorDot).toHaveClass(/fill-accent/);
+  });
+
+  test("16. at 320px, an axis-tip SVG label is legible (>= 18px)", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto(TOOL_URL);
+
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+    const label = scene.locator("text").first();
+    const fontSize = await label.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+    expect(fontSize).toBeGreaterThanOrEqual(18);
+  });
+
+  test("17. opening state's Angles group shows 'yaw' and 'about z'", async ({ page }) => {
+    await page.goto(TOOL_URL);
+
+    const anglesGroup = page.getByRole("group", { name: "Angles" });
+    await expect(anglesGroup.getByText("yaw", { exact: false })).toBeVisible();
+    await expect(anglesGroup.getByText("about z", { exact: false })).toBeVisible();
+  });
+
+  test("18. typing 400 into the first angle wraps to 40.0 and the slider matches", async ({ page }) => {
+    await page.goto(TOOL_URL);
+
+    const firstAngle = page.getByLabel("first angle, degrees");
+    await firstAngle.fill("400");
+    await firstAngle.blur();
+
+    await expect(firstAngle).toHaveValue("40.0");
+    await expect(page.getByLabel("first angle, slider")).toHaveValue("40");
+  });
+
   test("14. no tool data leaves the browser; no console errors", async ({ page }) => {
     const requests: string[] = [];
     const consoleErrors: string[] = [];
@@ -267,7 +305,7 @@ test.describe("Coordinate frame visualiser", () => {
     });
 
     await page.goto(TOOL_URL);
-    const firstAngle = page.getByLabel("first degrees");
+    const firstAngle = page.getByLabel("first angle, degrees");
     await firstAngle.fill("123.456");
     await firstAngle.blur();
 

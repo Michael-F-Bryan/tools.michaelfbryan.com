@@ -8,9 +8,12 @@
  * re-expressed in a different way (convention switch, quaternion commit).
  */
 import {
+  composeTransforms,
   type EulerAngles,
   type EulerInterpretation,
   eulerToRotation,
+  type Geodetic,
+  invertTransform,
   type LocalConvention,
   type Mat3,
   multiply,
@@ -20,7 +23,11 @@ import {
   rotationFromQuaternion,
   rotationToEuler,
   type TaitBryanOrder,
+  transformEcefFromLocal,
+  transformFromRotation,
+  type Transform,
   type Vec3,
+  wrapDegrees,
 } from "./math";
 
 export type PoseState = Readonly<{
@@ -85,13 +92,20 @@ function withRNedBodyFromActive(state: PoseState, rActiveBody: Mat3): Mat3 {
   return reexpressRotation(state.convention, rActiveBody);
 }
 
-/** Applies a single edited angle (the user is typing or dragging a slider). */
+/**
+ * Applies a single edited angle (the user is typing or dragging a slider).
+ * The first and third angles wrap into `(-180, 180]`; the middle angle is
+ * clamped to `[-90, 90]` (Tait-Bryan's valid range for the middle stage),
+ * regardless of whether the value arrived via the slider (already
+ * constrained by its own min/max) or a typed, out-of-range number.
+ */
 export function withAngleEdit(
   state: PoseState,
   field: keyof EulerAngles,
   value: number,
 ): PoseState {
-  const angles: EulerAngles = { ...state.angles, [field]: value };
+  const normalised = field === "second" ? Math.max(-90, Math.min(90, value)) : wrapDegrees(value);
+  const angles: EulerAngles = { ...state.angles, [field]: normalised };
   const rActive = eulerToRotation(angles, state.order, state.interpretation);
   return { ...state, angles, rNedBody: withRNedBodyFromActive(state, rActive) };
 }
@@ -134,6 +148,28 @@ export function withOriginEdit(state: PoseState, field: 0 | 1 | 2, value: number
   const nextActive: Vec3 =
     field === 0 ? [value, active[1], active[2]] : field === 1 ? [active[0], value, active[2]] : [active[0], active[1], value];
   return { ...state, originNed: reexpressVec3(state.convention, nextActive) };
+}
+
+/**
+ * The single product from body to ECEF, `T[ecef<-body] = T[ecef<-convention]
+ * . T[convention<-body]`. `rNedBody` and `originNed` are always NED-expressed
+ * (the canonical pose state), so they are re-expressed into the active
+ * convention before being composed with `T[ecef<-convention]`, which is
+ * itself convention-specific.
+ */
+export function wholeChain(
+  anchor: Geodetic,
+  convention: LocalConvention,
+  rNedBody: Mat3,
+  originNed: Vec3,
+): { ecefFromBody: Transform<"ecef", "body">; bodyFromEcef: Transform<"body", "ecef"> } {
+  const rActiveBody = reexpressRotation(convention, rNedBody);
+  const originActive = reexpressVec3(convention, originNed);
+  const ecefFromLocal = transformEcefFromLocal(anchor, convention);
+  const localFromBody = transformFromRotation({ to: convention, from: "body" as const, m: rActiveBody }, originActive);
+  const ecefFromBody = composeTransforms(ecefFromLocal, localFromBody);
+  const bodyFromEcef = invertTransform(ecefFromBody);
+  return { ecefFromBody, bodyFromEcef };
 }
 
 export function withProbeEdit(state: PoseState, field: 0 | 1 | 2, value: number): PoseState {

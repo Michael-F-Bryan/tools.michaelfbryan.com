@@ -19,6 +19,7 @@ import {
 import { RotationTable, TransformTable } from "./matrix-table";
 import type { PoseState } from "./pose";
 import { activeOrigin, activeProbe, activeRotation } from "./pose";
+import { stageAxisLabel, stageHumanName } from "./sequence";
 import { useSyncedDraft } from "./use-synced-draft";
 
 type OrientationInspectorProps = Readonly<{
@@ -36,11 +37,25 @@ const LOCAL_NAMES: Record<LocalConvention, readonly [string, string, string]> = 
 };
 
 function AngleRow({
-  label,
-  hint,
+  fieldName,
+  displayLabel,
+  axisHint,
   value,
   onCommit,
-}: Readonly<{ label: string; hint: string; value: number; onCommit: (value: number) => void }>) {
+  min = -180,
+  max = 180,
+}: Readonly<{
+  /** Stable stage identity ("first"/"second"/"third") used for the aria-labels, independent of the order. */
+  fieldName: string;
+  /** The visible name of this stage's angle, e.g. "yaw" or "angle 1". */
+  displayLabel: string;
+  /** The visible description of the axis this stage turns about, e.g. "about z" or "about y′". */
+  axisHint: string;
+  value: number;
+  onCommit: (value: number) => void;
+  min?: number;
+  max?: number;
+}>) {
   const [draft, setDraft, resetDraft] = useSyncedDraft(value.toFixed(1));
 
   function commit() {
@@ -55,16 +70,16 @@ function AngleRow({
   return (
     <div className="mt-3">
       <span className="text-sm text-secondary">
-        {label} <small className="font-mono text-xs text-muted">{hint}</small>
+        {displayLabel} <small className="font-mono text-xs text-muted">{axisHint}</small>
       </span>
       <div className="mt-1 grid grid-cols-[minmax(0,1fr)_5.5rem_auto] items-center gap-2">
         <input
           type="range"
-          min={-180}
-          max={180}
+          min={min}
+          max={max}
           step={0.1}
           value={value}
-          aria-label={`${label} slider`}
+          aria-label={`${fieldName} angle, slider`}
           onChange={(event) => onCommit(Number(event.target.value))}
           className="w-full accent-accent focus-visible:outline-2 focus-visible:outline-accent"
         />
@@ -72,7 +87,7 @@ function AngleRow({
           type="text"
           inputMode="decimal"
           value={draft}
-          aria-label={`${label} degrees`}
+          aria-label={`${fieldName} angle, degrees`}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}
           onKeyDown={(event) => {
@@ -176,7 +191,10 @@ function QuaternionGroup({
           </label>
         ))}
       </div>
-      <p className={cn("mt-2 max-w-[38rem] text-sm", note?.kind === "error" ? "text-error" : "text-muted")}>
+      <p
+        role={note?.kind === "error" ? "alert" : "status"}
+        className={cn("mt-2 max-w-[38rem] text-sm", note?.kind === "error" ? "text-error" : "text-muted")}
+      >
         {note?.text ??
           "Same rotation as R above. Non-unit input is normalised on commit; a zero or non-finite quaternion is rejected."}
       </p>
@@ -200,12 +218,23 @@ export function OrientationInspector({
   const probe = activeProbe(state);
   const names = LOCAL_NAMES[state.convention];
   const bodyNames = ["x", "y", "z"] as const;
+  // Row headers stay the bare letter; column headers get a "body" prefix so
+  // a body x/y/z column can never be confused with an ECEF X/Y/Z one.
+  const bodyColumnHeaders = ["body x", "body y", "body z"] as const;
 
   const decomposition = rotationToEuler(rotation, state.order, state.interpretation);
   const gimbalLocked = decomposition.gimbalLock || Math.abs(Math.abs(state.angles.second) - 90) < 1e-6;
 
+  const angleFieldNames = ["first", "second", "third"] as const;
+  const angleDisplayLabels = ([1, 2, 3] as const).map(
+    (stageIndex) => stageHumanName(state.order, stageIndex) ?? `angle ${stageIndex}`,
+  );
+  const angleAxisHints = ([1, 2, 3] as const).map(
+    (stageIndex) => `about ${stageAxisLabel(state.order, state.interpretation, state.convention, stageIndex)}`,
+  );
+
   const displayed = rInverted ? transpose(rotation) : rotation;
-  const rColumnHeaders: readonly [string, string, string] = rInverted ? names : bodyNames;
+  const rColumnHeaders: readonly [string, string, string] = rInverted ? names : bodyColumnHeaders;
   const rRowHeaders: readonly [string, string, string] = rInverted ? bodyNames : names;
   const rName = rInverted ? `R[body←${state.convention}]` : `R[${state.convention}←body]`;
   const rTakes = rInverted ? `${state.convention.toUpperCase()} coordinates` : "body coordinates";
@@ -220,7 +249,7 @@ export function OrientationInspector({
   const tGives = tInverted ? "body coordinates" : `${state.convention.toUpperCase()} coordinates`;
   const tColumnHeaders: readonly [string, string, string, string] = tInverted
     ? [...names, "origin"]
-    : [...bodyNames, "origin"];
+    : [...bodyColumnHeaders, "origin"];
   const tRowHeaders: readonly [string, string, string] = tInverted ? bodyNames : names;
   const tRows = localFromBody.m.slice(0, 3).map(
     (row) => row.map((v) => formatSigned(v, 3)) as unknown as readonly [string, string, string, string],
@@ -264,13 +293,33 @@ export function OrientationInspector({
         </p>
       </div>
 
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
+      <div role="group" aria-label="Angles" className="border-t border-rule-subtle px-4 py-4 sm:px-6">
         <div className="flex items-baseline justify-between">
           <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Angles</span>
         </div>
-        <AngleRow label="first" hint="about first axis" value={state.angles.first} onCommit={(v) => onAngleEdit("first", v)} />
-        <AngleRow label="second" hint="about second axis" value={state.angles.second} onCommit={(v) => onAngleEdit("second", v)} />
-        <AngleRow label="third" hint="about third axis" value={state.angles.third} onCommit={(v) => onAngleEdit("third", v)} />
+        <AngleRow
+          fieldName={angleFieldNames[0]}
+          displayLabel={angleDisplayLabels[0]}
+          axisHint={angleAxisHints[0]}
+          value={state.angles.first}
+          onCommit={(v) => onAngleEdit("first", v)}
+        />
+        <AngleRow
+          fieldName={angleFieldNames[1]}
+          displayLabel={angleDisplayLabels[1]}
+          axisHint={angleAxisHints[1]}
+          value={state.angles.second}
+          onCommit={(v) => onAngleEdit("second", v)}
+          min={-90}
+          max={90}
+        />
+        <AngleRow
+          fieldName={angleFieldNames[2]}
+          displayLabel={angleDisplayLabels[2]}
+          axisHint={angleAxisHints[2]}
+          value={state.angles.third}
+          onCommit={(v) => onAngleEdit("third", v)}
+        />
         {gimbalLocked ? (
           <p role="status" className="mt-3 max-w-[38rem] text-sm text-secondary">
             Gimbal lock: the second angle is at ±90°, so the first and third angles are no longer separately
@@ -279,8 +328,8 @@ export function OrientationInspector({
           </p>
         ) : (
           <p className="mt-3 max-w-[38rem] text-sm text-muted">
-            Near a second angle of ±90° the first- and third-stage pins become parallel; this note explains that
-            they are no longer separately determined.
+            When the second angle reaches ±90° the first- and third-stage axes become parallel and those two angles
+            stop being separately determined; this note will say so.
           </p>
         )}
       </div>
@@ -339,8 +388,9 @@ export function OrientationInspector({
           </span>
         </div>
         <p className="mt-3 max-w-[38rem] text-sm text-muted">
-          Body coordinates come from R[body←{state.convention}] · P, the inverse of the matrix above. Turn the block
-          and the {state.convention.toUpperCase()} triple stays put while the body triple changes.
+          Body coordinates come from T[body←{state.convention.toUpperCase()}] · P — R[body←{state.convention.toUpperCase()}]{" "}
+          applied to (P − origin). With the origin at zero this is just R[body←{state.convention.toUpperCase()}] · P.
+          Turn the block and the {state.convention.toUpperCase()} triple stays put while the body triple changes.
         </p>
       </div>
 

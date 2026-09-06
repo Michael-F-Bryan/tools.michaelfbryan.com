@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { applyToPoint, eulerToRotation, geodeticToEcef, type Geodetic } from "../src/entries/tools/coordinate-frame-visualiser/math";
+import { wholeChain } from "../src/entries/tools/coordinate-frame-visualiser/pose";
+import { anchorScenePoint, localTriadTips } from "../src/entries/tools/coordinate-frame-visualiser/position-geometry";
 import {
   clampElevation,
   MAX_ELEVATION_DEG,
@@ -116,6 +119,60 @@ test.describe("orbitCamera", () => {
     const camera: Camera = { azimuthDeg: 0, elevationDeg: 80, scale: 1 };
     const orbited = orbitCamera(camera, 0, 30);
     expect(orbited.elevationDeg).toBe(MAX_ELEVATION_DEG);
+  });
+});
+
+test.describe("localTriadTips", () => {
+  const anchor: Geodetic = { latitudeDeg: -31.9523, longitudeDeg: 115.8613, heightM: 24 };
+  const length = 0.16;
+
+  function distance(a: ScenePoint, b: ScenePoint): number {
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  }
+
+  test("each tip is `length` scene units from the anchor, not ~1e-7", () => {
+    const anchorPoint = anchorScenePoint(anchor);
+    const tips = localTriadTips(anchor, "ned", length);
+    expect(tips).toHaveLength(3);
+    for (const tip of tips) {
+      expect(distance(tip, anchorPoint)).toBeCloseTo(length, 6);
+    }
+  });
+
+  test("the NED 'D' tip points inward: closer to the origin than the anchor", () => {
+    const anchorPoint = anchorScenePoint(anchor);
+    const tips = localTriadTips(anchor, "ned", length);
+    const dTip = tips[2];
+    const originDistanceAnchor = Math.hypot(anchorPoint[0], anchorPoint[1], anchorPoint[2]);
+    const originDistanceD = Math.hypot(dTip[0], dTip[1], dTip[2]);
+    expect(originDistanceD).toBeLessThan(originDistanceAnchor);
+  });
+});
+
+test.describe("wholeChain", () => {
+  const anchor: Geodetic = { latitudeDeg: -31.9523, longitudeDeg: 115.8613, heightM: 24 };
+  const rNedBody = eulerToRotation({ first: 35, second: 20, third: -15 }, "zyx", "intrinsic");
+  const originNed = [1, -2, 0.5] as const;
+
+  test("NED and ENU produce the same ecefFromBody/bodyFromEcef, to 1e-6", () => {
+    const nedResult = wholeChain(anchor, "ned", rNedBody, originNed);
+    const enuResult = wholeChain(anchor, "enu", rNedBody, originNed);
+
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        expect(Math.abs(nedResult.ecefFromBody.m[r][c] - enuResult.ecefFromBody.m[r][c])).toBeLessThan(1e-6);
+        expect(Math.abs(nedResult.bodyFromEcef.m[r][c] - enuResult.bodyFromEcef.m[r][c])).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  test("with a zero body origin, ecefFromBody maps body (0,0,0) to the anchor's ECEF point", () => {
+    const { ecefFromBody } = wholeChain(anchor, "ned", rNedBody, [0, 0, 0]);
+    const mapped = applyToPoint(ecefFromBody, [0, 0, 0]);
+    const expected = geodeticToEcef(anchor);
+    expect(mapped[0]).toBeCloseTo(expected.x, 3);
+    expect(mapped[1]).toBeCloseTo(expected.y, 3);
+    expect(mapped[2]).toBeCloseTo(expected.z, 3);
   });
 });
 
