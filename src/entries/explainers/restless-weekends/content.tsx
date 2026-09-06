@@ -1,6 +1,12 @@
+import { Figure } from "@/components/figure";
+import { Label } from "@/components/label";
+import { Prose } from "@/components/prose";
+import { Section, SectionTitle } from "@/components/section";
+import { Step, Steps } from "@/components/steps";
+
 export default function RestlessWeekends() {
   return (
-    <div className="mt-12 space-y-24 pb-12 sm:mt-16 sm:space-y-32">
+    <div className="space-y-24 sm:space-y-32">
       <section
         aria-labelledby="note-for-gabbey"
         className="relative overflow-hidden border-y border-rule bg-surface px-6 py-10 sm:px-10 sm:py-14"
@@ -23,96 +29,68 @@ export default function RestlessWeekends() {
         </svg>
 
         <div className="relative max-w-[42rem]">
-          <p
-            id="note-for-gabbey"
-            className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-accent"
-          >
-            A note for Gabbey
-          </p>
-          <p className="mt-6 text-2xl font-bold leading-[1.35] tracking-[-0.02em] text-balance sm:text-3xl">
+          <Label id="note-for-gabbey">A note for Gabbey</Label>
+          <p className="mt-6 text-2xl font-bold leading-snug tracking-title text-balance sm:text-3xl">
             Most weekends I’ll decide I want to build something, open GitHub,
             look through my Documents folder, and wait for one of those old
             projects to feel interesting again.
           </p>
-          <p className="mt-6 max-w-[38rem] text-lg leading-8 text-secondary">
-            It rarely works. The repositories are full of cold context and old
-            obligations, so I eventually give up and lie down feeling empty,
-            bored and understimulated. That’s usually what is happening when I
-            tell you I’m bored despite having plenty of things I could do.
-          </p>
+          <Prose className="mt-6 max-w-[38rem]">
+            <p>
+              It rarely works. The repositories are full of cold context and
+              old obligations, so I eventually give up and lie down feeling
+              empty, bored and understimulated. That’s usually what is happening
+              when I tell you I’m bored despite having plenty of things I could
+              do.
+            </p>
+          </Prose>
         </div>
       </section>
 
-      <section aria-labelledby="free-saturday">
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          A familiar Saturday
-        </p>
-        <h2
-          id="free-saturday"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          What happens on a free Saturday
-        </h2>
-        <p className="mt-6 max-w-[44rem] text-lg leading-8 text-secondary">
-          Sunfish is always easy to reach for. Its problems are current, useful
-          and already loaded into my head. I usually avoid doing that because
-          turning every spare hour into unpaid work is a reliable way to burn
-          myself out. The alternatives ought to be easy—I have years of old
-          projects—but none of them gives me a reason to care right now.
-        </p>
+      <Section
+        id="free-saturday"
+        kicker="A familiar Saturday"
+        title="What happens on a free Saturday"
+      >
+        <Prose>
+          <p>
+            Sunfish is always easy to reach for. Its problems are current,
+            useful and already loaded into my head. I usually avoid doing that
+            because turning every spare hour into unpaid work is a reliable way
+            to burn myself out. The alternatives ought to be easy—I have years
+            of old projects—but none of them gives me a reason to care right
+            now.
+          </p>
+        </Prose>
 
-        <ol className="mt-10 grid overflow-hidden border border-rule bg-surface sm:grid-cols-4">
-          {[
-            ["01", "Free afternoon", "I want something to get absorbed in."],
-            ["02", "Look backwards", "GitHub, Documents and abandoned ideas."],
-            ["03", "Recover context", "Each option begins with homework."],
-            ["04", "Give up", "I’m still restless, now with less momentum."],
-          ].map(([number, title, body], index) => (
-            <li
-              className={`relative px-5 py-6 ${
-                index > 0 ? "border-t border-rule sm:border-l sm:border-t-0" : ""
-              }`}
-              key={number}
-            >
-              <span className="font-mono text-xs font-bold text-accent">
-                {number}
-              </span>
-              <strong className="mt-3 block text-lg">{title}</strong>
-              <span className="mt-2 block text-sm leading-6 text-muted">
-                {body}
-              </span>
-              {index < 3 ? (
-                <span
-                  aria-hidden="true"
-                  className="absolute -bottom-3 left-5 z-10 grid h-6 w-6 place-items-center rounded-full border border-rule bg-paper text-sm text-accent sm:-right-3 sm:bottom-auto sm:left-auto sm:top-7 sm:-rotate-90"
-                >
-                  ↓
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ol>
+        <Steps className="mt-10">
+          <Step title="Free afternoon">I want something to get absorbed in.</Step>
+          <Step title="Look backwards">
+            GitHub, Documents and abandoned ideas.
+          </Step>
+          <Step title="Recover context">Each option begins with homework.</Step>
+          <Step title="Give up">
+            I’m still restless, now with less momentum.
+          </Step>
+        </Steps>
 
-        <p className="mt-8 max-w-[44rem] leading-7 text-secondary">
-          The interview tested whether I simply needed a small challenge. I said
-          I’d probably give one a shot, and I wouldn’t mind if I abandoned it or
-          ended up writing instead. That ruled out the idea that I needed a
-          serious project or another backlog. I needed something that would get
-          me moving.
-        </p>
-      </section>
+        <Prose size="base" className="mt-8">
+          <p>
+            The interview tested whether I simply needed a small challenge. I
+            said I’d probably give one a shot, and I wouldn’t mind if I
+            abandoned it or ended up writing instead. That ruled out the idea
+            that I needed a serious project or another backlog. I needed
+            something that would get me moving.
+          </p>
+        </Prose>
+      </Section>
 
-      <section aria-labelledby="old-habit">
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          Before all this
-        </p>
-        <h2
-          id="old-habit"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          The habit I used to have
-        </h2>
-        <div className="mt-7 space-y-6 text-lg leading-8 text-secondary">
+      <Section
+        id="old-habit"
+        kicker="Before all this"
+        title="The habit I used to have"
+      >
+        <Prose>
           <p>
             Early in my career, ideas came from whatever I was already doing. A
             CAD library at work would annoy me, so I’d spend an evening trying a
@@ -127,9 +105,12 @@ export default function RestlessWeekends() {
             Seeing those numbers climb meant the thing had left my laptop and
             reached another person.
           </p>
-        </div>
+        </Prose>
 
-        <figure className="mt-10 border-y border-rule bg-surface px-5 py-7 sm:px-8">
+        <Figure
+          className="mt-10 border-y border-rule bg-surface px-5 py-7 sm:px-8"
+          caption="The writing came out of the work. It wasn’t a hurdle I had to clear before I could begin."
+        >
           <div className="grid gap-5 text-center sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:items-center">
             <strong>Notice some friction</strong>
             <span aria-hidden="true" className="hidden text-accent sm:block">
@@ -145,24 +126,15 @@ export default function RestlessWeekends() {
             </span>
             <strong>Share it with people</strong>
           </div>
-          <figcaption className="mt-6 text-center text-sm leading-6 text-muted">
-            The writing came out of the work. It wasn’t a hurdle I had to clear
-            before I could begin.
-          </figcaption>
-        </figure>
-      </section>
+        </Figure>
+      </Section>
 
-      <section aria-labelledby="lost-habit">
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          What changed
-        </p>
-        <h2
-          id="lost-habit"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          How I lost that habit
-        </h2>
-        <div className="mt-7 space-y-6 text-lg leading-8 text-secondary">
+      <Section
+        id="lost-habit"
+        kicker="What changed"
+        title="How I lost that habit"
+      >
+        <Prose>
           <p>
             The first interruption was fairly blunt: remote work took over my
             life and I was routinely still working at 4am. There wasn’t enough
@@ -184,12 +156,12 @@ export default function RestlessWeekends() {
             something. Now I was asking the article to prove its value before
             curiosity had produced any evidence.
           </p>
-        </div>
-      </section>
+        </Prose>
+      </Section>
 
       <section
         aria-labelledby="wedding-site"
-        className="relative overflow-hidden border border-rule bg-[#ece6d8] px-6 py-9 sm:px-10 sm:py-12"
+        className="relative overflow-hidden border border-rule bg-sand px-6 py-9 sm:px-10 sm:py-12"
       >
         <div
           aria-hidden="true"
@@ -197,33 +169,32 @@ export default function RestlessWeekends() {
         />
         <div className="relative grid gap-10 sm:grid-cols-[1.1fr_0.9fr] sm:items-end">
           <div>
-            <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-              Something we made together
-            </p>
-            <h2
-              id="wedding-site"
-              className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-            >
+            <Label>Something we made together</Label>
+            <SectionTitle id="wedding-site" className="mt-4">
               The wedding website
-            </h2>
-            <p className="mt-6 text-lg leading-8 text-secondary">
-              The wedding website is the clearest recent example because you
-              were there for it. We genuinely needed somewhere to communicate
-              the wedding details. The work was within my abilities, but it gave
-              me an excuse to practise visual design and spend too long on little
-              details simply because I enjoyed them.
-            </p>
-            <p className="mt-5 leading-7 text-secondary">
-              Showing sneak peeks to family and friends mattered too. The site
-              stopped being files on my laptop and became something in the lives
-              of people we care about. An equally polished fictional demo
-              wouldn’t have held my interest nearly as much.
-            </p>
+            </SectionTitle>
+            <Prose className="mt-7">
+              <p>
+                The wedding website is the clearest recent example because you
+                were there for it. We genuinely needed somewhere to communicate
+                the wedding details. The work was within my abilities, but it
+                gave me an excuse to practise visual design and spend too long
+                on little details simply because I enjoyed them.
+              </p>
+            </Prose>
+            <Prose size="base" className="mt-5">
+              <p>
+                Showing sneak peeks to family and friends mattered too. The site
+                stopped being files on my laptop and became something in the
+                lives of people we care about. An equally polished fictional
+                demo wouldn’t have held my interest nearly as much.
+              </p>
+            </Prose>
           </div>
 
-          <figure className="relative border border-rule bg-surface p-3 shadow-[6px_7px_0_0_#b8b0a2]">
+          <figure className="relative border border-rule bg-surface p-3 shadow-[6px_7px_0_0_var(--rule)]">
             <div className="flex items-center gap-1.5 border-b border-rule pb-3">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#a33a2b]/70" />
+              <span className="h-2.5 w-2.5 rounded-full bg-error/70" />
               <span className="h-2.5 w-2.5 rounded-full bg-[#9a6700]/70" />
               <span className="h-2.5 w-2.5 rounded-full bg-[#3f6b46]/70" />
               <span className="ml-2 font-mono text-[0.65rem] text-muted">
@@ -233,7 +204,7 @@ export default function RestlessWeekends() {
             <div className="grid min-h-52 place-items-center px-4 py-8 text-center">
               <div>
                 <span className="mx-auto block h-20 w-14 rounded-t-full border-2 border-accent/40" />
-                <p className="mt-5 text-sm font-bold uppercase tracking-[0.12em] text-accent">
+                <p className="mt-5 text-sm font-bold uppercase tracking-label text-accent">
                   Something real that we could share
                 </p>
               </div>
@@ -242,17 +213,12 @@ export default function RestlessWeekends() {
         </div>
       </section>
 
-      <section aria-labelledby="restful-building">
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          What I get from it
-        </p>
-        <h2
-          id="restful-building"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          Why some building feels restful
-        </h2>
-        <div className="mt-7 space-y-6 text-lg leading-8 text-secondary">
+      <Section
+        id="restful-building"
+        kicker="What I get from it"
+        title="Why some building feels restful"
+      >
+        <Prose>
           <p>
             From the outside, paid engineering and a personal project both look
             like me sitting at a computer and concentrating. The difference is
@@ -275,10 +241,10 @@ export default function RestlessWeekends() {
             getting absorbed in a question, following it for a few hours, and
             ending the day with something tangible that didn’t exist before.
           </p>
-        </div>
+        </Prose>
 
         <figure className="mt-10 border-l-2 border-accent bg-surface px-6 py-7 sm:px-8">
-          <blockquote className="text-2xl font-bold leading-[1.4] tracking-[-0.015em]">
+          <blockquote className="text-2xl font-bold leading-snug tracking-title">
             “It’s not really that appealing to me.”
           </blockquote>
           <figcaption className="mt-4 leading-7 text-secondary">
@@ -288,19 +254,14 @@ export default function RestlessWeekends() {
             catch my curiosity; there isn’t a formula that can do that for me.
           </figcaption>
         </figure>
-      </section>
+      </Section>
 
-      <section aria-labelledby="tools-site">
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          Somewhere to put things
-        </p>
-        <h2
-          id="tools-site"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          Why I made this site
-        </h2>
-        <div className="mt-7 space-y-6 text-lg leading-8 text-secondary">
+      <Section
+        id="tools-site"
+        kicker="Somewhere to put things"
+        title="Why I made this site"
+      >
+        <Prose>
           <p>
             Rejecting that disk tool helped because I immediately thought of
             something I did want: a place where each little tool or visual
@@ -314,41 +275,34 @@ export default function RestlessWeekends() {
             and then leave it alone. There is no schedule and no requirement for
             the next idea to resemble the last one.
           </p>
-        </div>
+        </Prose>
 
-        <figure className="mt-12 overflow-hidden border border-rule bg-surface px-5 pb-7 pt-10 sm:px-9">
+        <Figure
+          className="mt-10 overflow-hidden border border-rule bg-surface px-5 pb-7 pt-10 sm:px-9"
+          caption="I don’t need to fill the shelf for it to be useful."
+        >
           <div className="flex min-h-48 items-end justify-center gap-3 sm:gap-6">
             <div className="grid h-28 w-24 place-items-center border border-accent bg-[#e8f2f5] px-3 text-center font-mono text-xs font-bold uppercase tracking-[0.08em] text-accent sm:h-36 sm:w-32">
               One useful thing
             </div>
-            <div className="grid h-40 w-16 -rotate-2 place-items-center border border-rule bg-[#ece6d8] px-2 text-center font-mono text-[0.65rem] font-bold uppercase tracking-[0.08em] text-secondary sm:h-48 sm:w-24 sm:text-xs">
+            <div className="grid h-40 w-16 -rotate-2 place-items-center border border-rule bg-sand px-2 text-center font-mono text-[0.65rem] font-bold uppercase tracking-[0.08em] text-secondary sm:h-48 sm:w-24 sm:text-xs">
               What I learnt
             </div>
             <div className="grid h-20 w-24 rotate-1 place-items-center border border-dashed border-rule bg-paper px-3 text-center font-mono text-[0.65rem] font-bold uppercase tracking-[0.08em] text-muted sm:h-28 sm:w-32 sm:text-xs">
               Room for another idea
             </div>
           </div>
-          <div className="h-3 border-x border-b border-rule bg-[#b8b0a2]" />
-          <figcaption className="mt-5 text-center text-sm leading-6 text-muted">
-            I don’t need to fill the shelf for it to be useful.
-          </figcaption>
-        </figure>
-      </section>
+          <div className="h-3 border-x border-b border-rule bg-rule" />
+        </Figure>
+      </Section>
 
-      <section
-        aria-labelledby="for-gabbey"
+      <Section
+        id="for-gabbey"
+        kicker="For Gabbey"
+        title="What I want you to understand"
         className="border-y border-rule py-10 sm:py-14"
       >
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-accent">
-          For Gabbey
-        </p>
-        <h2
-          id="for-gabbey"
-          className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em] text-balance sm:text-4xl"
-        >
-          What I want you to understand
-        </h2>
-        <div className="mt-7 space-y-6 text-xl leading-9 text-secondary">
+        <Prose size="xl">
           <p>
             Small personal projects aren’t a demand that every spare hour become
             productive. They give me room to get curious without professional
@@ -361,8 +315,8 @@ export default function RestlessWeekends() {
             interests me and see where it goes. When I get that balance right, I
             usually feel better than I did when the weekend started.
           </p>
-        </div>
-      </section>
+        </Prose>
+      </Section>
     </div>
   );
 }

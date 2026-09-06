@@ -4,6 +4,8 @@ import { GoogleAnalytics } from "@next/third-parties/google";
 import { Atkinson_Hyperlegible } from "next/font/google";
 import Link from "next/link";
 
+import { Container } from "@/components/container";
+
 import "./globals.css";
 
 const sans = Atkinson_Hyperlegible({
@@ -34,14 +36,14 @@ export default function RootLayout({
     <html lang="en-AU" className={sans.variable}>
       <body className="min-h-screen bg-paper text-ink antialiased">
         <header className="border-b border-rule">
-          <div className="mx-auto max-w-[70rem] px-5 py-5 sm:px-8">
+          <Container className="py-5">
             <Link
               href="/"
-              className="font-bold tracking-[-0.015em] underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+              className="font-bold tracking-title underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
             >
               Michael F. Bryan <span className="text-muted">/ Tools</span>
             </Link>
-          </div>
+          </Container>
         </header>
 
         {children}

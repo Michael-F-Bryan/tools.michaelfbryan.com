@@ -14,6 +14,7 @@ The project is currently at the skeleton stage. It contains the catalogue and a 
 - `src/entries/<collection>/<slug>/content.tsx` contains the tool or explainer itself.
 - `src/entries/index.ts` discovers entries and derives their kind, slug, and URL from the directory structure.
 - `src/app/globals.css` contains the shared design tokens and global styles.
+- `src/components/` contains the shared page and explainer structures: `Container`, `PageTitle`, `Label`, `Section`, `Prose`, `Steps`, and `Figure`.
 - `tests/` contains browser-level tests for public routes.
 
 Pages are React Server Components and are generated statically. Interactive tools use narrow Client Component boundaries and should process user input in the browser unless a server dependency is genuinely required. Explainers are written in TSX so each one can use a layout suited to its subject.
@@ -62,6 +63,8 @@ PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
 4. Extend the Playwright coverage to prove the discovered catalogue entry opens the rendered page.
 
 The build discovers the new entry automatically. Its definition supplies the catalogue, document metadata, and visible page chrome; no separate route or catalogue registration is required.
+
+The page renders the entry's kind, title, and description; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-sand`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
 
 Shared components should represent behaviour or meaning that has already appeared in more than one published item. shadcn/ui is configured with Base UI primitives for accessible controls, while the site's visual identity remains in repository-owned components and design tokens.
 
