@@ -9,7 +9,7 @@ export default function Home() {
   return (
     <main>
       <Container>
-        <section className="py-14 sm:py-20">
+        <section className="py-12 sm:py-16">
           <PageTitle className="max-w-2xl">Tools and explainers</PageTitle>
         </section>
 
@@ -19,8 +19,12 @@ export default function Home() {
               <li key={entry.href}>
                 <Link
                   href={entry.href}
-                  className="group grid gap-4 border-b border-rule py-7 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:grid-cols-[1fr_auto] sm:px-4"
+                  className="group grid grid-cols-[0.5rem_minmax(0,1fr)] gap-x-5 gap-y-4 border-b border-rule py-6 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:grid-cols-[0.5rem_minmax(0,1fr)_auto] sm:px-4"
                 >
+                  <span
+                    aria-hidden="true"
+                    className="mt-1 h-14 bg-accent"
+                  />
                   <span>
                     <span className="block text-xl font-bold tracking-title group-hover:text-accent">
                       {entry.title}
@@ -29,7 +33,7 @@ export default function Home() {
                       {entry.description}
                     </span>
                   </span>
-                  <Label tone="muted" className="sm:text-right">
+                  <Label tone="muted" className="col-start-2 sm:col-start-3 sm:text-right">
                     {entry.kind}
                   </Label>
                 </Link>

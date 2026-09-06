@@ -18,7 +18,7 @@ export function Figure({ caption, children, className }: FigureProps) {
       {children}
       {caption ? (
         <figcaption
-          className="mt-5 text-center text-sm leading-6 text-muted"
+          className="mt-5 max-w-measure text-sm leading-6 text-muted"
         >
           {caption}
         </figcaption>

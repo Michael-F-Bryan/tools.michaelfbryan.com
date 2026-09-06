@@ -17,7 +17,7 @@ const components = [
 
 export default function ComponentKitchenSink() {
   return (
-    <div className="space-y-24 sm:space-y-32">
+    <div className="space-y-16 sm:space-y-24">
       <section
         aria-labelledby="why-this-page-exists"
         className="border-y border-rule bg-surface px-6 py-10 sm:px-10 sm:py-14"
@@ -154,41 +154,43 @@ export default function ComponentKitchenSink() {
         </Prose>
 
         <Figure
-          className="mt-10 border border-rule bg-surface px-5 py-8 sm:px-9"
-          caption="The boxes show three pages at different stages. Only the middle one produces shared code."
+          className="mt-10 border border-rule bg-panel px-5 py-7 sm:px-8"
+          caption="Repetition alone is not enough. Share only when the same job appears on more than one page."
         >
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-center">
-            <div className="border border-rule bg-paper p-5">
-              <Label tone="muted">First page</Label>
-              <strong className="mt-3 block text-lg">Draw what it needs</strong>
+          <dl className="border-t border-rule">
+            <div className="grid gap-2 border-b border-rule-subtle py-4 sm:grid-cols-[12rem_1fr] sm:gap-6">
+              <dt className="font-mono text-xs font-bold uppercase tracking-label text-muted">
+                One use
+              </dt>
+              <dd className="text-sm leading-6 text-secondary">
+                Keep it page-specific. There is no repeated job yet.
+              </dd>
             </div>
-            <span aria-hidden="true" className="hidden text-2xl text-accent sm:block">
-              →
-            </span>
-            <div className="border border-accent bg-sand p-5">
-              <Label>After repetition</Label>
-              <strong className="mt-3 block text-lg">Share the wrapper</strong>
+            <div className="grid gap-2 border-b border-rule-subtle py-4 sm:grid-cols-[12rem_1fr] sm:gap-6">
+              <dt className="font-mono text-xs font-bold uppercase tracking-label text-muted">
+                Repeated use, different job
+              </dt>
+              <dd className="text-sm leading-6 text-secondary">
+                Keep both local. Similar styling does not create a shared boundary.
+              </dd>
             </div>
-            <span aria-hidden="true" className="hidden text-2xl text-accent sm:block">
-              →
-            </span>
-            <div className="border border-rule bg-paper p-5">
-              <Label tone="muted">Next page</Label>
-              <strong className="mt-3 block text-lg">Draw something else</strong>
+            <div className="grid gap-2 border-b border-accent py-4 sm:grid-cols-[12rem_1fr] sm:gap-6">
+              <dt className="font-mono text-xs font-bold uppercase tracking-label text-accent">
+                Repeated use, same job
+              </dt>
+              <dd className="text-sm font-bold leading-6 text-ink">
+                Extract and name the shared component.
+              </dd>
             </div>
-          </div>
+          </dl>
         </Figure>
       </Section>
 
       <section
         aria-labelledby="custom-composition"
-        className="relative overflow-hidden border-l-2 border-accent bg-sand px-6 py-10 sm:px-10 sm:py-14"
+        className="grid gap-8 border-y border-rule bg-panel px-6 py-10 sm:px-10 lg:grid-cols-[minmax(0,1fr)_14rem] lg:gap-10"
       >
-        <div
-          aria-hidden="true"
-          className="absolute -bottom-16 -right-10 h-52 w-52 rounded-full border-[28px] border-surface/70"
-        />
-        <div className="relative max-w-measure">
+        <div className="max-w-measure">
           <Label>When Section is wrong</Label>
           <SectionTitle id="custom-composition" className="mt-4">
             Use the pieces when Section doesn’t fit
@@ -202,6 +204,10 @@ export default function ComponentKitchenSink() {
             </p>
           </Prose>
         </div>
+        <aside className="border-l-2 border-accent pl-5 text-sm leading-6 text-secondary">
+          The shared layer supplies useful pieces. It does not get to decide how
+          every explanation should look.
+        </aside>
       </section>
     </div>
   );

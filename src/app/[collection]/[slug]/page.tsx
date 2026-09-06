@@ -41,21 +41,42 @@ export default async function EntryPage({ params }: EntryPageProps) {
   const Content = await entry.load();
 
   return (
-    <main className="py-14 sm:py-20">
+    <main className="py-12 sm:py-16">
       <Container>
-        <article className="max-w-article">
-          <Label tone="muted">{entry.kind}</Label>
+        <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,52rem)_14rem] lg:gap-16">
+          <header className="max-w-article lg:col-start-1 lg:row-start-1">
+            <Label tone="muted">{entry.kind}</Label>
+            <PageTitle className="mt-5">{entry.title}</PageTitle>
+            <Prose size="xl" className="mt-7">
+              <p>{entry.description}</p>
+            </Prose>
+          </header>
 
-          <PageTitle className="mt-6">{entry.title}</PageTitle>
+          {entry.sections?.length ? (
+            <nav
+              aria-label="On this page"
+              className="border-y border-rule py-5 lg:sticky lg:top-8 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:border-y-0 lg:border-l lg:py-1 lg:pl-6"
+            >
+              <Label tone="muted">On this page</Label>
+              <ol className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-1">
+                {entry.sections.map((section) => (
+                  <li key={section.id}>
+                    <a
+                      href={`#${section.id}`}
+                      className="text-sm leading-5 text-secondary underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+                    >
+                      {section.label}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          ) : null}
 
-          <Prose size="xl" className="mt-8">
-            <p>{entry.description}</p>
-          </Prose>
-
-          <div className="mt-12 sm:mt-16">
+          <article className="max-w-article lg:col-start-1 lg:row-start-2">
             <Content />
-          </div>
-        </article>
+          </article>
+        </div>
       </Container>
     </main>
   );

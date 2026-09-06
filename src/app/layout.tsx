@@ -41,7 +41,8 @@ export default function RootLayout({
               href="/"
               className="font-bold tracking-title underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
             >
-              Michael F. Bryan <span className="text-muted">/ Tools</span>
+              Michael F. Bryan <span className="text-accent">/</span>{" "}
+              <span className="text-muted">Tools</span>
             </Link>
           </Container>
         </header>

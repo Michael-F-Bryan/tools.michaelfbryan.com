@@ -52,16 +52,19 @@ test("the kitchen sink renders every shared explainer structure", async ({
       name: "Don’t make a component after seeing something once",
     }),
   ).toBeVisible();
-  await expect(page.getByRole("listitem")).toHaveCount(4);
+  await expect(
+    page.locator('section[aria-labelledby="ordered-sequence"]').getByRole("listitem"),
+  ).toHaveCount(4);
   await expect(page.locator("dt").filter({ hasText: /^Container$/ })).toBeVisible();
   await expect(page.locator("dt").filter({ hasText: /^PageTitle$/ })).toBeVisible();
   await expect(page.locator("dt").filter({ hasText: /^Steps \/ Step$/ })).toBeVisible();
   await expect(
     page.getByText(
-      "The boxes show three pages at different stages. Only the middle one produces shared code.",
+      "Repetition alone is not enough. Share only when the same job appears on more than one page.",
       { exact: true },
     ),
   ).toBeVisible();
+  await expect(page.getByText("Repeated use, same job", { exact: true })).toBeVisible();
 
   const hasHorizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -75,4 +78,39 @@ test("the kitchen sink renders every shared explainer structure", async ({
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );
   expect(narrowPhoneHasHorizontalOverflow).toBe(false);
+});
+
+test("the shared shell uses the accepted cool palette", async ({ page }) => {
+  await page.goto("/explainers/component-kitchen-sink");
+
+  const palette = await page.evaluate(() => ({
+    accent: getComputedStyle(
+      [...document.querySelectorAll("span")].find(
+        (element) => element.textContent === "Why this exists",
+      )!,
+    ).color,
+    background: getComputedStyle(document.body).backgroundColor,
+    rule: getComputedStyle(document.querySelector("body > header")!).borderBottomColor,
+  }));
+
+  expect(palette).toEqual({
+    accent: "rgb(22, 77, 204)",
+    background: "rgb(249, 250, 251)",
+    rule: "rgb(132, 141, 152)",
+  });
+});
+
+test("the explainer provides useful in-page navigation", async ({ page }) => {
+  await page.goto("/explainers/component-kitchen-sink");
+
+  const contents = page.getByRole("navigation", { name: "On this page" });
+  await expect(contents).toBeVisible();
+  await expect(contents.getByRole("link")).toHaveCount(6);
+
+  await contents.getByRole("link", { name: "The shared parts" }).click();
+
+  await expect(page).toHaveURL(/#component-inventory$/);
+  await expect(
+    page.getByRole("heading", { name: "The shared parts" }),
+  ).toBeInViewport();
 });

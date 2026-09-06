@@ -10,7 +10,7 @@ The project currently contains the catalogue and a kitchen-sink explainer that e
 
 - `src/app/page.tsx` renders the catalogue from the discovered entries.
 - `src/app/[collection]/[slug]/page.tsx` generates each entry's route, metadata, and shared page chrome.
-- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title and description.
+- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title, description, and optional section index.
 - `src/entries/<collection>/<slug>/content.tsx` contains the tool or explainer itself.
 - `src/entries/index.ts` discovers entries and derives their kind, slug, and URL from the directory structure.
 - `src/app/globals.css` contains the shared design tokens and global styles.
@@ -64,7 +64,7 @@ PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
 
 The build discovers the new entry automatically. Its definition supplies the catalogue, document metadata, and visible page chrome; no separate route or catalogue registration is required.
 
-The page renders the entry's kind, title, and description; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-sand`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
+The page renders the entry's kind, title, description, and optional in-page navigation; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-panel`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
 
 Shared components should represent behaviour or meaning that has already appeared in more than one published item. shadcn/ui is configured with Base UI primitives for accessible controls, while the site's visual identity remains in repository-owned components and design tokens.
 

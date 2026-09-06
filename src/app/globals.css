@@ -5,8 +5,8 @@
 /*
  * Design tokens.
  *
- * The site is warm paper, dark ink, a single blue accent, strong readable
- * type, monospace utility labels, fine rules, and generous vertical space.
+ * The site is crisp near-white, dark ink, a single cool-blue accent, strong
+ * readable type, monospace utility labels, fine rules, and useful whitespace.
  * Surfaces are square; rounded corners are reserved for small badges and
  * for shadcn controls, which read `--radius`.
  *
@@ -21,11 +21,12 @@
   /* Site palette. `text-secondary` and `text-muted` are the two body greys. */
   --color-paper: var(--paper);
   --color-surface: var(--surface);
-  --color-sand: var(--sand);
+  --color-panel: var(--panel);
   --color-ink: var(--ink);
   --color-secondary: var(--text-secondary);
   --color-muted: var(--text-muted);
   --color-rule: var(--rule);
+  --color-rule-subtle: var(--rule-subtle);
   --color-accent: var(--accent);
   --color-error: var(--error);
 
@@ -67,15 +68,16 @@
 }
 
 :root {
-  --paper: #f7f4ec;
-  --surface: #fffcf4;
-  --sand: #ece6d8;
-  --ink: #171717;
-  --text-secondary: #414853;
-  --text-muted: #5f6b7a;
-  --rule: #b8b0a2;
-  --accent: #245c7a;
-  --error: #a33a2b;
+  --paper: #f9fafb;
+  --surface: #ffffff;
+  --panel: #f1f3f6;
+  --ink: #17191d;
+  --text-secondary: #3f4956;
+  --text-muted: #586372;
+  --rule: #848d98;
+  --rule-subtle: #c7ccd2;
+  --accent: #164dcc;
+  --error: #b42318;
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -85,9 +87,9 @@
   --popover-foreground: var(--ink);
   --primary: var(--accent);
   --primary-foreground: var(--paper);
-  --secondary: var(--sand);
+  --secondary: var(--panel);
   --secondary-foreground: var(--ink);
-  --muted: var(--sand);
+  --muted: var(--panel);
   --muted-foreground: var(--text-muted);
   --accent-foreground: var(--ink);
   --destructive: var(--error);
