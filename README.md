@@ -4,7 +4,7 @@
 
 Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The project is currently at the skeleton stage. It contains the catalogue and a placeholder for the first explainer, which will examine the engineering principles behind reliable AI-assisted transcription.
+The project currently contains the catalogue and a kitchen-sink explainer that exercises the shared visual vocabulary before subject-specific entries are added.
 
 ## Repository structure
 

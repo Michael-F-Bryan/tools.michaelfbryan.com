@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("the catalogue opens the first explainer", async ({ page }) => {
-  const description =
-    "Engineering principles for turning recordings into trustworthy transcripts without hiding uncertainty or losing the source evidence.";
+const description =
+  "A living specimen of the shared structures used to build visual explainers on this site.";
 
+test("the catalogue contains only the component kitchen sink", async ({ page }) => {
   await page.goto("/");
 
   await expect(page).toHaveTitle(/Tools by Michael F\. Bryan/);
@@ -11,21 +11,22 @@ test("the catalogue opens the first explainer", async ({ page }) => {
     page.getByRole("heading", { name: "Tools and explainers" }),
   ).toBeVisible();
 
+  const catalogueEntries = page
+    .getByRole("region", { name: "Catalogue" })
+    .getByRole("listitem");
+  await expect(catalogueEntries).toHaveCount(1);
+
   const explainer = page.getByRole("link", {
-    name: /Reliable AI-assisted transcription/,
+    name: /Explainer component kitchen sink/,
   });
 
-  await expect(explainer).toBeVisible();
   await expect(explainer).toContainText(description);
   await explainer.click();
 
-  await expect(page).toHaveURL(/\/explainers\/reliable-transcription$/);
+  await expect(page).toHaveURL(/\/explainers\/component-kitchen-sink$/);
   await expect(
-    page.getByRole("heading", { name: "Reliable AI-assisted transcription" }),
+    page.getByRole("heading", { name: "Explainer component kitchen sink" }),
   ).toBeVisible();
-  await expect(
-    page.getByText("In development", { exact: true }),
-  ).not.toBeVisible();
   await expect(page.getByText(description, { exact: true })).toBeVisible();
   await expect(page.locator('meta[name="description"]')).toHaveAttribute(
     "content",
@@ -33,51 +34,39 @@ test("the catalogue opens the first explainer", async ({ page }) => {
   );
 });
 
-test("the weekend explainer connects curiosity with rest", async ({ page }) => {
-  const description =
-    "A note for Gabbey about what I mean when I say I’m bored, and why making small things matters to my wellbeing.";
+test("the kitchen sink renders every shared explainer structure", async ({
+  page,
+}) => {
+  await page.goto("/explainers/component-kitchen-sink");
 
-  await page.goto("/");
-
-  const explainer = page.getByRole("link", {
-    name: /Why I get restless on free weekends/,
-  });
-
-  await expect(explainer).toBeVisible();
-  await expect(explainer).toContainText(description);
-  await explainer.click();
-
-  await expect(page).toHaveURL(/\/explainers\/restless-weekends$/);
   await expect(
-    page.getByRole("heading", { name: "Why I get restless on free weekends" }),
+    page.getByRole("heading", { name: "The page is the demonstration" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "What happens on a free Saturday" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "The wedding website" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "What I want you to understand" }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("“It’s not really that appealing to me.”", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("This is a working explanation, not a diagnosis.", {
-      exact: true,
+    page.getByRole("heading", {
+      name: "One small vocabulary for explainers",
     }),
-  ).not.toBeVisible();
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Steps are for sequences that really have an order",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("listitem")).toHaveCount(4);
+  await expect(page.locator("dt").filter({ hasText: /^Container$/ })).toBeVisible();
+  await expect(page.locator("dt").filter({ hasText: /^PageTitle$/ })).toBeVisible();
+  await expect(page.locator("dt").filter({ hasText: /^Steps \/ Step$/ })).toBeVisible();
+  await expect(
+    page.getByText(
+      "The caption explains why the picture matters instead of restating its labels.",
+      { exact: true },
+    ),
+  ).toBeVisible();
 
   const hasHorizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );
   expect(hasHorizontalOverflow).toBe(false);
-
-  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
-    "content",
-    description,
-  );
 
   await page.setViewportSize({ width: 320, height: 800 });
   await page.reload();
