@@ -16,11 +16,21 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
+      testIgnore: /coordinate-frame-math\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chromium",
+      testIgnore: /coordinate-frame-math\.spec\.ts$/,
       use: { ...devices["Pixel 7"] },
+    },
+    {
+      // Playwright has no per-project `webServer`, so the shared dev server
+      // below also starts for this project even though these are plain
+      // TypeScript unit tests. Accepted so the math tests stay inside the
+      // existing `pnpm test:e2e` gate instead of a second test runner.
+      name: "unit",
+      testMatch: /coordinate-frame-math\.spec\.ts$/,
     },
   ],
   webServer: externalBaseUrl
