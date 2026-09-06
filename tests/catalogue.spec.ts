@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 const description =
   "Every shared explainer component on one page, so I can compare them without hunting through old entries.";
 
-test("the catalogue contains only the component kitchen sink", async ({ page }) => {
+test("the catalogue lists the component kitchen sink and the coordinate-frame visualiser", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await expect(page).toHaveTitle(/Tools by Michael F\. Bryan/);
@@ -14,7 +16,12 @@ test("the catalogue contains only the component kitchen sink", async ({ page }) 
   const catalogueEntries = page
     .getByRole("region", { name: "Catalogue" })
     .getByRole("listitem");
-  await expect(catalogueEntries).toHaveCount(1);
+  await expect(catalogueEntries).toHaveCount(2);
+
+  const tool = page.getByRole("link", {
+    name: /Coordinate frame visualiser/,
+  });
+  await expect(tool).toBeVisible();
 
   const explainer = page.getByRole("link", {
     name: /Explainer component kitchen sink/,

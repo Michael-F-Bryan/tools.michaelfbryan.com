@@ -39,11 +39,18 @@ export async function generateMetadata({
 export default async function EntryPage({ params }: EntryPageProps) {
   const entry = await resolveEntry(params);
   const Content = await entry.load();
+  const isWorkspace = entry.layout === "workspace";
 
   return (
     <main className="py-12 sm:py-16">
       <Container>
-        <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,52rem)_14rem] lg:gap-16">
+        <div
+          className={
+            isWorkspace
+              ? "grid items-start gap-10"
+              : "grid items-start gap-10 lg:grid-cols-[minmax(0,52rem)_14rem] lg:gap-16"
+          }
+        >
           <header className="max-w-article lg:col-start-1 lg:row-start-1">
             <Label tone="muted">{entry.kind}</Label>
             <PageTitle className="mt-5">{entry.title}</PageTitle>
@@ -52,7 +59,7 @@ export default async function EntryPage({ params }: EntryPageProps) {
             </Prose>
           </header>
 
-          {entry.sections?.length ? (
+          {!isWorkspace && entry.sections?.length ? (
             <nav
               aria-label="On this page"
               className="border-y border-rule py-5 lg:sticky lg:top-8 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:border-y-0 lg:border-l lg:py-1 lg:pl-6"
@@ -73,7 +80,9 @@ export default async function EntryPage({ params }: EntryPageProps) {
             </nav>
           ) : null}
 
-          <article className="max-w-article lg:col-start-1 lg:row-start-2">
+          <article
+            className={isWorkspace ? "lg:col-start-1 lg:row-start-2" : "max-w-article lg:col-start-1 lg:row-start-2"}
+          >
             <Content />
           </article>
         </div>
