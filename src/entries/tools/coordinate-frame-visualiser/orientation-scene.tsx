@@ -1,60 +1,113 @@
 import { useRef } from "react";
 
+import { cn } from "@/lib/utils";
+
 import type { LocalConvention, Mat3, Vec3 } from "./math";
 import { multiplyMat3Vec3 } from "./math";
-import { type Camera, orbitCamera, project, type ScenePoint, sortByDepthAscending } from "./projection";
+import { type Camera, orbitCamera, project, type Projected, type ScenePoint, sortByDepthAscending } from "./projection";
 
 const GRID_HALF_EXTENT = 2;
 const TRIAD_LENGTH = 1.35;
+const PIN_HALF_LENGTH = 1.75;
+/** Labels sit this many viewBox units beyond an arrow tip, along the arrow. */
+const LABEL_OFFSET = 12;
+const SAFE_X = 205;
+const SAFE_Y = 155;
 
 /** Local-frame metres (in the active convention) to scene space, where `z` is always up. */
 function toScene(convention: LocalConvention, v: Vec3): ScenePoint {
   return convention === "ned" ? [v[1], v[0], -v[2]] : [v[0], v[1], v[2]];
 }
 
-function projectLocal(camera: Camera, convention: LocalConvention, v: Vec3) {
-  return project(camera, toScene(convention, v));
+/**
+ * The body glyph, in body coordinates (x forward, y right, z down): a
+ * delta-winged dart with a fin. The nose is the only sharp point, the fin
+ * stands up (−z), and the right wing is tinted so left and right can be told
+ * apart from any angle.
+ */
+const NOSE: Vec3 = [1, 0, 0];
+const SPINE_REAR: Vec3 = [-0.55, 0, 0];
+const WING_LEFT: Vec3 = [-0.8, -0.85, 0];
+const WING_RIGHT: Vec3 = [-0.8, 0.85, 0];
+const FIN_FRONT: Vec3 = [-0.25, 0, 0];
+const FIN_REAR: Vec3 = [-0.8, 0, 0];
+const FIN_TIP: Vec3 = [-0.9, 0, -0.5];
+
+type Face = Readonly<{ points: readonly Vec3[]; className: string }>;
+
+const BODY_FACES: readonly Face[] = [
+  { points: [NOSE, WING_LEFT, SPINE_REAR], className: "fill-surface stroke-accent" },
+  { points: [NOSE, SPINE_REAR, WING_RIGHT], className: "fill-accent/25 stroke-accent" },
+  { points: [FIN_FRONT, FIN_REAR, FIN_TIP], className: "fill-accent/10 stroke-accent" },
+];
+
+const GHOST_OUTLINES: readonly (readonly Vec3[])[] = [
+  [NOSE, WING_RIGHT, SPINE_REAR, WING_LEFT],
+  [FIN_FRONT, FIN_REAR, FIN_TIP],
+];
+
+function placeInLocal(rotation: Mat3, origin: Vec3, v: Vec3): Vec3 {
+  const rotated = multiplyMat3Vec3(rotation, v);
+  return [rotated[0] + origin[0], rotated[1] + origin[1], rotated[2] + origin[2]];
 }
 
-type Body = Readonly<{
-  nose: Vec3;
-  tailTop: Vec3;
-  tailLeft: Vec3;
-  tailRight: Vec3;
-  flankDot: Vec3;
+function polygonPoints(points: readonly Projected[]): string {
+  return points.map((p) => `${p.x},${p.y}`).join(" ");
+}
+
+function meanDepth(points: readonly Projected[]): number {
+  return points.reduce((sum, p) => sum + p.depth, 0) / points.length;
+}
+
+/** Unit screen direction from `from` to `to`, or null when they coincide on screen. */
+function screenDirection(from: Projected, to: Projected): readonly [number, number] | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 2) return null;
+  return [dx / length, dy / length];
+}
+
+/** An arrowhead polygon whose point is at `tip`, pointing along `dir`. */
+function arrowHead(tip: Projected, dir: readonly [number, number], size: number): string {
+  const [ux, uy] = dir;
+  const baseX = tip.x - ux * size;
+  const baseY = tip.y - uy * size;
+  const px = -uy * size * 0.45;
+  const py = ux * size * 0.45;
+  return `${tip.x},${tip.y} ${baseX + px},${baseY + py} ${baseX - px},${baseY - py}`;
+}
+
+function clampToSafeArea(x: number, y: number): readonly [number, number] {
+  return [Math.max(-SAFE_X, Math.min(SAFE_X, x)), Math.max(-SAFE_Y, Math.min(SAFE_Y, y))];
+}
+
+/** A label position just past an arrow tip; falls back to below-right when the arrow is end-on. */
+function labelBeyond(tip: Projected, dir: readonly [number, number] | null, offset = LABEL_OFFSET): readonly [number, number] {
+  if (!dir) return clampToSafeArea(tip.x + offset * 0.7, tip.y + offset);
+  return clampToSafeArea(tip.x + dir[0] * offset, tip.y + dir[1] * offset);
+}
+
+export type ScenePin = Readonly<{
+  /** Unit axis in the active local frame. */
+  axis: Vec3;
+  /** Which stage turns about it. */
+  stage: 1 | 2 | 3;
 }>;
-
-const BODY: Body = {
-  nose: [0.95, 0, 0],
-  tailTop: [-0.85, 0, -0.35],
-  tailLeft: [-0.85, -0.5, 0.32],
-  tailRight: [-0.85, 0.5, 0.32],
-  flankDot: [-0.15, 0.56, 0.05],
-};
-
-function transformBody(rotation: Mat3, origin: Vec3, body: Body): Body {
-  const apply = (v: Vec3): Vec3 => {
-    const rotated = multiplyMat3Vec3(rotation, v);
-    return [rotated[0] + origin[0], rotated[1] + origin[1], rotated[2] + origin[2]];
-  };
-  return {
-    nose: apply(body.nose),
-    tailTop: apply(body.tailTop),
-    tailLeft: apply(body.tailLeft),
-    tailRight: apply(body.tailRight),
-    flankDot: apply(body.flankDot),
-  };
-}
 
 export type OrientationSceneProps = Readonly<{
   convention: LocalConvention;
+  /** The pose the solid body is drawn in: the scrubbed pose. */
   rotation: Mat3;
+  /** The pose the sequence ends in, drawn as a dashed target when it differs from `rotation`. */
+  finalRotation: Mat3;
+  showFinalGhost: boolean;
   origin: Vec3;
   probe: Vec3;
-  ghostRotation: Mat3;
-  showGhost: boolean;
-  pinAxes: readonly Vec3[];
-  pinLabel: string;
+  showProbe: boolean;
+  pins: readonly ScenePin[];
+  /** Two pins on the same line (gimbal lock): draw them so both can be seen. */
+  pinsCollinear: boolean;
   camera: Camera;
   onCameraChange: (camera: Camera) => void;
 }>;
@@ -62,12 +115,13 @@ export type OrientationSceneProps = Readonly<{
 export function OrientationScene({
   convention,
   rotation,
+  finalRotation,
+  showFinalGhost,
   origin,
   probe,
-  ghostRotation,
-  showGhost,
-  pinAxes,
-  pinLabel,
+  showProbe,
+  pins,
+  pinsCollinear,
   camera,
   onCameraChange,
 }: OrientationSceneProps) {
@@ -95,21 +149,23 @@ export function OrientationScene({
     dragState.current = null;
   }
 
-  const body = transformBody(rotation, origin, BODY);
-  const ghost = transformBody(ghostRotation, origin, BODY);
+  const pr = (v: Vec3) => project(camera, toScene(convention, v));
   const localNames = convention === "ned" ? (["N", "E", "D"] as const) : (["E", "N", "U"] as const);
-  const localAxes: readonly Vec3[] = [
+  const basis: readonly Vec3[] = [
     [1, 0, 0],
     [0, 1, 0],
     [0, 0, 1],
   ];
-
-  const pr = (v: Vec3) => projectLocal(camera, convention, v);
+  const localOrigin = pr([0, 0, 0]);
+  const bodyOrigin = pr(origin);
+  // Labels get a paper-coloured halo (stroke painted under the fill) so two
+  // that land near each other, or over a line, stay legible.
+  const labelClass = "font-mono text-sm font-bold max-sm:text-[22px] [paint-order:stroke] stroke-surface [stroke-width:3px]";
 
   type Primitive = { depth: number; node: React.ReactNode };
   const primitives: Primitive[] = [];
 
-  // Ground grid.
+  // Ground grid: the tangent plane at the anchor.
   for (let i = -GRID_HALF_EXTENT; i <= GRID_HALF_EXTENT; i++) {
     const a = pr([i, -GRID_HALF_EXTENT, 0]);
     const b = pr([i, GRID_HALF_EXTENT, 0]);
@@ -125,38 +181,18 @@ export function OrientationScene({
     });
   }
 
-  // Pinned axis/axes: long lines through the origin.
-  pinAxes.forEach((axis, index) => {
-    const scaled: Vec3 = [axis[0] * 6, axis[1] * 6, axis[2] * 6];
-    const negated: Vec3 = [-scaled[0], -scaled[1], -scaled[2]];
-    const p1 = pr(scaled);
-    const p2 = pr(negated);
-    primitives.push({
-      depth: (p1.depth + p2.depth) / 2 + 0.5,
-      node: (
-        <line
-          key={`pin-${index}`}
-          x1={p1.x}
-          y1={p1.y}
-          x2={p2.x}
-          y2={p2.y}
-          className="stroke-accent"
-          strokeWidth={1.5}
-        />
-      ),
-    });
-  });
-
-  // Local frame triad (ink).
-  localAxes.forEach((axis, index) => {
+  // Local frame triad: thin ink arrows with open heads.
+  basis.forEach((axis, index) => {
     const tip = pr([axis[0] * TRIAD_LENGTH, axis[1] * TRIAD_LENGTH, axis[2] * TRIAD_LENGTH]);
-    const start = pr([0, 0, 0]);
+    const dir = screenDirection(localOrigin, tip);
+    const [lx, ly] = labelBeyond(tip, dir);
     primitives.push({
       depth: tip.depth,
       node: (
-        <g key={`local-axis-${index}`}>
-          <line x1={start.x} y1={start.y} x2={tip.x} y2={tip.y} className="stroke-ink" strokeWidth={1.5} />
-          <text x={tip.x} y={tip.y} className="fill-ink font-mono text-sm max-sm:text-[22px] font-bold" dy={-4}>
+        <g key={`local-axis-${index}`} data-local-axis={localNames[index]}>
+          <line x1={localOrigin.x} y1={localOrigin.y} x2={tip.x} y2={tip.y} className="stroke-ink" strokeWidth={1.25} />
+          {dir ? <polygon points={arrowHead(tip, dir, 9)} className="fill-surface stroke-ink" strokeWidth={1.25} strokeLinejoin="round" /> : null}
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" className={cn("fill-ink", labelClass)}>
             {localNames[index]}
           </text>
         </g>
@@ -164,64 +200,110 @@ export function OrientationScene({
     });
   });
 
-  // Ghost outline (dashed), only stage>0.
-  if (showGhost) {
-    const g = [ghost.nose, ghost.tailTop, ghost.tailLeft, ghost.tailRight].map((v) => pr(v));
-    const depth = g.reduce((sum, p) => sum + p.depth, 0) / g.length;
+  // Rotation-axis pins: bounded dash-dot lines with a ring and a stage label at one end.
+  let previousPinLabelEnd: Projected | null = null;
+  pins.forEach((pin, index) => {
+    const positive: Vec3 = [pin.axis[0] * PIN_HALF_LENGTH, pin.axis[1] * PIN_HALF_LENGTH, pin.axis[2] * PIN_HALF_LENGTH];
+    const negative: Vec3 = [-positive[0], -positive[1], -positive[2]];
+    const p1 = pr([positive[0] + origin[0], positive[1] + origin[1], positive[2] + origin[2]]);
+    const p2 = pr([negative[0] + origin[0], negative[1] + origin[1], negative[2] + origin[2]]);
+    // With two collinear pins, label the second at whichever end is farther
+    // from the first label so both stay readable.
+    const labelEnd =
+      previousPinLabelEnd === null
+        ? p1
+        : Math.hypot(p1.x - previousPinLabelEnd.x, p1.y - previousPinLabelEnd.y) >=
+            Math.hypot(p2.x - previousPinLabelEnd.x, p2.y - previousPinLabelEnd.y)
+          ? p1
+          : p2;
+    previousPinLabelEnd = labelEnd;
+    const dir = screenDirection(bodyOrigin, labelEnd);
+    const [lx, ly] = labelBeyond(labelEnd, dir, 16);
     primitives.push({
-      depth,
+      depth: Math.max(p1.depth, p2.depth) + 0.5,
       node: (
-        <polygon
-          key="ghost"
-          points={`${g[0].x},${g[0].y} ${g[1].x},${g[1].y} ${g[2].x},${g[2].y} ${g[3].x},${g[3].y}`}
-          className="fill-none stroke-rule"
-          strokeWidth={1}
-          strokeDasharray="4 3"
-        />
+        <g key={`pin-${pin.stage}`} data-pin-stage={pin.stage}>
+          <line
+            x1={p1.x}
+            y1={p1.y}
+            x2={p2.x}
+            y2={p2.y}
+            className="stroke-accent"
+            strokeWidth={1.25}
+            strokeDasharray={pinsCollinear && index === 1 ? "2 4" : "7 3 1 3"}
+          />
+          <circle
+            cx={labelEnd.x}
+            cy={labelEnd.y}
+            r={pinsCollinear && index === 1 ? 7 : 4.5}
+            className="fill-surface stroke-accent"
+            strokeWidth={1.25}
+          />
+          <text
+            x={lx}
+            y={ly}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="fill-accent font-mono text-xs max-sm:text-lg [paint-order:stroke] stroke-surface [stroke-width:3px]"
+          >
+            axis {pin.stage}
+          </text>
+        </g>
       ),
+    });
+  });
+
+  // The final pose as a quiet dashed target, when the body is not there yet.
+  if (showFinalGhost) {
+    GHOST_OUTLINES.forEach((outline, index) => {
+      const projected = outline.map((v) => pr(placeInLocal(finalRotation, origin, v)));
+      primitives.push({
+        depth: meanDepth(projected),
+        node: (
+          <polygon
+            key={`ghost-${index}`}
+            data-final-ghost
+            points={polygonPoints(projected)}
+            className="fill-none stroke-rule"
+            strokeWidth={1}
+            strokeDasharray="4 3"
+            strokeLinejoin="round"
+          />
+        ),
+      });
     });
   }
 
-  // Body faces.
-  const faces: readonly (readonly [Vec3, Vec3, Vec3, "top" | "side"])[] = [
-    [body.nose, body.tailTop, body.tailLeft, "top"],
-    [body.nose, body.tailRight, body.tailTop, "top"],
-    [body.nose, body.tailRight, body.tailLeft, "side"],
-    [body.tailTop, body.tailRight, body.tailLeft, "side"],
-  ];
-  faces.forEach(([a, b, c, kind], index) => {
-    const pa = pr(a);
-    const pb = pr(b);
-    const pc = pr(c);
+  // The body, in the displayed pose.
+  BODY_FACES.forEach((face, index) => {
+    const projected = face.points.map((v) => pr(placeInLocal(rotation, origin, v)));
     primitives.push({
-      depth: (pa.depth + pb.depth + pc.depth) / 3,
+      depth: meanDepth(projected),
       node: (
         <polygon
           key={`face-${index}`}
-          points={`${pa.x},${pa.y} ${pb.x},${pb.y} ${pc.x},${pc.y}`}
-          className={kind === "top" ? "fill-surface stroke-ink" : "fill-panel stroke-ink"}
-          strokeWidth={1}
+          points={polygonPoints(projected)}
+          className={face.className}
+          strokeWidth={1.25}
           strokeLinejoin="round"
         />
       ),
     });
   });
 
-  const flank = pr(body.flankDot);
-  primitives.push({ depth: flank.depth + 0.01, node: <circle key="flank" cx={flank.x} cy={flank.y} r={3} className="fill-ink" /> });
-
-  // Body frame triad (cobalt), from the body origin.
-  const bodyOrigin = pr(origin);
+  // Body frame triad: thick cobalt arrows with filled heads.
   const bodyLabels = ["x", "y", "z"] as const;
-  localAxes.forEach((axis, index) => {
-    const rotated = multiplyMat3Vec3(rotation, [axis[0] * TRIAD_LENGTH, axis[1] * TRIAD_LENGTH, axis[2] * TRIAD_LENGTH]);
-    const tip = pr([rotated[0] + origin[0], rotated[1] + origin[1], rotated[2] + origin[2]]);
+  basis.forEach((axis, index) => {
+    const tip = pr(placeInLocal(rotation, origin, [axis[0] * TRIAD_LENGTH, axis[1] * TRIAD_LENGTH, axis[2] * TRIAD_LENGTH]));
+    const dir = screenDirection(bodyOrigin, tip);
+    const [lx, ly] = labelBeyond(tip, dir);
     primitives.push({
       depth: tip.depth + 0.02,
       node: (
-        <g key={`body-axis-${index}`}>
-          <line x1={bodyOrigin.x} y1={bodyOrigin.y} x2={tip.x} y2={tip.y} className="stroke-accent" strokeWidth={2} />
-          <text x={tip.x} y={tip.y} dy={-4} className="fill-accent font-mono text-sm max-sm:text-[22px] font-bold">
+        <g key={`body-axis-${index}`} data-body-axis={bodyLabels[index]}>
+          <line x1={bodyOrigin.x} y1={bodyOrigin.y} x2={tip.x} y2={tip.y} className="stroke-accent" strokeWidth={2.25} />
+          {dir ? <polygon points={arrowHead(tip, dir, 10)} className="fill-accent" /> : null}
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" className={cn("fill-accent", labelClass)}>
             {bodyLabels[index]}
           </text>
         </g>
@@ -229,31 +311,41 @@ export function OrientationScene({
     });
   });
 
-  // Probe: component legs then a solid line from the local origin.
-  const probeInLocal: Vec3 = probe;
-  const probeScenePoint = pr(probeInLocal);
-  const legA = pr([probeInLocal[0], probeInLocal[1], 0]);
-  const legOrigin = pr([0, 0, 0]);
-  primitives.push({
-    depth: (legOrigin.depth + legA.depth) / 2 - 0.05,
-    node: <polyline key="probe-legs" points={`${legOrigin.x},${legOrigin.y} ${legA.x},${legA.y} ${probeScenePoint.x},${probeScenePoint.y}`} className="fill-none stroke-rule" strokeWidth={1} strokeDasharray="3 3" />,
-  });
-  primitives.push({
-    depth: probeScenePoint.depth + 0.1,
-    node: (
-      <g key="probe">
-        <line x1={legOrigin.x} y1={legOrigin.y} x2={probeScenePoint.x} y2={probeScenePoint.y} className="stroke-ink" strokeWidth={1} />
-        <circle cx={probeScenePoint.x} cy={probeScenePoint.y} r={4} className="fill-ink" />
-        <text x={probeScenePoint.x} y={probeScenePoint.y} dy={-6} className="fill-ink font-mono text-sm max-sm:text-[22px] font-bold">
-          P
-        </text>
-      </g>
-    ),
-  });
+  // Optional probe point: component legs then a solid line from the local origin.
+  if (showProbe) {
+    const probePoint = pr(probe);
+    const footPoint = pr([probe[0], probe[1], 0]);
+    primitives.push({
+      depth: (localOrigin.depth + footPoint.depth) / 2 - 0.05,
+      node: (
+        <polyline
+          key="probe-legs"
+          points={`${localOrigin.x},${localOrigin.y} ${footPoint.x},${footPoint.y} ${probePoint.x},${probePoint.y}`}
+          className="fill-none stroke-rule"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />
+      ),
+    });
+    const dir = screenDirection(localOrigin, probePoint);
+    const [lx, ly] = labelBeyond(probePoint, dir, 14);
+    primitives.push({
+      depth: probePoint.depth + 0.1,
+      node: (
+        <g key="probe" data-probe>
+          <line x1={localOrigin.x} y1={localOrigin.y} x2={probePoint.x} y2={probePoint.y} className="stroke-ink" strokeWidth={1} />
+          <circle cx={probePoint.x} cy={probePoint.y} r={4} className="fill-ink" />
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" className={cn("fill-ink", labelClass)}>
+            P
+          </text>
+        </g>
+      ),
+    });
+  }
 
   primitives.push({
-    depth: legOrigin.depth - 0.1,
-    node: <circle key="origin" cx={legOrigin.x} cy={legOrigin.y} r={2.5} className="fill-ink" />,
+    depth: localOrigin.depth - 0.1,
+    node: <circle key="origin" cx={localOrigin.x} cy={localOrigin.y} r={2.5} className="fill-ink" />,
   });
 
   const ordered = sortByDepthAscending(primitives, (p) => p.depth);
@@ -262,19 +354,24 @@ export function OrientationScene({
     <svg
       viewBox="-220 -170 440 340"
       role="img"
-      aria-label="Orthographic scene: a local tangent frame in ink, a body frame in cobalt, and a probe point. Drag to orbit the camera."
-      className="block w-full touch-pan-y select-none"
+      aria-label="Orthographic scene: a local tangent frame drawn in ink, a dart-shaped body with its frame drawn in cobalt, and the axis the current rotation stage turns about. Drag to orbit the camera."
+      className="block max-h-[44vh] w-full cursor-grab touch-pan-y select-none active:cursor-grabbing lg:max-h-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
     >
       {ordered.map((p) => p.node)}
-      {pinAxes.length > 0 ? (
-        <text x={-205} y={-150} className="fill-accent font-mono text-xs max-sm:text-base font-bold">
-          {pinLabel}
+      {pinsCollinear ? (
+        <text x={-208} y={-150} className="fill-accent font-mono text-xs font-bold max-sm:text-base">
+          axis 1 = axis 3 · gimbal lock
         </text>
       ) : null}
+      <g aria-hidden="true" className="fill-muted font-mono text-[10px] max-sm:text-sm">
+        <text x={208} y={158} textAnchor="end">
+          ↻ drag to orbit
+        </text>
+      </g>
     </svg>
   );
 }

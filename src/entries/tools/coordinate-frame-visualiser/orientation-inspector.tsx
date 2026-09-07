@@ -2,30 +2,32 @@ import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { DISCLOSURE_SUMMARY, READONLY_FIELD, SEGMENT_BUTTON, segmentTone, TEXT_FIELD } from "./controls";
 import { formatFixed, formatSigned, parseUserNumber } from "./format";
 import {
   applyToPoint,
-  type EulerAngles,
   type LocalConvention,
   invertTransform,
   type Mat3,
   normaliseQuaternion,
   quaternionFromRotation,
   type Quaternion,
-  rotationToEuler,
   transformFromRotation,
   transpose,
 } from "./math";
 import { RotationTable, TransformTable } from "./matrix-table";
 import type { PoseState } from "./pose";
-import { activeOrigin, activeProbe, activeRotation } from "./pose";
-import { stageAxisLabel, stageHumanName } from "./sequence";
+import { activeOrigin, activeProbe } from "./pose";
 import { useSyncedDraft } from "./use-synced-draft";
 
 type OrientationInspectorProps = Readonly<{
   state: PoseState;
+  /** The rotation the scene is drawing (the scrubbed pose), which every number here describes. */
+  rotation: Mat3;
+  focusedStage: 0 | 1 | 2 | 3;
+  showProbe: boolean;
+  onShowProbeChange: (show: boolean) => void;
   onConventionChange: (convention: LocalConvention) => void;
-  onAngleEdit: (field: keyof EulerAngles, value: number) => void;
   onQuaternionCommit: (q: Quaternion) => void;
   onProbeEdit: (field: 0 | 1 | 2, value: number) => void;
   onOriginEdit: (field: 0 | 1 | 2, value: number) => void;
@@ -36,70 +38,8 @@ const LOCAL_NAMES: Record<LocalConvention, readonly [string, string, string]> = 
   enu: ["E", "N", "U"],
 };
 
-function AngleRow({
-  fieldName,
-  displayLabel,
-  axisHint,
-  value,
-  onCommit,
-  min = -180,
-  max = 180,
-}: Readonly<{
-  /** Stable stage identity ("first"/"second"/"third") used for the aria-labels, independent of the order. */
-  fieldName: string;
-  /** The visible name of this stage's angle, e.g. "yaw" or "angle 1". */
-  displayLabel: string;
-  /** The visible description of the axis this stage turns about, e.g. "about z" or "about y′". */
-  axisHint: string;
-  value: number;
-  onCommit: (value: number) => void;
-  min?: number;
-  max?: number;
-}>) {
-  const [draft, setDraft, resetDraft] = useSyncedDraft(value.toFixed(1));
-
-  function commit() {
-    const parsed = parseUserNumber(draft);
-    if (parsed === null) {
-      resetDraft();
-      return;
-    }
-    onCommit(parsed);
-  }
-
-  return (
-    <div className="mt-3">
-      <span className="text-sm text-secondary">
-        {displayLabel} <small className="font-mono text-xs text-muted">{axisHint}</small>
-      </span>
-      <div className="mt-1 grid grid-cols-[minmax(0,1fr)_5.5rem_auto] items-center gap-2">
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={0.1}
-          value={value}
-          aria-label={`${fieldName} angle, slider`}
-          onChange={(event) => onCommit(Number(event.target.value))}
-          className="w-full accent-accent focus-visible:outline-2 focus-visible:outline-accent"
-        />
-        <input
-          type="text"
-          inputMode="decimal"
-          value={draft}
-          aria-label={`${fieldName} angle, degrees`}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") commit();
-          }}
-          className="w-full border border-rule bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums"
-        />
-        <span className="font-mono text-xs text-muted">°</span>
-      </div>
-      <span className="mt-1 block font-mono text-xs text-muted">{((value * Math.PI) / 180).toFixed(4)} rad</span>
-    </div>
-  );
+function Kicker({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">{children}</span>;
 }
 
 function QuaternionGroup({
@@ -146,25 +86,19 @@ function QuaternionGroup({
   const order: readonly (keyof Quaternion)[] = componentOrder === "wxyz" ? ["w", "x", "y", "z"] : ["x", "y", "z", "w"];
 
   return (
-    <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Quaternion</span>
-        <div className="inline-flex border border-rule" role="group" aria-label="Component order">
-          {(["wxyz", "xyzw"] as const).map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              aria-pressed={componentOrder === candidate}
-              onClick={() => setComponentOrder(candidate)}
-              className={cn(
-                "px-2 py-1 font-mono text-xs focus-visible:outline-2 focus-visible:outline-accent",
-                componentOrder === candidate ? "bg-accent text-paper" : "text-secondary",
-              )}
-            >
-              {candidate === "wxyz" ? "w x y z" : "x y z w"}
-            </button>
-          ))}
-        </div>
+    <div className="mt-2">
+      <div className="inline-flex border border-rule" role="group" aria-label="Component order">
+        {(["wxyz", "xyzw"] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            aria-pressed={componentOrder === candidate}
+            onClick={() => setComponentOrder(candidate)}
+            className={cn(SEGMENT_BUTTON, "font-mono text-xs", segmentTone(componentOrder === candidate))}
+          >
+            {candidate === "wxyz" ? "w x y z" : "x y z w"}
+          </button>
+        ))}
       </div>
       <div
         className="mt-3 flex flex-wrap gap-3"
@@ -186,7 +120,7 @@ function QuaternionGroup({
               onKeyDown={(event) => {
                 if (event.key === "Enter") commit();
               }}
-              className="w-20 border border-rule bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums"
+              className={cn(TEXT_FIELD, "w-20")}
             />
           </label>
         ))}
@@ -196,7 +130,7 @@ function QuaternionGroup({
         className={cn("mt-2 max-w-[38rem] text-sm", note?.kind === "error" ? "text-error" : "text-muted")}
       >
         {note?.text ??
-          "Same rotation as R above. Non-unit input is normalised on commit; a zero or non-finite quaternion is rejected."}
+          "Same rotation as R. Non-unit input is normalised on commit; a zero or non-finite quaternion is rejected. Committing one finishes the sequence."}
       </p>
     </div>
   );
@@ -204,8 +138,11 @@ function QuaternionGroup({
 
 export function OrientationInspector({
   state,
+  rotation,
+  focusedStage,
+  showProbe,
+  onShowProbeChange,
   onConventionChange,
-  onAngleEdit,
   onQuaternionCommit,
   onProbeEdit,
   onOriginEdit,
@@ -213,7 +150,6 @@ export function OrientationInspector({
   const [rInverted, setRInverted] = useState(false);
   const [tInverted, setTInverted] = useState(false);
 
-  const rotation = activeRotation(state);
   const origin = activeOrigin(state);
   const probe = activeProbe(state);
   const names = LOCAL_NAMES[state.convention];
@@ -221,35 +157,23 @@ export function OrientationInspector({
   // Row headers stay the bare letter; column headers get a "body" prefix so
   // a body x/y/z column can never be confused with an ECEF X/Y/Z one.
   const bodyColumnHeaders = ["body x", "body y", "body z"] as const;
-
-  const decomposition = rotationToEuler(rotation, state.order, state.interpretation);
-  const gimbalLocked = decomposition.gimbalLock || Math.abs(Math.abs(state.angles.second) - 90) < 1e-6;
-
-  const angleFieldNames = ["first", "second", "third"] as const;
-  const angleDisplayLabels = ([1, 2, 3] as const).map(
-    (stageIndex) => stageHumanName(state.order, stageIndex) ?? `angle ${stageIndex}`,
-  );
-  const angleAxisHints = ([1, 2, 3] as const).map(
-    (stageIndex) => `about ${stageAxisLabel(state.order, state.interpretation, state.convention, stageIndex)}`,
-  );
+  const scrubbed = focusedStage < 3;
+  const local = state.convention.toUpperCase();
 
   const displayed = rInverted ? transpose(rotation) : rotation;
   const rColumnHeaders: readonly [string, string, string] = rInverted ? names : bodyColumnHeaders;
   const rRowHeaders: readonly [string, string, string] = rInverted ? bodyNames : names;
   const rName = rInverted ? `R[body←${state.convention}]` : `R[${state.convention}←body]`;
-  const rTakes = rInverted ? `${state.convention.toUpperCase()} coordinates` : "body coordinates";
-  const rGives = rInverted ? "body coordinates" : `${state.convention.toUpperCase()} coordinates`;
-
+  const rTakes = rInverted ? `${local} coordinates` : "body coordinates";
+  const rGives = rInverted ? "body coordinates" : `${local} coordinates`;
   const rRows = displayed.map((row) => row.map((v) => formatSigned(v)) as unknown as readonly [string, string, string]);
 
   const bodyTransform = transformFromRotation({ to: state.convention, from: "body" as const, m: rotation }, origin);
   const localFromBody = tInverted ? invertTransform(bodyTransform) : bodyTransform;
   const tName = tInverted ? `T[body←${state.convention}]` : `T[${state.convention}←body]`;
-  const tTakes = tInverted ? `${state.convention.toUpperCase()} coordinates of a point, with a fourth coordinate of 1` : "body coordinates of a point, with a fourth coordinate of 1";
-  const tGives = tInverted ? "body coordinates" : `${state.convention.toUpperCase()} coordinates`;
-  const tColumnHeaders: readonly [string, string, string, string] = tInverted
-    ? [...names, "origin"]
-    : [...bodyColumnHeaders, "origin"];
+  const tTakes = tInverted ? `${local} coordinates of a point, with a fourth coordinate of 1` : "body coordinates of a point, with a fourth coordinate of 1";
+  const tGives = tInverted ? "body coordinates" : `${local} coordinates`;
+  const tColumnHeaders: readonly [string, string, string, string] = tInverted ? [...names, "origin"] : [...bodyColumnHeaders, "origin"];
   const tRowHeaders: readonly [string, string, string] = tInverted ? bodyNames : names;
   const tRows = localFromBody.m.slice(0, 3).map(
     (row) => row.map((v) => formatSigned(v, 3)) as unknown as readonly [string, string, string, string],
@@ -261,7 +185,7 @@ export function OrientationInspector({
     <div className="min-w-0">
       <div className="px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Frame</span>
+          <Kicker>Frame</Kicker>
           <span className="font-mono text-xs text-muted">shared with the position mode</span>
         </div>
         <div className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
@@ -274,10 +198,7 @@ export function OrientationInspector({
                   type="button"
                   aria-pressed={state.convention === candidate}
                   onClick={() => onConventionChange(candidate)}
-                  className={cn(
-                    "px-2 py-1 text-xs uppercase focus-visible:outline-2 focus-visible:outline-accent",
-                    state.convention === candidate ? "bg-accent text-paper" : "text-secondary",
-                  )}
+                  className={cn(SEGMENT_BUTTON, "text-xs uppercase", segmentTone(state.convention === candidate))}
                 >
                   {candidate.toUpperCase()}
                 </button>
@@ -286,59 +207,43 @@ export function OrientationInspector({
             <span className="font-mono text-xs text-muted">tangent frame at the anchor</span>
           </span>
           <span className="text-sm text-secondary">Body</span>
-          <span className="font-mono text-xs text-muted">x forward · y right · z down · fixed, independent of the local frame</span>
+          <span className="font-mono text-xs text-muted">x forward · y right · z down</span>
         </div>
-        <p className="mt-2 max-w-[38rem] text-sm text-muted">
-          Switching NED to ENU relabels the grid and recomputes every number. The block does not move.
-        </p>
       </div>
 
-      <div role="group" aria-label="Angles" className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <div className="flex items-baseline justify-between">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Angles</span>
+      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6" data-body-axes-readout>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <Kicker>Body axes in {local}</Kicker>
+          <span className="font-mono text-xs text-muted">the columns of R[{state.convention}←body]</span>
         </div>
-        <AngleRow
-          fieldName={angleFieldNames[0]}
-          displayLabel={angleDisplayLabels[0]}
-          axisHint={angleAxisHints[0]}
-          value={state.angles.first}
-          onCommit={(v) => onAngleEdit("first", v)}
-        />
-        <AngleRow
-          fieldName={angleFieldNames[1]}
-          displayLabel={angleDisplayLabels[1]}
-          axisHint={angleAxisHints[1]}
-          value={state.angles.second}
-          onCommit={(v) => onAngleEdit("second", v)}
-          min={-90}
-          max={90}
-        />
-        <AngleRow
-          fieldName={angleFieldNames[2]}
-          displayLabel={angleDisplayLabels[2]}
-          axisHint={angleAxisHints[2]}
-          value={state.angles.third}
-          onCommit={(v) => onAngleEdit("third", v)}
-        />
-        {gimbalLocked ? (
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-sm tabular-nums">
+          {bodyNames.map((bodyName, column) => (
+            <div key={bodyName} className="contents">
+              <dt className="font-bold text-accent">body {bodyName}</dt>
+              <dd className="flex flex-wrap gap-x-3 text-secondary">
+                {names.map((localName, row) => (
+                  <span key={localName}>
+                    <span className="text-muted">{localName}</span> {formatSigned(rotation[row][column], 3)}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {scrubbed ? (
           <p role="status" className="mt-3 max-w-[38rem] text-sm text-secondary">
-            Gimbal lock: the second angle is at ±90°, so the first and third angles are no longer separately
-            determined — only their sum or difference is observable. Both pins are drawn in the scene because they
-            are now collinear.
+            These numbers describe the body as drawn: {focusedStage === 0 ? "at the start, before any rotation" : `after stage ${focusedStage} of 3`}.
+            Scrub to the end for the full rotation.
           </p>
-        ) : (
-          <p className="mt-3 max-w-[38rem] text-sm text-muted">
-            When the second angle reaches ±90° the first- and third-stage axes become parallel and those two angles
-            stop being separately determined; this note will say so.
-          </p>
-        )}
+        ) : null}
       </div>
 
-      <QuaternionGroup rotation={rotation} onCommit={onQuaternionCommit} />
-
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">R</span>
-        <div className="mt-3">
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Rotation matrix</Kicker>
+          <span className="text-sm text-muted">{rName} · 3×3 · invert and copy</span>
+        </summary>
+        <div className="mt-2 pb-2">
           <RotationTable
             name={rName}
             takes={rTakes}
@@ -352,20 +257,34 @@ export function OrientationInspector({
             copyText={`${rName}\n${displayed.map((row) => row.map((v) => formatSigned(v)).join("  ")).join("\n")}`}
           />
         </div>
-      </div>
+      </details>
 
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <div className="flex items-baseline justify-between">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Probe</span>
-          <span className="font-mono text-xs text-muted">one point, two descriptions</span>
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Quaternion</Kicker>
+          <span className="text-sm text-muted">the same rotation as four numbers · editable</span>
+        </summary>
+        <div className="pb-2">
+          <QuaternionGroup rotation={rotation} onCommit={onQuaternionCommit} />
         </div>
-        <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-y-2">
-          <span className="text-sm text-secondary">P in {state.convention.toUpperCase()}</span>
+      </details>
+
+      <details
+        className="border-t border-rule-subtle px-4 py-2 sm:px-6"
+        open={showProbe}
+        onToggle={(event) => onShowProbeChange(event.currentTarget.open)}
+      >
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Point P</Kicker>
+          <span className="text-sm text-muted">one point, two descriptions · also draws P in the scene</span>
+        </summary>
+        <div className="mt-2 grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-y-2 pb-2">
+          <span className="text-sm text-secondary">P in {local}</span>
           <span className="flex flex-wrap gap-3">
             {names.map((name, index) => (
               <label key={name} className="flex items-center gap-1 font-mono text-xs text-muted">
                 {name}
-                <ProbeField value={probe[index]} onCommit={(v) => onProbeEdit(index as 0 | 1 | 2, v)} label={`local ${name}`} />
+                <NumberField value={probe[index]} onCommit={(v) => onProbeEdit(index as 0 | 1 | 2, v)} label={`local ${name}`} />
               </label>
             ))}
             <span className="font-mono text-xs text-muted">m</span>
@@ -375,31 +294,24 @@ export function OrientationInspector({
             {bodyNames.map((name, index) => (
               <label key={name} className="flex items-center gap-1 font-mono text-xs text-muted">
                 {name}
-                <input
-                  type="text"
-                  readOnly
-                  aria-label={`body ${name}`}
-                  value={formatFixed(probeBody[index], 3)}
-                  className="w-20 border border-rule-subtle bg-panel px-2 py-1 text-right font-mono text-sm tabular-nums text-secondary"
-                />
+                <input type="text" readOnly aria-label={`body ${name}`} value={formatFixed(probeBody[index], 3)} className={cn(READONLY_FIELD, "w-20")} />
               </label>
             ))}
             <span className="font-mono text-xs text-muted">m</span>
           </span>
+          <p className="col-span-2 mt-1 max-w-[38rem] text-sm text-muted">
+            Body coordinates are R[body←{local}] · (P − origin). Turn the body and the {local} triple stays put while the
+            body triple changes.
+          </p>
         </div>
-        <p className="mt-3 max-w-[38rem] text-sm text-muted">
-          Body coordinates come from T[body←{state.convention.toUpperCase()}] · P — R[body←{state.convention.toUpperCase()}]{" "}
-          applied to (P − origin). With the origin at zero this is just R[body←{state.convention.toUpperCase()}] · P.
-          Turn the block and the {state.convention.toUpperCase()} triple stays put while the body triple changes.
-        </p>
-      </div>
+      </details>
 
-      <details className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <summary className="flex cursor-pointer flex-wrap items-baseline gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Pose T</span>
-          <span className="text-sm text-muted">4×4 · a separate object that carries R and the body origin</span>
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Pose T</Kicker>
+          <span className="text-sm text-muted">4×4 · carries R and the body origin</span>
         </summary>
-        <div className="mt-3">
+        <div className="mt-2 pb-2">
           <TransformTable
             name={tName}
             takes={tTakes}
@@ -420,10 +332,10 @@ export function OrientationInspector({
                 {names.map((name, index) => (
                   <label key={name} className="flex items-center gap-1 font-mono text-xs text-muted">
                     {name}
-                    <ProbeField value={origin[index]} onCommit={(v) => onOriginEdit(index as 0 | 1 | 2, v)} label={`origin ${name}`} />
+                    <NumberField value={origin[index]} onCommit={(v) => onOriginEdit(index as 0 | 1 | 2, v)} label={`origin ${name}`} />
                   </label>
                 ))}
-                <span className="font-mono text-xs text-muted">m · body origin in {state.convention.toUpperCase()}</span>
+                <span className="font-mono text-xs text-muted">m · body origin in {local}</span>
               </span>
             </div>
           ) : null}
@@ -434,7 +346,7 @@ export function OrientationInspector({
   );
 }
 
-function ProbeField({
+function NumberField({
   value,
   onCommit,
   label,
@@ -461,7 +373,7 @@ function ProbeField({
       onKeyDown={(event) => {
         if (event.key === "Enter") commit();
       }}
-      className="w-20 border border-rule bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums"
+      className={cn(TEXT_FIELD, "w-20")}
     />
   );
 }

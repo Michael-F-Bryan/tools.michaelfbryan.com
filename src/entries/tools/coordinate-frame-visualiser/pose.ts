@@ -19,6 +19,7 @@ import {
   multiply,
   multiplyMat3Vec3,
   type Quaternion,
+  rotationAfterStages,
   rotationEnuFromNed,
   rotationFromQuaternion,
   rotationToEuler,
@@ -177,4 +178,20 @@ export function withProbeEdit(state: PoseState, field: 0 | 1 | 2, value: number)
   const nextActive: Vec3 =
     field === 0 ? [value, active[1], active[2]] : field === 1 ? [active[0], value, active[2]] : [active[0], active[1], value];
   return { ...state, probeNed: reexpressVec3(state.convention, nextActive) };
+}
+
+/**
+ * The rotation the scene actually draws: the pose after `progress` stages of
+ * the sequence (0 = start, 3 = finished). At the end this is the canonical
+ * rotation itself, so a quaternion committed at gimbal lock (where the kept
+ * angles no longer reproduce it exactly) is still what gets shown.
+ */
+export function displayedRotation(state: PoseState, progress: number): Mat3 {
+  if (progress >= 3) return activeRotation(state);
+  return rotationAfterStages(state.angles, state.order, state.interpretation, progress);
+}
+
+/** {@link displayedRotation}, re-expressed as `R[ned<-body]` for the whole-chain product. */
+export function displayedRNedBody(state: PoseState, progress: number): Mat3 {
+  return reexpressRotation(state.convention, displayedRotation(state, progress));
 }

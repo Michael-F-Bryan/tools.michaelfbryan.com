@@ -8,6 +8,16 @@ function num(text: string): number {
   return Number(text.trim().replace("−", "-").replace(/ /g, ""));
 }
 
+/** Opens a `<details>` reference panel by the kicker text in its summary, if it is not already open. */
+async function openDisclosure(page: Page, kicker: string | RegExp) {
+  const summary = page.locator("summary", { hasText: kicker }).first();
+  const details = summary.locator("xpath=..");
+  if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await summary.click();
+  }
+  await expect(details).toHaveAttribute("open", "");
+}
+
 async function cellText(page: Page, tableName: RegExp, rowHeader: string, colIndex: number) {
   const table = page.getByRole("table", { name: tableName });
   const row = table.locator("tr", { has: page.locator(`th:text-is("${rowHeader}")`) });
@@ -43,9 +53,16 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByLabel("second angle, degrees")).toHaveValue("20.0");
     await expect(page.getByLabel("third angle, degrees")).toHaveValue("-15.0");
 
+    // The scrubber opens at the end: the body is drawn in its full pose and
+    // no final-pose ghost is needed.
+    await expect(page.locator("#cfv-scrub")).toHaveValue("3");
+    await expect(page.locator("[data-final-ghost]")).toHaveCount(0);
+
+    await openDisclosure(page, "Rotation matrix");
     const r00 = await cellText(page, /Rotation matrix/, "N", 0);
     expect(num(r00)).toBeCloseTo(0.7698, 3);
 
+    await openDisclosure(page, "Point P");
     await expect(page.getByLabel("body x")).toHaveValue("1.791");
   });
 
@@ -70,6 +87,8 @@ test.describe("Coordinate frame visualiser", () => {
 
   test("4. changing yaw changes R and the probe's body coordinates, not the local probe inputs", async ({ page }) => {
     await page.goto(TOOL_URL);
+    await openDisclosure(page, "Rotation matrix");
+    await openDisclosure(page, "Point P");
 
     const localN = page.getByLabel("local N");
     await expect(localN).toHaveValue("1.50");
@@ -87,11 +106,13 @@ test.describe("Coordinate frame visualiser", () => {
 
   test("5. intrinsic to extrinsic with fixed angles changes R and the pin", async ({ page }) => {
     await page.goto(TOOL_URL);
+    await openDisclosure(page, "Rotation matrix");
 
     // R[0][0] happens to coincide between intrinsic and extrinsic for this
     // particular angle triple; R[0][1] (the "E, body y" entry) does not.
     const before = num(await cellText(page, /Rotation matrix/, "N", 1));
 
+    await page.locator("#cfv-scrub").fill("2");
     await expect(page.locator('li[aria-current="step"]')).toContainText("y′");
 
     await page.getByRole("button", { name: "extrinsic" }).click();
@@ -103,6 +124,8 @@ test.describe("Coordinate frame visualiser", () => {
 
   test("6. NED to ENU preserves the physical pose", async ({ page }) => {
     await page.goto(TOOL_URL);
+    await openDisclosure(page, "Rotation matrix");
+    await openDisclosure(page, "Point P");
 
     const bodyBefore = [
       await page.getByLabel("body x").inputValue(),
@@ -133,16 +156,41 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByLabel("body z")).toHaveValue(bodyBefore[2]);
   });
 
-  test("7. scrubbing to stage 2 marks it current with the y′ pin; stage 0 has no current pin", async ({ page }) => {
+  test("7. the scrubber moves the drawn body: start coincides with the local frame, the end is the full pose", async ({
+    page,
+  }) => {
     await page.goto(TOOL_URL);
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+    const readout = page.locator("[data-body-axes-readout]");
+
+    // At the end (the opening state) the body's x axis is the first column of R.
+    await expect(readout).toContainText("+0.770");
+    await expect(scene.locator("[data-final-ghost]")).toHaveCount(0);
+    await expect(scene.locator("[data-pin-stage]")).toHaveCount(0);
 
     const scrub = page.locator("#cfv-scrub");
     await scrub.fill("0");
-    await expect(page.locator('li[aria-current="step"]')).toHaveCount(0);
+    // The start row is the current step; the body axes coincide with the
+    // local frame, so body x reads (+1, 0, 0); the final pose is a ghost.
+    await expect(page.locator('li[aria-current="step"]')).toContainText("start");
+    await expect(readout).toContainText("N +1.000");
+    await expect(readout.getByRole("status")).toContainText("at the start");
+    await expect(scene.locator("[data-final-ghost]")).toHaveCount(2);
+    await expect(scene.locator("[data-pin-stage]")).toHaveCount(0);
 
+    // The pin follows the stage in progress and the numbers follow the body.
     await scrub.fill("2");
     await expect(page.locator('li[aria-current="step"]')).toHaveCount(1);
     await expect(page.locator('li[aria-current="step"]')).toContainText("y′");
+    await expect(scene.locator('[data-pin-stage="2"]')).toHaveCount(1);
+    await expect(readout.getByRole("status")).toContainText("after stage 2 of 3");
+    // After yaw and pitch only, body y is still level: (−sin 35°, cos 35°, 0).
+    await expect(readout).toContainText("E +0.819");
+
+    await scrub.fill("3");
+    // The roll stage tips body y out of the horizontal plane.
+    await expect(readout).not.toContainText("E +0.819");
+    await expect(readout.getByRole("status")).toHaveCount(0);
   });
 
   test("8. gimbal lock at pitch 90 shows the explanation and both pins", async ({ page }) => {
@@ -154,10 +202,20 @@ test.describe("Coordinate frame visualiser", () => {
 
     await expect(page.getByRole("status").filter({ hasText: "Gimbal lock" })).toBeVisible();
     await expect(page.getByText(/are collinear/)).toBeVisible();
+
+    // The status claims both pins are drawn, so both must be drawn, at every scrub position.
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+    await expect(scene.locator('[data-pin-stage="1"]')).toHaveCount(1);
+    await expect(scene.locator('[data-pin-stage="3"]')).toHaveCount(1);
+    await page.locator("#cfv-scrub").fill("0");
+    await expect(scene.locator("[data-pin-stage]")).toHaveCount(2);
+    await expect(scene.getByText("axis 1 = axis 3", { exact: false })).toBeVisible();
   });
 
   test("9. quaternion: non-unit input is normalised, zero input is rejected", async ({ page }) => {
     await page.goto(TOOL_URL);
+    await openDisclosure(page, "Rotation matrix");
+    await openDisclosure(page, "Quaternion");
 
     await page.getByLabel("w", { exact: true }).fill("2");
     await page.getByLabel("x", { exact: true }).fill("0");
@@ -179,6 +237,7 @@ test.describe("Coordinate frame visualiser", () => {
 
   test("10. invert toggles R and copy writes the shown matrix to the clipboard", async ({ page, context, browserName }) => {
     await page.goto(TOOL_URL);
+    await openDisclosure(page, "Rotation matrix");
 
     const before = num(await cellText(page, /Rotation matrix/, "N", 0));
     await page.getByRole("button", { name: /Invert → R\[body←ned\]/ }).click();
@@ -277,12 +336,53 @@ test.describe("Coordinate frame visualiser", () => {
     expect(fontSize).toBeGreaterThanOrEqual(18);
   });
 
-  test("17. opening state's Angles group shows 'yaw' and 'about z'", async ({ page }) => {
+  test("17. opening state's Angles group shows 'yaw' and 'about z', beneath the scene", async ({ page }) => {
     await page.goto(TOOL_URL);
 
     const anglesGroup = page.getByRole("group", { name: "Angles" });
     await expect(anglesGroup.getByText("yaw", { exact: false })).toBeVisible();
     await expect(anglesGroup.getByText("about z", { exact: false })).toBeVisible();
+
+    // The primary controls sit directly under the scene, before the reference panels.
+    const sceneBottom = (await page.locator("[data-scene-stage]").boundingBox())!.y;
+    const anglesTop = (await anglesGroup.boundingBox())!.y;
+    const referenceTop = (await page.locator("summary", { hasText: "Rotation matrix" }).boundingBox())!.y;
+    expect(anglesTop).toBeGreaterThan(sceneBottom);
+    const viewport = page.viewportSize()!;
+    if (viewport.width < 1024) expect(referenceTop).toBeGreaterThan(anglesTop);
+  });
+
+  test("19. point P is a layer: hidden until its disclosure or checkbox turns it on", async ({ page }) => {
+    await page.goto(TOOL_URL);
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+    await expect(scene.locator("[data-probe]")).toHaveCount(0);
+
+    await page.getByLabel("show point P").check();
+    await expect(scene.locator("[data-probe]")).toHaveCount(1);
+    await expect(page.getByLabel("local N")).toBeVisible();
+
+    await page.locator("summary", { hasText: "Point P" }).click();
+    await expect(scene.locator("[data-probe]")).toHaveCount(0);
+    await expect(page.getByLabel("show point P")).not.toBeChecked();
+  });
+
+  test("20. at 390px the scene stays on screen while the angle and scrub sliders are used", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(TOOL_URL);
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+
+    for (const control of [page.getByLabel("third angle, slider"), page.locator("#cfv-scrub")]) {
+      await control.scrollIntoViewIfNeeded();
+      await control.focus();
+      const controlBox = (await control.boundingBox())!;
+      const sceneBox = (await scene.boundingBox())!;
+      expect(controlBox.y).toBeGreaterThanOrEqual(0);
+      expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(844);
+      // The scene is pinned above the control and mostly on screen.
+      expect(sceneBox.y).toBeGreaterThanOrEqual(-8);
+      expect(sceneBox.y + sceneBox.height).toBeLessThanOrEqual(controlBox.y);
+      expect(sceneBox.height).toBeGreaterThan(160);
+    }
   });
 
   test("18. typing 400 into the first angle wraps to 40.0 and the slider matches", async ({ page }) => {
