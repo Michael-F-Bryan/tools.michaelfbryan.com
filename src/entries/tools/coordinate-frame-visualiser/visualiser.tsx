@@ -5,7 +5,8 @@ import { useState } from "react";
 import { ChainRail, type Mode } from "./chain-rail";
 import type { EulerAngles, Geodetic, LocalConvention, Quaternion } from "./math";
 import { ORIENTATION_VIEW, OrientationMode } from "./orientation-mode";
-import { ANCHOR_VIEW, PositionMode } from "./position-mode";
+import { PositionMode } from "./position-mode";
+import { cameraFacingAnchor } from "./position-geometry";
 import type { Camera } from "./projection";
 import {
   displayedRNedBody,
@@ -29,7 +30,7 @@ export function Visualiser() {
   const [showProbe, setShowProbe] = useState(false);
   const [anchor, setAnchor] = useState<Geodetic>(OPENING_ANCHOR);
   const [orientationCamera, setOrientationCamera] = useState<Camera>(ORIENTATION_VIEW);
-  const [positionCamera, setPositionCamera] = useState<Camera>(ANCHOR_VIEW);
+  const [positionCamera, setPositionCamera] = useState<Camera>(() => cameraFacingAnchor(OPENING_ANCHOR));
 
   function handleConventionChange(convention: LocalConvention) {
     setPose((prev) => withConvention(prev, convention));
@@ -81,7 +82,7 @@ export function Visualiser() {
           camera={positionCamera}
           onCameraChange={setPositionCamera}
           onConventionChange={handleConventionChange}
-          onAnchorCommit={setAnchor}
+          onAnchorChange={setAnchor}
         />
       )}
     </div>

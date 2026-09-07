@@ -266,10 +266,11 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByLabel("ECEF Y")).toHaveValue(/4\s*874\s*393/);
     await expect(page.getByLabel("ECEF Z")).toHaveValue(/[-−]3\s*355\s*957/);
 
+    await openDisclosure(page, "Local tangent transform");
     const anchorColumn = await cellText(page, /Homogeneous transform/, "X", 3);
     expect(anchorColumn.replace(/\s/g, "")).toContain("362811");
 
-    const latitude = page.getByLabel("latitude");
+    const latitude = page.getByLabel("latitude", { exact: true });
     await latitude.fill("999");
     await latitude.blur();
     await expect(page.getByRole("alert").filter({ hasText: "Latitude" })).toBeVisible();
@@ -278,7 +279,7 @@ test.describe("Coordinate frame visualiser", () => {
     await latitude.fill("-31.9523");
     await latitude.blur();
 
-    const longitude = page.getByLabel("longitude");
+    const longitude = page.getByLabel("longitude", { exact: true });
     await longitude.fill("10");
     await longitude.blur();
 
@@ -313,8 +314,14 @@ test.describe("Coordinate frame visualiser", () => {
     );
     expect(mobileOverflow).toBe(false);
 
-    const scrollRegion = page.getByRole("group", { name: /matrix, scrollable/ }).first();
+    await openDisclosure(page, "Local tangent transform");
+    const scrollRegion = page.getByRole("group", { name: /T\[ecef←ned\] matrix, scrollable/ });
     await expect(scrollRegion).toHaveAttribute("tabindex", "0");
+    // The cropped edge is faded and the hint beneath the table names the missing column.
+    await expect(scrollRegion.locator("xpath=..").locator("[data-scroll-fade]")).toBeVisible();
+    await expect(page.locator("[data-scroll-hint]", { hasText: "anchor column" })).toBeVisible();
+    await scrollRegion.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+    await expect(page.locator("[data-scroll-hint]", { hasText: "anchor column" })).toHaveCount(0);
   });
 
   test("15. position mode: the anchor is drawn solid (visible hemisphere) at the default camera", async ({ page }) => {
@@ -385,6 +392,101 @@ test.describe("Coordinate frame visualiser", () => {
     }
   });
 
+  test("21. position mode: dragging the anchor across the globe moves it continuously", async ({ page }) => {
+    await page.goto(TOOL_URL);
+    await page.getByRole("button", { name: "Position", exact: true }).click();
+
+    const handle = page.locator("[data-anchor-handle]");
+    await handle.scrollIntoViewIfNeeded();
+    const box = (await handle.boundingBox())!;
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+
+    const latitudeField = page.getByLabel("latitude", { exact: true });
+    const longitudeField = page.getByLabel("longitude", { exact: true });
+    await expect(latitudeField).toHaveValue("-31.9523");
+
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 30, startY - 20, { steps: 5 });
+    // Mid-drag, before release: the fields, the sliders and ECEF already follow.
+    const midLatitude = Number(await latitudeField.inputValue());
+    expect(midLatitude).toBeGreaterThan(-31.9523);
+    await expect(page.getByLabel("ECEF X")).not.toHaveValue(/[-−]2\s*362\s*811/);
+    await page.mouse.move(startX + 60, startY - 40, { steps: 5 });
+    await page.mouse.up();
+
+    const endLatitude = Number(await latitudeField.inputValue());
+    const endLongitude = Number(await longitudeField.inputValue());
+    expect(endLatitude).toBeGreaterThan(midLatitude);
+    expect(endLongitude).toBeGreaterThan(115.8613);
+    expect(Number(await page.getByLabel("latitude, slider").inputValue())).toBeCloseTo(endLatitude, 1);
+
+    // Dragging the anchor did not orbit the camera: the Earth's centre stayed put.
+    const scene = page.getByRole("img", { name: /WGS84 ellipsoid/ });
+    await expect(scene.locator('circle[r="150"]')).toHaveAttribute("cx", "0");
+  });
+
+  test("22. position mode: committed coordinates reframe the camera so the anchor stays legible", async ({ page }) => {
+    await page.goto(TOOL_URL);
+    await page.getByRole("button", { name: "Position", exact: true }).click();
+    const scene = page.getByRole("img", { name: /WGS84 ellipsoid/ });
+    const dot = scene.locator("[data-anchor-handle] circle[r=\"5\"]");
+
+    async function anchorOffset() {
+      const cx = Number(await dot.getAttribute("cx"));
+      const cy = Number(await dot.getAttribute("cy"));
+      return Math.hypot(cx, cy);
+    }
+
+    for (const [latitude, longitude] of [
+      ["0", "0"],
+      ["90", "0"],
+      ["-90", "0"],
+      ["0", "180"],
+      ["0", "-180"],
+      ["-31.9523", "115.8613"],
+    ]) {
+      const latitudeField = page.getByLabel("latitude", { exact: true });
+      await latitudeField.fill(latitude);
+      await latitudeField.blur();
+      const longitudeField = page.getByLabel("longitude", { exact: true });
+      await longitudeField.fill(longitude);
+      await longitudeField.blur();
+
+      // Drawn solid (front hemisphere), inside the middle of the disc, never on the limb.
+      await expect(dot).toHaveClass(/fill-accent/);
+      expect(await anchorOffset()).toBeLessThan(110);
+      for (const name of ["N", "E", "D"]) {
+        const label = scene.locator(`[data-triad-axis="${name}"] text`);
+        const x = Number(await label.getAttribute("x"));
+        const y = Number(await label.getAttribute("y"));
+        expect(Math.abs(x)).toBeLessThanOrEqual(205);
+        expect(Math.abs(y)).toBeLessThanOrEqual(205);
+      }
+    }
+  });
+
+  test("23. at 390px the globe stays on screen while the latitude slider is used", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(TOOL_URL);
+    await page.getByRole("button", { name: "Position", exact: true }).click();
+    const scene = page.getByRole("img", { name: /WGS84 ellipsoid/ });
+
+    const slider = page.getByLabel("latitude, slider");
+    await slider.scrollIntoViewIfNeeded();
+    await slider.focus();
+    await slider.fill("10");
+    await expect(page.getByLabel("latitude", { exact: true })).toHaveValue("10.0000");
+
+    const sliderBox = (await slider.boundingBox())!;
+    const sceneBox = (await scene.boundingBox())!;
+    expect(sliderBox.y + sliderBox.height).toBeLessThanOrEqual(844);
+    expect(sceneBox.y).toBeGreaterThanOrEqual(-8);
+    expect(sceneBox.y + sceneBox.height).toBeLessThanOrEqual(sliderBox.y);
+    expect(sceneBox.height).toBeGreaterThan(160);
+  });
+
   test("18. typing 400 into the first angle wraps to 40.0 and the slider matches", async ({ page }) => {
     await page.goto(TOOL_URL);
 
@@ -410,7 +512,7 @@ test.describe("Coordinate frame visualiser", () => {
     await firstAngle.blur();
 
     await page.getByRole("button", { name: "Position", exact: true }).click();
-    const latitude = page.getByLabel("latitude");
+    const latitude = page.getByLabel("latitude", { exact: true });
     await latitude.fill("12.3456");
     await latitude.blur();
 

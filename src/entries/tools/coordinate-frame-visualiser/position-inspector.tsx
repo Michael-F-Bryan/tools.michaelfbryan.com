@@ -2,77 +2,19 @@ import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-import { formatMetres, formatSigned, parseUserNumber } from "./format";
+import { DISCLOSURE_SUMMARY, READONLY_FIELD, SEGMENT_BUTTON, segmentTone } from "./controls";
+import { formatMetres, formatSigned } from "./format";
 import { type Geodetic, geodeticToEcef, invertTransform, type LocalConvention, transformEcefFromLocal, WGS84_A, WGS84_INV_F } from "./math";
 import { TransformTable } from "./matrix-table";
-import { useSyncedDraft } from "./use-synced-draft";
 
 type PositionInspectorProps = Readonly<{
   anchor: Geodetic;
   convention: LocalConvention;
   onConventionChange: (convention: LocalConvention) => void;
-  onAnchorCommit: (anchor: Geodetic) => void;
 }>;
 
-function GeodeticField({
-  label,
-  hint,
-  value,
-  onCommit,
-  validate,
-}: Readonly<{
-  label: string;
-  hint: string;
-  value: number;
-  onCommit: (value: number) => void;
-  validate: (value: number) => string | null;
-}>) {
-  const [draft, setDraft, resetDraft] = useSyncedDraft(value.toString());
-  const [error, setError] = useState<string | null>(null);
-
-  function commit() {
-    const parsed = parseUserNumber(draft);
-    if (parsed === null) {
-      setError("Enter a number.");
-      resetDraft();
-      return;
-    }
-    const problem = validate(parsed);
-    if (problem) {
-      setError(problem);
-      resetDraft();
-      return;
-    }
-    setError(null);
-    onCommit(parsed);
-  }
-
-  return (
-    <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-sm text-secondary">
-        {label} <small className="font-mono text-xs text-muted">{hint}</small>
-      </span>
-      <span className="flex items-center gap-2">
-        <input
-          type="text"
-          inputMode="decimal"
-          aria-label={label}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") commit();
-          }}
-          className="w-28 border border-rule bg-surface px-2 py-1 text-right font-mono text-sm tabular-nums"
-        />
-      </span>
-      {error ? (
-        <p role="alert" className="col-span-2 text-sm text-error">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
+function Kicker({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">{children}</span>;
 }
 
 function MeridianInset() {
@@ -111,15 +53,14 @@ function MeridianInset() {
   );
 }
 
-export function PositionInspector({ anchor, convention, onConventionChange, onAnchorCommit }: PositionInspectorProps) {
+export function PositionInspector({ anchor, convention, onConventionChange }: PositionInspectorProps) {
   const [inverted, setInverted] = useState(false);
   const ecef = geodeticToEcef(anchor);
   const forward = transformEcefFromLocal(anchor, convention);
   const shown = inverted ? invertTransform(forward) : forward;
+  const local = convention.toUpperCase();
   const localNames = convention === "ned" ? (["N", "E", "D"] as const) : (["E", "N", "U"] as const);
-  const columnHeaders: readonly [string, string, string, string] = inverted
-    ? ["X", "Y", "Z", "origin"]
-    : [...localNames, "anchor"];
+  const columnHeaders: readonly [string, string, string, string] = inverted ? ["X", "Y", "Z", "origin"] : [...localNames, "anchor"];
   const rowHeaders: readonly [string, string, string] = inverted ? localNames : (["X", "Y", "Z"] as const);
   const rows = shown.m.slice(0, 3).map(
     (row) =>
@@ -130,15 +71,16 @@ export function PositionInspector({ anchor, convention, onConventionChange, onAn
         string,
       ],
   );
+  const matrixName = inverted ? `T[${convention}←ecef]` : `T[ecef←${convention}]`;
 
   return (
     <div className="min-w-0">
       <div className="px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Frame</span>
+          <Kicker>Frame</Kicker>
           <span className="font-mono text-xs text-muted">shared with the orientation mode</span>
         </div>
-        <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2">
+        <div className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
           <span className="text-sm text-secondary">Local</span>
           <span className="flex flex-wrap items-center gap-2">
             <span className="inline-flex border border-rule" role="group" aria-label="Local frame convention">
@@ -148,54 +90,20 @@ export function PositionInspector({ anchor, convention, onConventionChange, onAn
                   type="button"
                   aria-pressed={convention === candidate}
                   onClick={() => onConventionChange(candidate)}
-                  className={cn(
-                    "px-2 py-1 text-xs uppercase focus-visible:outline-2 focus-visible:outline-accent",
-                    convention === candidate ? "bg-accent text-paper" : "text-secondary",
-                  )}
+                  className={cn(SEGMENT_BUTTON, "text-xs uppercase", segmentTone(convention === candidate))}
                 >
                   {candidate.toUpperCase()}
                 </button>
               ))}
             </span>
-            <span className="font-mono text-xs text-muted">changes which rows the matrix below has, not where the anchor is</span>
+            <span className="font-mono text-xs text-muted">relabels the triad, not where the anchor is</span>
           </span>
         </div>
       </div>
 
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
+      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6" data-ecef-readout>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Geodetic</span>
-          <span className="font-mono text-xs text-muted">
-            WGS84 · a {formatMetres(WGS84_A)} m · 1/f {WGS84_INV_F.toFixed(6)}
-          </span>
-        </div>
-        <GeodeticField
-          label="latitude"
-          hint="φ · negative is south"
-          value={anchor.latitudeDeg}
-          onCommit={(latitudeDeg) => onAnchorCommit({ ...anchor, latitudeDeg })}
-          validate={(v) => (Math.abs(v) > 90 ? "Latitude must be between −90° and 90°." : null)}
-        />
-        <GeodeticField
-          label="longitude"
-          hint="λ · negative is west"
-          value={anchor.longitudeDeg}
-          onCommit={(longitudeDeg) => onAnchorCommit({ ...anchor, longitudeDeg })}
-          validate={(v) => (Math.abs(v) > 180 ? "Longitude must be between −180° and 180°." : null)}
-        />
-        <GeodeticField
-          label="height"
-          hint="h · above the ellipsoid, not sea level"
-          value={anchor.heightM}
-          onCommit={(heightM) => onAnchorCommit({ ...anchor, heightM })}
-          validate={() => null}
-        />
-        <MeridianInset />
-      </div>
-
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">ECEF</span>
+          <Kicker>Anchor in ECEF</Kicker>
           <span className="border border-accent px-2 py-0.5 font-mono text-xs uppercase tracking-label text-accent">
             a function, not a matrix
           </span>
@@ -205,51 +113,85 @@ export function PositionInspector({ anchor, convention, onConventionChange, onAn
             <span key={label} className="contents">
               <span className="text-sm text-secondary">{label}</span>
               <span className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  aria-label={`ECEF ${label}`}
-                  value={formatMetres([ecef.x, ecef.y, ecef.z][index])}
-                  className="w-32 border border-rule-subtle bg-panel px-2 py-1 text-right font-mono text-sm tabular-nums text-secondary"
-                />
+                <input type="text" readOnly aria-label={`ECEF ${label}`} value={formatMetres([ecef.x, ecef.y, ecef.z][index])} className={cn(READONLY_FIELD, "w-32")} />
                 <span className="font-mono text-xs text-muted">m</span>
               </span>
             </span>
           ))}
         </div>
-        <pre className="mt-3 whitespace-pre-wrap font-mono text-sm leading-6 text-secondary">
-          {"X = (Rₙ + h) cos φ cos λ\nY = (Rₙ + h) cos φ sin λ\nZ = (Rₙ(1 − e²) + h) sin φ\nRₙ(φ) = a / √(1 − e² sin² φ)"}
-        </pre>
-        <p className="mt-2 max-w-[38rem] text-sm text-muted">
-          φ and λ appear inside sines and cosines and under a square root. There is no 3×3 or 4×4 that turns (φ, λ,
-          h) into (X, Y, Z). Going the other way is iterative.
+        <p className="mt-3 max-w-[38rem] text-sm text-muted">
+          Where the anchor is, measured from the Earth&rsquo;s centre. φ and λ are angles, so (φ, λ, h) passes through
+          sines, cosines and a square root to get here; no matrix does that step.
         </p>
       </div>
 
-      <div className="border-t border-rule-subtle px-4 py-4 sm:px-6">
-        <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Local tangent</span>
-        <div className="mt-3">
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Geodetic → ECEF</Kicker>
+          <span className="text-sm text-muted">the closed-form WGS84 formula</span>
+        </summary>
+        <div className="mt-2 pb-2">
+          <span className="font-mono text-xs text-muted">
+            WGS84 · a {formatMetres(WGS84_A)} m · 1/f {WGS84_INV_F.toFixed(6)}
+          </span>
+          <pre className="mt-3 whitespace-pre-wrap font-mono text-sm leading-6 text-secondary">
+            {"X = (Rₙ + h) cos φ cos λ\nY = (Rₙ + h) cos φ sin λ\nZ = (Rₙ(1 − e²) + h) sin φ\nRₙ(φ) = a / √(1 − e² sin² φ)"}
+          </pre>
+          <p className="mt-2 max-w-[38rem] text-sm text-muted">
+            There is no 3×3 or 4×4 that turns (φ, λ, h) into (X, Y, Z). Going the other way is iterative.
+          </p>
+          <MeridianInset />
+        </div>
+      </details>
+
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Local tangent transform</Kicker>
+          <span className="text-sm text-muted">{matrixName} · 4×4 · invert and copy</span>
+        </summary>
+        <div className="mt-2 pb-2">
           <TransformTable
-            name={inverted ? `T[${convention}←ecef]` : `T[ecef←${convention}]`}
-            takes={inverted ? "ECEF coordinates" : `${convention.toUpperCase()} coordinates measured at the anchor, with a fourth coordinate of 1`}
-            gives={inverted ? `${convention.toUpperCase()} coordinates` : "ECEF coordinates"}
+            name={matrixName}
+            takes={inverted ? "ECEF coordinates" : `${local} coordinates measured at the anchor, with a fourth coordinate of 1`}
+            gives={inverted ? `${local} coordinates` : "ECEF coordinates"}
             columnHeaders={columnHeaders}
             rowHeaders={rowHeaders}
             rows={rows}
             ariaLabel="Homogeneous transform between ECEF and the local tangent frame"
+            translationLabel={inverted ? "origin" : "anchor"}
             onInvert={() => setInverted((v) => !v)}
             invertLabel={inverted ? `Invert → T[ecef←${convention}]` : `Invert → T[${convention}←ecef]`}
             invertNote={inverted ? "rotation transposed, last column becomes −Rᵀ·p" : "rotation transposed, last column becomes −Rᵀ·p_anchor"}
-            copyText={`T[${inverted ? `${convention}←ecef` : `ecef←${convention}`}]\n${shown.m
-              .map((row) => row.map((v) => formatSigned(v, 4)).join("  "))
-              .join("\n")}`}
+            copyText={`${matrixName}\n${shown.m.map((row) => row.map((v) => formatSigned(v, 4)).join("  ")).join("\n")}`}
           />
+          <p className="mt-2 max-w-[38rem] text-sm text-muted">
+            The tinted block is the rotation: its columns are the local frame&rsquo;s basis vectors written in ECEF,
+            and they depend only on φ and λ. The last column is the anchor&rsquo;s ECEF position above.
+          </p>
         </div>
-        <p className="mt-2 max-w-[38rem] text-sm text-muted">
-          The tinted block is the rotation: its columns are the local frame&rsquo;s basis vectors written in ECEF,
-          and they depend only on φ and λ. The last column is the anchor&rsquo;s ECEF position above.
-        </p>
-      </div>
+      </details>
+
+      <details className="border-t border-rule-subtle px-4 py-2 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
+          <Kicker>Hops</Kicker>
+          <span className="text-sm text-muted">two kinds of step; only the second is a matrix</span>
+        </summary>
+        <ol className="mt-2 border-t border-rule-subtle pb-2" aria-label="Hops">
+          <li className="border-b border-rule-subtle py-2 text-sm">
+            <span className="font-mono text-xs font-bold text-muted">01</span>{" "}
+            <strong>geodetic → ECEF</strong> <span className="text-muted">· a closed-form function of φ, λ, h and the WGS84 constants</span>
+          </li>
+          <li aria-current="step" className="border-b border-rule-subtle bg-accent/10 py-2 text-sm">
+            <span className="font-mono text-xs font-bold text-accent">02</span>{" "}
+            <strong>ECEF ↔ local {local}</strong>{" "}
+            <span className="text-ink">· a 4×4 whose rotation depends only on φ and λ, and whose last column is the anchor&rsquo;s ECEF position</span>
+          </li>
+          <li className="border-b border-rule-subtle py-2 text-sm">
+            <span className="font-mono text-xs font-bold text-muted">03</span>{" "}
+            <strong>local {local} ↔ body</strong> <span className="text-muted">· the orientation mode</span>
+          </li>
+        </ol>
+      </details>
     </div>
   );
 }

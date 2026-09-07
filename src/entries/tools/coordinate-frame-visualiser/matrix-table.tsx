@@ -1,41 +1,71 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type ScrollHintState = "hidden" | "visible";
+import { cn } from "@/lib/utils";
+
+import { LINK_BUTTON } from "./controls";
+
+type Overflow = Readonly<{ canScroll: boolean; atEnd: boolean }>;
 
 /**
  * Wraps a wide table in a horizontally scrollable region with an explicit,
  * accessible affordance (rather than a silent crop) for narrow viewports:
- * a focusable, named scroll region plus a "scroll -->" hint that disappears
- * once the region has actually been scrolled.
+ * a focusable, named scroll region, a fade along the cropped edge, and a
+ * hint beneath the table naming what is out of view. Both disappear once
+ * the region is scrolled to the end or is wide enough not to scroll.
  */
 export function ScrollableMatrix({
   ariaLabel,
+  hint = "scroll for the rest",
   children,
-}: Readonly<{ ariaLabel: string; children: React.ReactNode }>) {
-  const [hint, setHint] = useState<ScrollHintState>("visible");
+}: Readonly<{ ariaLabel: string; hint?: string; children: React.ReactNode }>) {
   const ref = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState<Overflow>({ canScroll: false, atEnd: true });
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () =>
+      setOverflow({
+        canScroll: element.scrollWidth > element.clientWidth + 1,
+        atEnd: element.scrollLeft + element.clientWidth >= element.scrollWidth - 1,
+      });
+    // Measured after layout (and again on resize, including a parent
+    // `<details>` opening, which is a size change from zero).
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    element.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", measure);
+    };
+  }, []);
+
+  const cropped = overflow.canScroll && !overflow.atEnd;
 
   return (
-    <div className="relative">
-      <div
-        ref={ref}
-        tabIndex={0}
-        role="group"
-        aria-label={ariaLabel}
-        className="focus-visible:outline-2 focus-visible:outline-accent overflow-x-auto"
-        onScroll={(event) => {
-          if (event.currentTarget.scrollLeft > 4) setHint("hidden");
-        }}
-      >
-        {children}
-      </div>
-      {hint === "visible" ? (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute right-0 top-0 bg-surface pl-2 font-mono text-xs text-muted sm:hidden"
-          data-scroll-hint
+    <div>
+      <div className="relative">
+        <div
+          ref={ref}
+          tabIndex={0}
+          role="group"
+          aria-label={ariaLabel}
+          className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent"
         >
-          scroll →
+          {children}
+        </div>
+        {cropped ? (
+          <span
+            aria-hidden="true"
+            data-scroll-fade
+            className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-surface to-transparent"
+          />
+        ) : null}
+      </div>
+      {cropped ? (
+        <span aria-hidden="true" data-scroll-hint className="mt-1 block font-mono text-xs text-muted">
+          {hint} →
         </span>
       ) : null}
     </div>
@@ -62,11 +92,7 @@ export function MatrixCopyButton({ getText, label = "Copy" }: CopyButtonProps) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="font-mono text-sm text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-accent"
-      >
+      <button type="button" onClick={handleCopy} className={cn(LINK_BUTTON, "font-mono text-sm text-accent")}>
         {label}
       </button>
       <span role="status" aria-live="polite" className="sr-only">
@@ -141,11 +167,7 @@ export function RotationTable({
         </tbody>
       </table>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-        <button
-          type="button"
-          onClick={onInvert}
-          className="font-mono text-sm text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-accent"
-        >
+        <button type="button" onClick={onInvert} className={cn(LINK_BUTTON, "font-mono text-sm text-accent")}>
           {invertLabel}
         </button>
         <span className="text-sm text-muted">the inverse of a rotation is its transpose</span>
@@ -164,6 +186,8 @@ type TransformTableProps = Readonly<{
   /** 3 rows x 4 columns: the rotation block (first 3 columns, tinted) plus the translation column. */
   rows: readonly (readonly [string, string, string, string])[];
   ariaLabel: string;
+  /** What the fourth column holds ("anchor", "origin"), named in the narrow-screen scroll hint. */
+  translationLabel?: string;
   onInvert?: () => void;
   invertLabel?: string;
   invertNote?: string;
@@ -179,6 +203,7 @@ export function TransformTable({
   rowHeaders,
   rows,
   ariaLabel,
+  translationLabel = "translation",
   onInvert,
   invertLabel,
   invertNote,
@@ -190,7 +215,7 @@ export function TransformTable({
       <span className="mt-1 block text-sm text-secondary">
         <strong className="text-ink">Takes</strong> {takes} · <strong className="text-ink">gives</strong> {gives}.
       </span>
-      <ScrollableMatrix ariaLabel={`${name} matrix, scrollable`}>
+      <ScrollableMatrix ariaLabel={`${name} matrix, scrollable`} hint={`scroll for the ${translationLabel} column`}>
         <table
           aria-label={ariaLabel}
           className="mt-3 border-l-2 border-r-2 border-ink font-mono text-sm tabular-nums"
@@ -237,11 +262,7 @@ export function TransformTable({
       </ScrollableMatrix>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         {onInvert && invertLabel ? (
-          <button
-            type="button"
-            onClick={onInvert}
-            className="font-mono text-sm text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-accent"
-          >
+          <button type="button" onClick={onInvert} className={cn(LINK_BUTTON, "font-mono text-sm text-accent")}>
             {invertLabel}
           </button>
         ) : null}

@@ -94,6 +94,28 @@ export function project(camera: Camera, point: ScenePoint): Projected {
   };
 }
 
+export type Ray = Readonly<{
+  /** A point on the ray: where the screen point sits on the view plane through the scene origin. */
+  origin: ScenePoint;
+  /** Unit direction of travel, away from the camera into the scene. */
+  direction: ScenePoint;
+}>;
+
+/**
+ * The inverse of {@link project} for a screen point: the orthographic view
+ * ray that projects onto `(x, y)`, for picking scene geometry under the
+ * pointer. Screen `y` grows downwards, as in `project`.
+ */
+export function viewRay(camera: Camera, x: number, y: number): Ray {
+  const { dir, right, up } = cameraBasis(camera);
+  const sx = x / camera.scale;
+  const sy = -y / camera.scale;
+  return {
+    origin: [right[0] * sx + up[0] * sy, right[1] * sx + up[1] * sy, right[2] * sx + up[2] * sy],
+    direction: [-dir[0], -dir[1], -dir[2]],
+  };
+}
+
 /** Orbits the camera by a pointer-drag delta. Azimuth accumulates freely; elevation is clamped. */
 export function orbitCamera(camera: Camera, deltaAzimuthDeg: number, deltaElevationDeg: number): Camera {
   return {

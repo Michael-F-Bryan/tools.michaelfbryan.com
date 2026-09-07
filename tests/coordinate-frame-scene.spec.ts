@@ -2,7 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import { applyToPoint, eulerToRotation, geodeticToEcef, type Geodetic } from "../src/entries/tools/coordinate-frame-visualiser/math";
 import { wholeChain } from "../src/entries/tools/coordinate-frame-visualiser/pose";
-import { anchorScenePoint, localTriadTips } from "../src/entries/tools/coordinate-frame-visualiser/position-geometry";
+import {
+  anchorFacing,
+  anchorScenePoint,
+  cameraFacingAnchor,
+  localTriadTips,
+  pickOnEllipsoid,
+  POSITION_SCALE,
+} from "../src/entries/tools/coordinate-frame-visualiser/position-geometry";
 import {
   clampElevation,
   MAX_ELEVATION_DEG,
@@ -146,6 +153,57 @@ test.describe("localTriadTips", () => {
     const originDistanceAnchor = Math.hypot(anchorPoint[0], anchorPoint[1], anchorPoint[2]);
     const originDistanceD = Math.hypot(dTip[0], dTip[1], dTip[2]);
     expect(originDistanceD).toBeLessThan(originDistanceAnchor);
+  });
+});
+
+test.describe("cameraFacingAnchor", () => {
+  test("puts the anchor squarely in front of the camera, at the centre of the scene", () => {
+    for (const anchor of [
+      { latitudeDeg: -31.9523, longitudeDeg: 115.8613, heightM: 24 },
+      { latitudeDeg: 0, longitudeDeg: 0, heightM: 0 },
+      { latitudeDeg: 0, longitudeDeg: 180, heightM: 0 },
+      { latitudeDeg: 60, longitudeDeg: -120, heightM: 0 },
+    ] satisfies Geodetic[]) {
+      const camera = cameraFacingAnchor(anchor);
+      expect(anchorFacing(camera, anchor)).toBeGreaterThan(0.99);
+      const projected = project(camera, anchorScenePoint(anchor));
+      expect(Math.hypot(projected.x, projected.y)).toBeLessThan(2);
+    }
+  });
+
+  test("at a pole the camera's elevation is clamped but the anchor is still in view", () => {
+    const pole: Geodetic = { latitudeDeg: 90, longitudeDeg: 0, heightM: 0 };
+    expect(anchorFacing(cameraFacingAnchor(pole), pole)).toBeGreaterThan(0.99);
+  });
+});
+
+test.describe("pickOnEllipsoid", () => {
+  const anchor: Geodetic = { latitudeDeg: -31.9523, longitudeDeg: 115.8613, heightM: 24 };
+
+  test("picking where the anchor projects returns the anchor's latitude and longitude", () => {
+    for (const camera of [cameraFacingAnchor(anchor), { azimuthDeg: 90, elevationDeg: -10, scale: POSITION_SCALE }]) {
+      const projected = project(camera, anchorScenePoint(anchor));
+      expect(projected.depth).toBeGreaterThan(0);
+      const picked = pickOnEllipsoid(camera, projected.x, projected.y);
+      expect(picked).not.toBeNull();
+      expect(picked!.latitudeDeg).toBeCloseTo(anchor.latitudeDeg, 5);
+      expect(picked!.longitudeDeg).toBeCloseTo(anchor.longitudeDeg, 5);
+    }
+  });
+
+  test("uses geodetic latitude: the equator and the poles pick exactly", () => {
+    const camera: Camera = { azimuthDeg: 0, elevationDeg: 0, scale: POSITION_SCALE };
+    const equator = pickOnEllipsoid(camera, 0, 0);
+    expect(equator!.latitudeDeg).toBeCloseTo(0, 9);
+    expect(equator!.longitudeDeg).toBeCloseTo(0, 9);
+    // A screen point just inside the top of the (flattened) ellipsoid outline.
+    const nearPole = pickOnEllipsoid(camera, 0, -POSITION_SCALE * 0.9966 + 0.01);
+    expect(nearPole!.latitudeDeg).toBeGreaterThan(85);
+  });
+
+  test("returns null off the Earth", () => {
+    const camera: Camera = { azimuthDeg: 30, elevationDeg: 20, scale: POSITION_SCALE };
+    expect(pickOnEllipsoid(camera, POSITION_SCALE * 1.5, 0)).toBeNull();
   });
 });
 
