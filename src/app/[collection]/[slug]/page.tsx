@@ -42,19 +42,21 @@ export default async function EntryPage({ params }: EntryPageProps) {
   const isWorkspace = entry.layout === "workspace";
 
   return (
-    <main className="py-12 sm:py-16">
+    // A workspace's introduction is kept short so the interactive surface
+    // starts within the first screen, on phones included.
+    <main className={isWorkspace ? "py-8 sm:py-10" : "py-12 sm:py-16"}>
       <Container>
         <div
           className={
             isWorkspace
-              ? "grid items-start gap-10"
+              ? "grid items-start gap-6"
               : "grid items-start gap-10 lg:grid-cols-[minmax(0,52rem)_14rem] lg:gap-16"
           }
         >
           <header className="max-w-article lg:col-start-1 lg:row-start-1">
             <Label tone="muted">{entry.kind}</Label>
-            <PageTitle className="mt-5">{entry.title}</PageTitle>
-            <Prose size="xl" className="mt-7">
+            <PageTitle className={isWorkspace ? "mt-3 text-3xl sm:text-5xl" : "mt-5"}>{entry.title}</PageTitle>
+            <Prose size={isWorkspace ? "base" : "xl"} className={isWorkspace ? "mt-3" : "mt-7"}>
               <p>{entry.description}</p>
             </Prose>
           </header>

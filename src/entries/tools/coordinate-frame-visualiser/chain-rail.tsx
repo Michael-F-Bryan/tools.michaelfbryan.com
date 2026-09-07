@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 
+import { DISCLOSURE_SUMMARY, SEGMENT_BUTTON, segmentTone } from "./controls";
 import { formatMetres, formatSigned } from "./format";
 import { type Geodetic, type LocalConvention, type Mat3, type Vec3 } from "./math";
 import { ScrollableMatrix } from "./matrix-table";
@@ -37,28 +38,38 @@ function MatrixLines({ m }: Readonly<{ m: readonly (readonly number[])[] }>) {
   );
 }
 
-/** A compact "→" shown only at narrow widths, standing in for the full link name that's hidden there. */
-function MobileLinkArrow() {
+/** A frame name in the chain map. */
+function FrameName({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <li className="whitespace-nowrap font-mono text-sm font-bold text-ink">{children}</li>;
+}
+
+/** A hop between two frames: the step that a mode explores is drawn in cobalt. */
+function Hop({ active, children }: Readonly<{ active: boolean; children: React.ReactNode }>) {
   return (
-    <span aria-hidden="true" className="sm:hidden">
-      →
-    </span>
+    <li
+      aria-current={active ? "true" : undefined}
+      className={cn(
+        "whitespace-nowrap border-b-2 px-1 font-mono text-xs",
+        active ? "border-accent font-bold text-accent" : "border-transparent text-muted",
+      )}
+    >
+      {children}
+    </li>
   );
 }
 
+/**
+ * The chain of frames from geodetic to body, as a map of where each mode
+ * sits. The two mode buttons are the only controls; the map itself just
+ * shows which hops the current mode is about.
+ */
 export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, originNed }: ChainRailProps) {
   const localLabel = convention === "ned" ? "local NED" : "local ENU";
-  const bodyLinkName = convention === "ned" ? "T[ned←body]" : "T[enu←body]";
-
   const { ecefFromBody, bodyFromEcef } = wholeChain(anchor, convention, rNedBody, originNed);
 
   return (
     <nav aria-label="Transform chain" className="border-b border-rule">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-4 pt-3 sm:px-6">
-        <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Chain</span>
-        <p className="text-sm text-muted">
-          Left to right is nesting. The direction a matrix maps is printed on the matrix, not here.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
         <div className="inline-flex border border-rule" role="group" aria-label="Mode">
           {(["orientation", "position"] as const).map((candidate) => (
             <button
@@ -66,95 +77,34 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
               type="button"
               aria-pressed={mode === candidate}
               onClick={() => onModeChange(candidate)}
-              className={cn(
-                "px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-accent",
-                mode === candidate ? "bg-accent text-paper" : "text-secondary",
-              )}
+              className={cn(SEGMENT_BUTTON, "px-4", segmentTone(mode === candidate))}
             >
               {candidate === "orientation" ? "Orientation" : "Position"}
             </button>
           ))}
         </div>
+        <ol aria-label="Frames" className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <FrameName>geodetic</FrameName>
+          <Hop active={mode === "position"}>f(φ, λ, h) →</Hop>
+          <FrameName>ECEF</FrameName>
+          <Hop active={mode === "position"}>T[ecef←{convention}] ↔</Hop>
+          <FrameName>{localLabel}</FrameName>
+          <Hop active={mode === "orientation"}>T[{convention}←body] ↔</Hop>
+          <FrameName>body</FrameName>
+        </ol>
       </div>
 
-      <ol aria-label="Frames" className="flex items-center gap-1 overflow-x-auto px-4 py-3 sm:px-6">
-        <li>
-          <button
-            type="button"
-            aria-pressed={mode === "position"}
-            onClick={() => onModeChange("position")}
-            className={cn(
-              "whitespace-nowrap border-b-2 pb-0.5 font-mono text-sm font-bold focus-visible:outline-2 focus-visible:outline-accent",
-              mode === "position" ? "border-accent text-accent" : "border-transparent text-ink",
-            )}
-          >
-            geodetic
-          </button>
-        </li>
-        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "position" ? "text-accent" : "text-muted")}>
-          <span className="hidden sm:inline">f(φ, λ, h) →</span>
-          <MobileLinkArrow />
-        </li>
-        <li>
-          <button
-            type="button"
-            aria-pressed={mode === "position"}
-            onClick={() => onModeChange("position")}
-            className={cn(
-              "whitespace-nowrap border-b-2 pb-0.5 font-mono text-sm font-bold focus-visible:outline-2 focus-visible:outline-accent",
-              mode === "position" ? "border-accent text-accent" : "border-transparent text-ink",
-            )}
-          >
-            ECEF
-          </button>
-        </li>
-        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "position" ? "text-accent" : "text-muted")}>
-          <span className="hidden sm:inline">T[ecef←{convention}] ↔</span>
-          <MobileLinkArrow />
-        </li>
-        <li>
-          <button
-            type="button"
-            aria-pressed={mode === "orientation"}
-            onClick={() => onModeChange("orientation")}
-            className={cn(
-              "whitespace-nowrap border-b-2 pb-0.5 font-mono text-sm font-bold focus-visible:outline-2 focus-visible:outline-accent",
-              mode === "orientation" ? "border-accent text-accent" : "border-transparent text-ink",
-            )}
-          >
-            {localLabel}
-          </button>
-        </li>
-        <li className={cn("mx-1 font-mono text-xs sm:mx-2", mode === "orientation" ? "text-accent" : "text-muted")}>
-          <span className="hidden sm:inline">{bodyLinkName} ↔</span>
-          <MobileLinkArrow />
-        </li>
-        <li>
-          <button
-            type="button"
-            aria-pressed={mode === "orientation"}
-            onClick={() => onModeChange("orientation")}
-            className={cn(
-              "whitespace-nowrap border-b-2 pb-0.5 font-mono text-sm font-bold focus-visible:outline-2 focus-visible:outline-accent",
-              mode === "orientation" ? "border-accent text-accent" : "border-transparent text-ink",
-            )}
-          >
-            body
-          </button>
-        </li>
-      </ol>
-
-      <details className="border-t border-rule-subtle">
-        <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 sm:px-6">
+      <details className="border-t border-rule-subtle px-4 py-1 sm:px-6">
+        <summary className={DISCLOSURE_SUMMARY}>
           <span className="font-mono text-xs font-bold uppercase tracking-label text-accent">Whole chain</span>
           <span className="text-sm text-muted">
-            One product from body to ECEF: T[ecef←body] = T[ecef←{convention}] · T[{convention}←body].
+            one product from body to ECEF: T[ecef←body] = T[ecef←{convention}] · T[{convention}←body]
           </span>
         </summary>
-        <div className="space-y-4 px-4 pb-4 sm:px-6">
+        <div className="space-y-4 pb-4">
           <div>
             <span className="block font-mono text-sm font-bold text-ink">T[ecef←body]</span>
-            <ScrollableMatrix ariaLabel="T[ecef←body] matrix, scrollable">
+            <ScrollableMatrix ariaLabel="T[ecef←body] matrix, scrollable" hint="scroll for the translation column">
               <MatrixLines m={ecefFromBody.m} />
             </ScrollableMatrix>
           </div>
@@ -162,7 +112,7 @@ export function ChainRail({ mode, onModeChange, convention, anchor, rNedBody, or
             <span className="block font-mono text-sm font-bold text-ink">
               T[body←ecef] — factors inverted, order reversed
             </span>
-            <ScrollableMatrix ariaLabel="T[body←ecef] matrix, scrollable">
+            <ScrollableMatrix ariaLabel="T[body←ecef] matrix, scrollable" hint="scroll for the translation column">
               <MatrixLines m={bodyFromEcef.m} />
             </ScrollableMatrix>
           </div>

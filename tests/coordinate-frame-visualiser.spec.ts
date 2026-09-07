@@ -66,21 +66,28 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByLabel("body x")).toHaveValue("1.791");
   });
 
-  test("3. mode switching leaves exactly one mode section visible", async ({ page }) => {
+  test("3. mode switching leaves exactly one mode section visible; the chain map marks the mode's hops", async ({
+    page,
+  }) => {
     await page.goto(TOOL_URL);
+    const chain = page.getByRole("navigation", { name: "Transform chain" });
+    const frames = chain.getByRole("list", { name: "Frames" });
 
     await expect(page.locator("[data-mode-section]")).toHaveCount(1);
     await expect(page.getByRole("region", { name: "Orientation" })).toBeVisible();
+    // The map is not a second set of controls: only the two mode buttons are interactive.
+    await expect(frames.getByRole("button")).toHaveCount(0);
+    await expect(frames.locator('[aria-current="true"]')).toHaveCount(1);
+    await expect(frames.locator('[aria-current="true"]')).toContainText("T[ned←body]");
 
     await page.getByRole("button", { name: "Position", exact: true }).click();
     await expect(page.locator("[data-mode-section]")).toHaveCount(1);
     await expect(page.getByRole("region", { name: "Position" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Orientation" })).toHaveCount(0);
+    await expect(frames.locator('[aria-current="true"]')).toHaveCount(2);
+    await expect(frames.locator('[aria-current="true"]').first()).toContainText("f(φ, λ, h)");
 
-    await page.getByRole("button", { name: "geodetic" }).click();
-    await expect(page.getByRole("region", { name: "Position" })).toBeVisible();
-
-    await page.getByRole("button", { name: "body" }).click();
+    await page.getByRole("button", { name: "Orientation", exact: true }).click();
     await expect(page.locator("[data-mode-section]")).toHaveCount(1);
     await expect(page.getByRole("region", { name: "Orientation" })).toBeVisible();
   });
@@ -485,6 +492,55 @@ test.describe("Coordinate frame visualiser", () => {
     expect(sceneBox.y).toBeGreaterThanOrEqual(-8);
     expect(sceneBox.y + sceneBox.height).toBeLessThanOrEqual(sliderBox.y);
     expect(sceneBox.height).toBeGreaterThan(160);
+  });
+
+  test("24. at 390px a fresh visitor reaches the scene and a control without scrolling past prose", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(TOOL_URL);
+
+    const scene = page.getByRole("img", { name: /Orthographic scene/ });
+    const sceneBox = (await scene.boundingBox())!;
+    // The scene starts within the first screen, with room to see most of it.
+    expect(sceneBox.y).toBeLessThan(844 - 200);
+
+    // Nothing in the chain rail overflows its row at 320 px either.
+    await page.setViewportSize({ width: 320, height: 900 });
+    const frames = page.getByRole("list", { name: "Frames" });
+    const overflowing = await frames.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(overflowing).toBe(false);
+  });
+
+  test("25. at 390px the primary controls have comfortable touch targets", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(TOOL_URL);
+
+    const targets = [
+      page.getByRole("button", { name: "Position", exact: true }),
+      page.getByRole("button", { name: "ENU", exact: true }),
+      page.getByRole("button", { name: "extrinsic" }),
+      page.getByRole("button", { name: "above", exact: true }),
+      page.getByLabel("first angle, slider"),
+      page.getByLabel("first angle, degrees"),
+      page.locator("#cfv-scrub"),
+      page.getByRole("combobox", { name: "Rotation order" }),
+      page.locator("summary", { hasText: "Rotation matrix" }),
+    ];
+    for (const target of targets) {
+      await target.scrollIntoViewIfNeeded();
+      const box = (await target.boundingBox())!;
+      expect(box.height, `height of ${await target.evaluate((el) => el.outerHTML.slice(0, 60))}`).toBeGreaterThanOrEqual(44);
+    }
+
+    // Adjacent segmented buttons do not overlap.
+    const ned = (await page.getByRole("button", { name: "NED", exact: true }).boundingBox())!;
+    const enu = (await page.getByRole("button", { name: "ENU", exact: true }).boundingBox())!;
+    expect(enu.x).toBeGreaterThanOrEqual(ned.x + ned.width - 1);
+
+    // Keyboard focus stays visible on the primary slider.
+    const scrub = page.locator("#cfv-scrub");
+    await scrub.focus();
+    const outline = await scrub.evaluate((el) => getComputedStyle(el).outlineStyle);
+    expect(outline).not.toBe("none");
   });
 
   test("18. typing 400 into the first angle wraps to 40.0 and the slider matches", async ({ page }) => {
