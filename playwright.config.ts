@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+
+/** Specs that test pure modules and need no browser or server. */
+const unitSpecs = /(coordinate-frame-(math|scene)|one-mark-at-a-time-schedule)\.spec\.ts$/;
 const baseURL = externalBaseUrl ?? "http://localhost:3107";
 
 export default defineConfig({
@@ -16,12 +19,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testIgnore: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testIgnore: unitSpecs,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chromium",
-      testIgnore: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testIgnore: unitSpecs,
       use: { ...devices["Pixel 7"] },
     },
     {
@@ -30,7 +33,7 @@ export default defineConfig({
       // TypeScript unit tests. Accepted so the math tests stay inside the
       // existing `pnpm test:e2e` gate instead of a second test runner.
       name: "unit",
-      testMatch: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testMatch: unitSpecs,
     },
   ],
   webServer: externalBaseUrl

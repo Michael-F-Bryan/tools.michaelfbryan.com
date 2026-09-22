@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const description =
   "Every shared explainer component on one page, so I can compare them without hunting through old entries.";
 
-test("the catalogue lists the component kitchen sink and the coordinate-frame visualiser", async ({
+test("the catalogue lists every discovered entry and opens one", async ({
   page,
 }) => {
   await page.goto("/");
@@ -16,7 +16,7 @@ test("the catalogue lists the component kitchen sink and the coordinate-frame vi
   const catalogueEntries = page
     .getByRole("region", { name: "Catalogue" })
     .getByRole("listitem");
-  await expect(catalogueEntries).toHaveCount(2);
+  await expect(catalogueEntries).toHaveCount(3);
 
   const tool = page.getByRole("link", {
     name: /Coordinate frame visualiser/,
