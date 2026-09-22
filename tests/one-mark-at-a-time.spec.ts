@@ -18,11 +18,10 @@ const marksOf = (page: Page) => page.locator("[data-mark]");
 const liveRegionOf = (page: Page) => page.locator('[aria-live="polite"]');
 /** The notice written on the paper, as opposed to its screen-reader twin. */
 const freshPaperOf = (page: Page) =>
-  page.locator("p:not([aria-live])", {
-    hasText: "Fresh paper. Start again whenever you like.",
-  });
-const stageOf = (page: Page) => page.getByRole("img", { name: /ink drawing/ });
-const surfaceOf = (page: Page) => page.getByRole("button", { name: /draw/i });
+  page.locator("p:not([aria-live])", { hasText: "Starting again on fresh paper." });
+/** Found by structure, so the accessible name is free to be asserted on. */
+const stageOf = (page: Page) => page.locator('svg[role="img"]');
+const surfaceOf = (page: Page) => page.getByRole("button", { name: /to draw$/ });
 const restartOf = (page: Page) => page.getByRole("button", { name: "Draw another" });
 
 /**
@@ -50,9 +49,9 @@ async function tap(page: Page) {
 async function draw(page: Page, count: number, how: (page: Page) => Promise<void> = pressSpace) {
   const drawn = await marksOf(page).count();
   for (let index = 1; index <= count; index += 1) {
+    await page.waitForTimeout(PACE_MS);
     await how(page);
     await expect(marksOf(page)).toHaveCount(drawn + index);
-    await page.waitForTimeout(PACE_MS);
   }
 }
 
@@ -102,6 +101,10 @@ test.describe("One mark at a time", () => {
     await expect(surfaceOf(page)).toBeVisible();
     // Focus is not taken from the visitor: Space works regardless.
     await expect(page.locator("body")).toBeFocused();
+    // Blank paper says so: a non-visual visitor gets confirmation that their
+    // first press did something, without being handed a count of marks.
+    await expect(stageOf(page)).toHaveAttribute("aria-label", "Blank paper");
+    await pressSpace(page);
     await expect(stageOf(page)).toHaveAttribute("aria-label", "An unfinished ink drawing");
   });
 
@@ -256,13 +259,18 @@ test.describe("One mark at a time", () => {
       "aria-label",
       "A finished ink drawing of a bicycle",
     );
-    await expect(page.getByText("That’s the drawing.")).toBeVisible();
     await expect(liveRegionOf(page)).toHaveText("The drawing is finished.");
 
-    // The way out arrives a beat later, so the press that finished the drawing
-    // cannot be the press that throws it away.
-    await expect(restartOf(page)).toBeHidden();
+    // The last mark lands with nothing else moving: the whole footer waits out
+    // a settling beat, so the press that finished the drawing cannot be the
+    // press that throws it away.
+    await expect(surfaceOf(page)).toBeVisible();
+    await expect(restartOf(page)).toHaveCount(0);
+    await expect(page.getByText("That’s the drawing.")).toHaveCount(0);
+
     await expect(restartOf(page)).toBeVisible();
+    await expect(page.getByText("That’s the drawing.")).toBeVisible();
+    await expect(surfaceOf(page)).toHaveCount(0);
     await expect(aside).toBeVisible();
 
     // Another press cannot add a thirty-fourth mark.
@@ -296,6 +304,8 @@ test.describe("One mark at a time", () => {
 
     await expect(marksOf(page)).toHaveCount(0);
     await expect(surfaceOf(page)).toBeVisible();
+    // Focus follows the control that replaced the one it was on.
+    await expect(surfaceOf(page)).toBeFocused();
     await expect(page.getByText("What was that?")).toHaveCount(0);
     // The marks are never announced one by one.
     await expect(liveRegionOf(page)).toHaveText("");
@@ -326,22 +336,29 @@ test.describe("One mark at a time", () => {
     await draw(page, 1);
   });
 
-  test("11. a long pause starts the drawing over", async ({ page }) => {
+  test("11. a long pause starts the drawing over, and the press still draws", async ({
+    page,
+  }) => {
+    test.slow();
     await open(page);
     await draw(page, TIMING.settleMarks + 4);
 
-    await page.waitForTimeout(TIMING.idleLimitMs + 400);
+    await page.waitForTimeout(TIMING.idleLimitMs + 600);
     await pressSpace(page);
 
-    await expect(marksOf(page)).toHaveCount(0);
+    // The old run is set aside, but the press that ended it is not spent on
+    // ending it: it lays the first mark of the next one.
+    await expect(marksOf(page)).toHaveCount(1);
+    await expect(marksOf(page)).toHaveAttribute("data-mark", MARKS[0]!.id);
     await expect(freshPaperOf(page)).toBeVisible();
-    await expect(liveRegionOf(page)).toHaveText("Fresh paper. Start again whenever you like.");
+    await expect(liveRegionOf(page)).toHaveText("Starting again on fresh paper.");
 
     await draw(page, 1);
     await expect(freshPaperOf(page)).toHaveCount(0);
   });
 
   test("12. being hidden long enough starts over; a glance away does not", async ({ page }) => {
+    test.slow();
     await open(page);
 
     await draw(page, 3);
@@ -350,12 +367,47 @@ test.describe("One mark at a time", () => {
     await expect(marksOf(page)).toHaveCount(3);
 
     await draw(page, TIMING.settleMarks + 4 - 3);
-    await hide(page, 400);
+    // A notification, a glance at another tab, a short app switch.
+    await hide(page, 3_000);
     await expect(marksOf(page)).toHaveCount(TIMING.settleMarks + 4);
+    // And the press on the way back is not swallowed either.
+    await draw(page, 1);
 
     await hide(page, TIMING.awayLimitMs + 400);
     await expect(marksOf(page)).toHaveCount(0);
     await expect(freshPaperOf(page)).toBeVisible();
+  });
+
+  test("12b. Enter works on the press surface, and so does an assistive click", async ({
+    page,
+  }) => {
+    await open(page);
+    const surface = surfaceOf(page);
+
+    await surface.focus();
+    await page.keyboard.press("Enter");
+    await expect(marksOf(page)).toHaveCount(1);
+
+    // What assistive technology sends is a bare click with no click count,
+    // never a pointer sequence.
+    await page.waitForTimeout(PACE_MS);
+    await surface.dispatchEvent("click", { detail: 0 });
+    await expect(marksOf(page)).toHaveCount(2);
+  });
+
+  test("12c. a reflex press after the last mark neither draws nor scrolls", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 420 });
+    await open(page);
+    await draw(page, TOTAL_MARKS);
+    await expect(restartOf(page)).toBeVisible();
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    expect(await page.evaluate(() => document.body.scrollHeight > window.innerHeight)).toBe(true);
+    const scrolled = await page.evaluate(() => window.scrollY);
+
+    await pressSpace(page);
+    await expect(marksOf(page)).toHaveCount(TOTAL_MARKS);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   });
 
   test("13. a second finger does not lay a second mark", async ({ page, context }) => {

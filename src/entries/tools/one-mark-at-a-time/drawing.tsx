@@ -67,7 +67,8 @@ export function Drawing() {
   // Coming back to the page counts; it must not also count as a press.
   const lastActivityRef = useRef<number | null>(null);
   const hiddenSinceRef = useRef<number | null>(null);
-  const keyboardRef = useRef(false);
+  const surfaceHadFocusRef = useRef(false);
+  const refocusRef = useRef(false);
   const surfaceRef = useRef<HTMLButtonElement | null>(null);
   const finishedRef = useRef<HTMLDivElement | null>(null);
 
@@ -82,6 +83,10 @@ export function Drawing() {
 
   const layMark = useCallback(() => {
     pendingRef.current = null;
+    // The press surface may be about to go away. Whether it holds focus right
+    // now decides whether focus has to be moved, and once it has gone there
+    // is no way left to ask.
+    surfaceHadFocusRef.current = document.activeElement === surfaceRef.current;
     drawnRef.current += 1;
     setDrawn(drawnRef.current);
   }, []);
@@ -117,13 +122,17 @@ export function Drawing() {
       lastActivity !== null &&
       shouldStartOver(drawnRef.current, now - lastActivity, TIMING.idleLimitMs)
     ) {
+      // The old run is set aside, but this press is not spent on undoing it:
+      // it falls through and lays the first mark of the new one, so a visitor
+      // who paused too long sees their press do something rather than only
+      // take something away.
       startOver(true);
-      return;
+    } else {
+      setStartedOver(false);
     }
 
     lastPressRef.current = now;
     lastActivityRef.current = now;
-    setStartedOver(false);
 
     const delay = injectedDelayMs(drawnRef.current);
     if (delay === 0) {
@@ -143,8 +152,10 @@ export function Drawing() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.code !== "Space" && event.key !== " ") return;
-      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (drawnRef.current >= TOTAL_MARKS) return;
+      // Shift+Space is a page key of its own, and the rest are shortcuts.
+      if (event.repeat || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
 
       const active = document.activeElement;
       if (
@@ -158,7 +169,12 @@ export function Drawing() {
       // Space would otherwise scroll the page, and would activate the focused
       // surface a second time on release.
       event.preventDefault();
-      keyboardRef.current = true;
+
+      // After thirty-three presses of Space a thirty-fourth is a reflex. It
+      // lays no mark, and having swallowed it here it cannot scroll the
+      // finished drawing out of view either.
+      if (drawnRef.current >= TOTAL_MARKS) return;
+
       press();
     }
 
@@ -209,19 +225,27 @@ export function Drawing() {
     return () => window.clearTimeout(timer);
   }, [finished]);
 
-  // Someone drawing by keyboard has just lost the surface that held their
-  // focus. It moves to the finished panel rather than to the restart control:
-  // after thirty-three presses of Space, a thirty-fourth is a reflex, and it
-  // must not be the thing that throws the drawing away.
+  // The surface that held the visitor's focus has just been replaced. Focus
+  // moves to the finished panel rather than to the restart control, because a
+  // reflex press must not be the thing that throws the drawing away.
   useEffect(() => {
-    if (!finished || !keyboardRef.current) return;
+    if (!settled || !surfaceHadFocusRef.current) return;
     finishedRef.current?.focus({ preventScroll: true });
-  }, [finished]);
+  }, [settled]);
+
+  // And back again on the way out, so restarting does not strand focus on the
+  // document body with nothing to show for it.
+  useEffect(() => {
+    if (!refocusRef.current) return;
+    refocusRef.current = false;
+    surfaceRef.current?.focus({ preventScroll: true });
+  }, [drawn]);
 
   return (
-    // The panel hugs the drawing rather than filling the workspace width:
-    // everything around the accumulating ink should be quiet.
-    <div className="mx-auto w-full max-w-[44rem] border border-rule bg-surface">
+    // The panel hugs the drawing rather than filling the workspace width —
+    // everything around the accumulating ink should be quiet — and shares the
+    // left edge of the title above it rather than sitting on its own axis.
+    <div className="w-full max-w-[44rem] border border-rule bg-surface">
       {/*
         A live region that is mounted from the start and empty until it has
         something to say. Announcing through a region that appears at the same
@@ -232,7 +256,7 @@ export function Drawing() {
         {finished
           ? "The drawing is finished."
           : startedOver
-            ? "Fresh paper. Start again whenever you like."
+            ? "Starting again on fresh paper."
             : ""}
       </p>
 
@@ -243,13 +267,16 @@ export function Drawing() {
           aria-label={
             finished
               ? "A finished ink drawing of a bicycle"
-              : "An unfinished ink drawing"
+              : drawn === 0
+                ? "Blank paper"
+                : "An unfinished ink drawing"
           }
           // Sized by width alone, with the drawing's own 810:526 ratio folded
           // into the height cap, so the ink is never letterboxed inside a box
-          // taller or wider than itself. 54svh is what a landscape phone can
-          // spare and still show the whole panel at once; nothing else binds
-          // on it, so portrait and desktop are unaffected.
+          // taller or wider than itself. At 54svh the whole panel still fits
+          // the height of a landscape phone, which is the tightest case; the
+          // rem caps bind first in portrait and on a desktop, so neither is
+          // affected by it.
           className="mx-auto block h-auto w-[min(100%,40rem,calc(54svh*1.54))]"
           fill="none"
           stroke="currentColor"
@@ -268,14 +295,22 @@ export function Drawing() {
         {startedOver ? (
           // Written on the fresh paper, so nothing around the press surface
           // moves, and so the first press clears it in the same frame as the
-          // mark it lays.
-          <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm leading-6 text-muted">
-            Fresh paper. Start again whenever you like.
+          // mark it lays. It sits along the foot of the sheet like a caption,
+          // clear of the one mark that can be on the paper beside it.
+          <p className="pointer-events-none absolute inset-0 flex items-end justify-center px-6 pb-1 text-center text-sm leading-6 text-muted">
+            Starting again on fresh paper.
           </p>
         ) : null}
       </div>
 
-      {finished ? (
+      {/*
+        The swap waits out the settling beat rather than arriving with the
+        thirty-third mark. That mark is the one the whole drawing is for, and
+        it should land with nothing else moving anywhere on the page. Until
+        then the press surface stays where it is, inert: `press` lays no
+        thirty-fourth mark, and the hint has long since faded out of it.
+      */}
+      {settled ? (
         <div
           ref={finishedRef}
           tabIndex={-1}
@@ -284,20 +319,18 @@ export function Drawing() {
           <p className="text-center leading-7 text-secondary">
             That&rsquo;s the drawing.
           </p>
-          {/* Hidden rather than unmounted, so holding it back moves nothing. */}
-          <div
-            className={`flex w-full flex-col items-center gap-6 ${settled ? "" : "invisible"}`}
+          <button
+            type="button"
+            onClick={() => {
+              refocusRef.current = true;
+              startOver(false);
+            }}
+            className="border border-rule px-5 py-2.5 font-mono text-xs font-bold uppercase tracking-label text-secondary hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            <button
-              type="button"
-              onClick={() => startOver(false)}
-              className="border border-rule px-5 py-2.5 font-mono text-xs font-bold uppercase tracking-label text-secondary hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >
-              Draw another
-            </button>
+            Draw another
+          </button>
 
-            <Aside />
-          </div>
+          <Aside />
         </div>
       ) : (
         <button
@@ -307,7 +340,14 @@ export function Drawing() {
           // the visitor's own lift-off inside the interval being manipulated.
           onPointerDown={(event) => {
             if (!event.isPrimary || event.button !== 0) return;
-            keyboardRef.current = false;
+            press();
+          }}
+          // A mouse or a finger has already been served on `pointerdown`, and
+          // both leave a click count behind. A click without one came from a
+          // keyboard's Enter or from assistive technology, neither of which
+          // sends a pointer sequence at all, so that is the click to act on.
+          onClick={(event) => {
+            if (event.detail !== 0) return;
             press();
           }}
           className="flex min-h-[26svh] w-full cursor-pointer select-none items-center justify-center border-t border-rule bg-panel px-5 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] font-mono text-xs font-bold uppercase tracking-label text-muted [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-accent sm:min-h-28"
@@ -340,7 +380,13 @@ export function Drawing() {
 function Aside() {
   return (
     <details className="group w-full max-w-measure border-t border-rule-subtle pt-5 text-left">
-      <summary className="flex min-h-11 cursor-pointer items-center py-2 marker:text-muted focus-visible:outline-2 focus-visible:outline-accent">
+      {/*
+        Shaped like the site's other disclosures (see `DISCLOSURE_SUMMARY` in
+        the coordinate-frame visualiser): a comfortable tap height, and a flex
+        box, which suppresses the native marker. Interactivity is carried by
+        the question itself and by the hover colour.
+      */}
+      <summary className="flex min-h-11 cursor-pointer items-center py-2 focus-visible:outline-2 focus-visible:outline-accent">
         <Label tone="muted" className="group-hover:text-accent">
           What was that?
         </Label>

@@ -101,7 +101,9 @@ function chainRun(side: 1 | -1): string {
   const dy = BOTTOM_BRACKET.y - REAR_HUB.y;
   const distance = Math.hypot(dx, dy);
   const bearing = Math.atan2(dy, dx);
-  const spread = Math.acos((CHAINRING_RADIUS - COG_RADIUS) / distance);
+  // Tangency needs the shared unit normal n to satisfy
+  // n · (chainring - cog) = r(cog) - r(chainring), hence the leading sign.
+  const spread = Math.acos((COG_RADIUS - CHAINRING_RADIUS) / distance);
   const normal = bearing + side * spread;
   const offset: Point = { x: Math.cos(normal), y: Math.sin(normal) };
 

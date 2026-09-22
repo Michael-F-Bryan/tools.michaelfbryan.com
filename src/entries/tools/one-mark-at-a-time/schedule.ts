@@ -40,12 +40,22 @@ export const TIMING = {
   holdDelayMs: 180,
   /**
    * How long a gap between marks may be before the run is treated as
-   * abandoned. Adaptation decays, so a stale run must not be handed a
-   * no-delay mark as though it were still adapted.
+   * abandoned rather than merely paused.
+   *
+   * Generous on purpose. Recalibration aftereffects are stored rather than
+   * rapidly lost when nothing contradicts them, so a visitor admiring the
+   * bicycle for a few seconds has not gone stale — and starting over costs
+   * them every mark they have laid. The limit is here for the visitor who
+   * wandered off, not the one who paused.
    */
-  idleLimitMs: 8_000,
-  /** The same judgement for a page that was hidden and came back. */
-  awayLimitMs: 2_500,
+  idleLimitMs: 30_000,
+  /**
+   * The same judgement for a page that was hidden and came back. Stricter,
+   * because being away from the page is a real change of context rather than
+   * a pause in front of it, but still long enough to survive a notification,
+   * a glance at another tab, or a short app switch.
+   */
+  awayLimitMs: 15_000,
 } as const;
 
 export type Phase = "settle" | "drift" | "hold" | "release";
