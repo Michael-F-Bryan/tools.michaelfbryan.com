@@ -14,10 +14,12 @@ export function PlacesMap({ places, origin, selected, onSelect }: {
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const initialOrigin = useRef(origin);
   const markers = useRef<maplibregl.Marker[]>([]);
   const onSelectRef = useRef(onSelect);
   const [mapReady, setMapReady] = useState(false);
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
+  useEffect(() => { if (mapReady) map.current?.flyTo({ center: [origin[0], origin[1]], essential: true }); }, [mapReady, origin]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -27,7 +29,7 @@ export function PlacesMap({ places, origin, selected, onSelect }: {
       const instance = new MapLibre.Map({
         container: container.current,
         style: "https://tiles.openfreemap.org/styles/positron",
-        center: [144.968, -37.815], zoom: 13.3,
+        center: [initialOrigin.current[0], initialOrigin.current[1]], zoom: 14.1,
         attributionControl: { compact: false },
       });
       map.current = instance;
@@ -52,7 +54,7 @@ export function PlacesMap({ places, origin, selected, onSelect }: {
         const button = document.createElement("button");
         button.type = "button";
         button.className = `${styles.pin} ${styles[place.category.toLowerCase()]}`;
-        button.textContent = place.category === "Art" ? "A" : place.category === "Museum" ? "M" : "L";
+        button.textContent = place.category.slice(0, 1);
         button.title = place.name;
         button.setAttribute("aria-label", place.name);
         if (place.id === selected) button.dataset.selected = "true";

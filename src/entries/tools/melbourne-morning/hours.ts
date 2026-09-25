@@ -3,7 +3,7 @@ import type { Place } from "./places";
 
 export type Window = Readonly<{ date: string; from: string; until: string }>;
 export type Availability = Readonly<{
-  kind: "open" | "later" | "closed";
+  kind: "open" | "later" | "unknown" | "closed";
   label: string;
   starts: number; // epoch milliseconds; useful for ordering
 }>;
@@ -23,11 +23,17 @@ export function availability(place: Place, window: Window): Availability {
   const end = localInstant(day, window.until, place.timezone);
   if (end <= start) throw new RangeError("Window must end after it starts in the place's timezone");
 
+  const schedule = place.hours;
+  if (!schedule) return { kind: "unknown", label: place.hoursNote ?? "Hours unknown · check venue", starts: Infinity };
+
   // Include yesterday's overnight opening and tomorrow for a window near midnight.
   const overlapping = [-1, 0, 1].flatMap((offset) => {
     const openingDay = day.add({ days: offset });
     const weekday = openingDay.dayOfWeek % 7;
-    return place.hours.filter((hours) => hours.days.includes(weekday)).map((hours) => {
+    const date = openingDay.toString();
+    const hoursForDay = place.exceptions && Object.hasOwn(place.exceptions, date)
+      ? place.exceptions[date] : schedule;
+    return (hoursForDay ?? []).filter((hours) => hours.days.includes(weekday)).map((hours) => {
       const opens = localInstant(openingDay, hours.opens, place.timezone);
       const closes = localInstant(
         openingDay.add({ days: hours.closes <= hours.opens ? 1 : 0 }),

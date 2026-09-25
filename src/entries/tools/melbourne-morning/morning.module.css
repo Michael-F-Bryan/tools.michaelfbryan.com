@@ -27,3 +27,5 @@
   .controls { grid-column: 1 / -1; grid-template-columns: 2fr 1fr 1fr 1fr auto; align-items: end; }
   .map { height: 560px; position: sticky; top: 1rem; }
 }
+
+.outdoors { background: #326b47; } .books { background: #70508c; } .food { background: #995121; } .cinema { background: #47536c; }
