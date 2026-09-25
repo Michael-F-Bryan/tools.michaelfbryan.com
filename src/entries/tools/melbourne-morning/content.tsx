@@ -7,11 +7,12 @@ import { PlacesMap } from "./places-map";
 import styles from "./morning.module.css";
 
 const origins = [
+  { name: "Melbourne Museum", coordinates: [144.9723488, -37.8032298] },
   { name: "Fed Square", coordinates: [144.9691, -37.8179] },
   { name: "State Library", coordinates: [144.9655, -37.8098] },
   { name: "NGV International", coordinates: [144.9687, -37.8229] },
 ] as const;
-const categories = ["All", "Art", "Museum", "Library"] as const;
+const categories = ["All", "Art", "Museum", "Library", "Outdoors", "Books", "Food", "Cinema"] as const;
 const zone = "Australia/Melbourne";
 
 function walkingMinutes(from: readonly [number, number], to: readonly [number, number]) {
@@ -58,10 +59,12 @@ export default function MelbourneMorning() {
       (!hideClosed || status.kind !== "closed") &&
       `${place.name} ${place.description}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
     ).sort((a, b) => {
-      const rank = { open: 0, later: 1, closed: 2 };
-      return rank[a.status.kind] - rank[b.status.kind] || a.status.starts - b.status.starts || a.place.name.localeCompare(b.place.name);
+      const rank = { open: 0, later: 1, unknown: 2, closed: 3 };
+      const byStatus = rank[a.status.kind] - rank[b.status.kind];
+      const byOpening = a.status.kind === "later" && b.status.kind === "later" ? a.status.starts - b.status.starts : 0;
+      return byStatus || byOpening || walkingMinutes(origin, a.place.coordinates) - walkingMinutes(origin, b.place.coordinates) || a.place.name.localeCompare(b.place.name);
     });
-  }, [validWindow, window, category, query, hideClosed]);
+  }, [validWindow, window, category, query, hideClosed, origin]);
   const selectedPlace: Place | undefined = visible.find(({ place }) => place.id === selected)?.place;
   const selectedStatus = visible.find(({ place }) => place.id === selected)?.status;
 
@@ -117,7 +120,7 @@ export default function MelbourneMorning() {
         <h2 className="text-xl font-bold">{selectedPlace.name}</h2>
         <p className="text-secondary">{selectedPlace.description}</p>
         <p><strong>{selectedStatus.label}</strong> · {walkingMinutes(origin, selectedPlace.coordinates)} min walk approx.</p>
-        <p className={styles.note}>Usual hours: {selectedPlace.hours.map((hours) => `${hours.opens}–${hours.closes}`).join(", ")} · {selectedPlace.timezone}. Holiday hours can differ.</p>
+        <p className={styles.note}>Hours: {selectedPlace.hours ? (selectedPlace.exceptions?.[window?.date ?? ""] ?? selectedPlace.hours).map((hours) => `${hours.opens}–${hours.closes}`).join(", ") : selectedPlace.hoursNote} · {selectedPlace.timezone}. Holiday hours can differ.</p>
         <p className={styles.note}>Tip: {selectedPlace.tip}</p>
         <p className={styles.note}><a href={selectedPlace.source} target="_blank" rel="noopener noreferrer">Check venue hours</a> · <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedPlace.coordinates[1]},${selectedPlace.coordinates[0]}`)}`} target="_blank" rel="noopener noreferrer">Open in Google Maps</a></p>
       </section> : null}
@@ -128,7 +131,7 @@ export default function MelbourneMorning() {
         </button>)}
         {!visible.length && validWindow ? <p className="py-4 text-secondary">No places match this window and these filters.</p> : null}
       </div>
-      <p className={styles.note}>*Straight-line walking estimate, not a route. Curated venue hours checked September 2026; special dates may differ. Check with the venue before travelling. Map © OpenStreetMap contributors (ODbL).</p>
+      <p className={styles.note}>*Straight-line walking estimate, not a route. Curated venue hours checked September 2026; public holidays, sessions and sell-outs may differ. Check with the venue before travelling. Map © OpenStreetMap contributors (ODbL).</p>
     </div>
   </div>;
 }

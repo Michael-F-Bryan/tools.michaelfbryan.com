@@ -16,12 +16,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testIgnore: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chromium",
-      testIgnore: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours)\.spec\.ts$/,
       use: { ...devices["Pixel 7"] },
     },
     {
@@ -30,7 +30,7 @@ export default defineConfig({
       // TypeScript unit tests. Accepted so the math tests stay inside the
       // existing `pnpm test:e2e` gate instead of a second test runner.
       name: "unit",
-      testMatch: /coordinate-frame-(math|scene)\.spec\.ts$/,
+      testMatch: /(?:coordinate-frame-(?:math|scene)|melbourne-hours)\.spec\.ts$/,
     },
   ],
   webServer: externalBaseUrl
