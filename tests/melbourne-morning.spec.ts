@@ -9,9 +9,11 @@ test("the Carlton area has nearby options, unknown sessions are honest, and filt
   await page.getByLabel("From").fill("09:00");
   await page.getByLabel("Until").fill("12:00");
   await expect(page.getByRole("region", { name: "Map of nearby places" }).locator("canvas")).toBeVisible();
-  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(14);
-  await page.getByRole("checkbox", { name: /Hide places with no listed opening/ }).uncheck();
   await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(16);
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem").filter({ hasText: "Seven Seeds Carlton" })).toContainText("Special-date hours unverified");
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem").filter({ hasText: "Cinema Nova" })).toContainText("Film sessions vary by day");
+  await page.getByRole("checkbox", { name: /Hide places with no listed opening/ }).uncheck();
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(18);
   await expect(page.getByRole("list", { name: "Places worth visiting" }).getByText("Closed on selected date (venue notice)")).toHaveCount(2);
   await page.getByRole("checkbox", { name: /Hide places with no listed opening/ }).check();
   await expect(page.getByRole("button", { name: "IMAX Melbourne" })).toBeVisible();

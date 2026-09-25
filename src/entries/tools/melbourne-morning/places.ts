@@ -153,4 +153,22 @@ export const places: readonly Place[] = [
     timezone: "Australia/Melbourne", source: "https://www.melbourne.vic.gov.au/fitzroy-gardens",
     hours: null, hoursNote: "Outdoor garden; access hours not published",
   },
+  {
+    id: "seven-seeds-carlton", name: "Seven Seeds Carlton", category: "Food", coordinates: [144.9590354, -37.8028349],
+    description: "Coffee roaster and café with an all-day menu on Berkeley Street.",
+    tip: "Walk-ins only; the kitchen stops orders an hour before closing. Holiday hours vary—check the venue's news.",
+    timezone: "Australia/Melbourne", source: "https://sevenseeds.com.au/pages/seven-seeds-carlton",
+    hours: [
+      { days: [1, 2, 3, 4, 5], opens: "07:00", closes: "17:00" },
+      { days: [0, 6], opens: "08:00", closes: "17:00" },
+    ],
+    uncertainDates: ["2026-09-25"],
+  },
+  {
+    id: "cinema-nova", name: "Cinema Nova", category: "Cinema", coordinates: [144.9680124, -37.7978092],
+    description: "Independent Carlton cinema with changing films and start times.",
+    tip: "Choose a session and check its runtime against your window; opening the building does not mean a film is starting.",
+    timezone: "Australia/Melbourne", source: "https://www.cinemanova.com.au/films-now-showing",
+    hours: null, hoursNote: "Film sessions vary by day; check timetable and tickets",
+  },
 ];
