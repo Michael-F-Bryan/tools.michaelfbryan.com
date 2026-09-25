@@ -1,7 +1,7 @@
 export type Place = Readonly<{
   id: string;
   name: string;
-  category: "Art" | "Museum" | "Library" | "Outdoors" | "Books" | "Food" | "Cinema";
+  category: "Art" | "Museum" | "Library" | "Outdoors" | "Books" | "Food" | "Cinema" | "Wellness";
   coordinates: readonly [number, number]; // longitude, latitude
   description: string;
   tip: string;
@@ -9,6 +9,7 @@ export type Place = Readonly<{
   source: string;
   hours: readonly { days: readonly number[]; opens: string; closes: string }[] | null; // Sunday = 0; null = no dependable hours
   hoursNote?: string;
+  uncertainDates?: readonly string[]; // no trustworthy special-date hours; do not infer from the weekly schedule
   exceptions?: Readonly<Record<string, readonly { days: readonly number[]; opens: string; closes: string }[] | null>>;
 }>;
 
@@ -41,6 +42,7 @@ export const places: readonly Place[] = [
     description: "A public library with reading rooms and exhibitions on Swanston Street.",
     tip: "Check the Library site for holiday closures before setting off.",
     timezone: "Australia/Melbourne", source: "https://www.slv.vic.gov.au/visit/opening-hours",
+    uncertainDates: ["2026-09-25"],
     hours: [{ days: [0, 1, 2, 3, 4, 5, 6], opens: "10:00", closes: "18:00" }],
   },
   {
@@ -93,5 +95,62 @@ export const places: readonly Place[] = [
       { days: [1, 2, 3, 4, 5], opens: "07:30", closes: "15:00" },
       { days: [0, 6], opens: "08:00", closes: "15:00" },
     ],
+  },
+  {
+    id: "brunswick-street-gallery", name: "Brunswick Street Gallery", category: "Art", coordinates: [144.978782, -37.7976732],
+    description: "Independent exhibitions by contemporary Australian artists in Fitzroy.",
+    tip: "Upstairs access only; the gallery also closes during exhibition installs. Check current shows first.",
+    timezone: "Australia/Melbourne", source: "https://brunswickstreetgallery.com.au/pages/contact",
+    hours: [
+      { days: [2, 3, 4, 5, 6], opens: "10:00", closes: "17:00" },
+      { days: [0], opens: "11:00", closes: "16:00" },
+    ],
+  },
+  {
+    id: "heartattack-and-vine", name: "Heartattack and Vine", category: "Food", coordinates: [144.9672504, -37.7976471],
+    description: "Walk-in Carlton café and neighbourhood bar on Lygon Street.",
+    tip: "No bookings; its site says 8am till late but does not publish a closing time or holiday exception.",
+    timezone: "Australia/Melbourne", source: "https://www.heartattackandvine.com.au/",
+    hours: null, hoursNote: "Listed from 8am daily; closing and holiday hours unknown",
+  },
+  {
+    id: "kathleen-syme", name: "Kathleen Syme Library", category: "Library", coordinates: [144.9652521, -37.7987135],
+    description: "Carlton neighbourhood library and community space on Faraday Street.",
+    tip: "Library access differs from community-centre room hours; council libraries close on Victorian public holidays.",
+    timezone: "Australia/Melbourne", source: "https://www.melbourne.vic.gov.au/library-locations-and-opening-hours",
+    hours: [
+      { days: [1, 2, 3, 4], opens: "10:00", closes: "19:00" },
+      { days: [5], opens: "13:00", closes: "18:00" },
+      { days: [6], opens: "10:00", closes: "16:00" },
+      { days: [0], opens: "12:00", closes: "16:00" },
+    ],
+    exceptions: { "2026-09-25": null },
+  },
+  {
+    id: "melbourne-city-baths", name: "Melbourne City Baths", category: "Wellness", coordinates: [144.963295, -37.8071077],
+    description: "Historic indoor pool and fitness centre on Swanston Street.",
+    tip: "Casual entry costs extra; pool, spa and sauna close 15 minutes before the building.",
+    timezone: "Australia/Melbourne", source: "https://www.melbourne.vic.gov.au/melbourne-city-baths",
+    hours: [
+      { days: [1, 2, 3, 4], opens: "06:00", closes: "22:00" },
+      { days: [5], opens: "06:00", closes: "20:00" },
+      { days: [0, 6], opens: "08:00", closes: "18:00" },
+    ],
+    uncertainDates: ["2026-09-25"],
+  },
+  {
+    id: "chinese-museum", name: "Chinese Museum", category: "Museum", coordinates: [144.969209, -37.8107366],
+    description: "Chinese Australian history and culture in Chinatown.",
+    tip: "The museum closes on public holidays; enter via Cohen Place off Lonsdale or Little Bourke Street.",
+    timezone: "Australia/Melbourne", source: "https://www.chinesemuseum.com.au/location-hours",
+    hours: [{ days: [0, 1, 2, 3, 4, 5, 6], opens: "10:00", closes: "16:00" }],
+    exceptions: { "2026-09-25": null },
+  },
+  {
+    id: "fitzroy-gardens", name: "Fitzroy Gardens", category: "Outdoors", coordinates: [144.9805054, -37.812684],
+    description: "Tree-lined paths, flowers and heritage features in East Melbourne.",
+    tip: "The City of Melbourne links a self-guided walk. The Conservatory inside has separate opening and closure dates.",
+    timezone: "Australia/Melbourne", source: "https://www.melbourne.vic.gov.au/fitzroy-gardens",
+    hours: null, hoursNote: "Outdoor garden; access hours not published",
   },
 ];

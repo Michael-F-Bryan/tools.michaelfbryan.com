@@ -4,8 +4,16 @@ test("the Carlton area has nearby options, unknown sessions are honest, and filt
   await page.goto("/tools/melbourne-morning");
   await expect(page.getByRole("heading", { name: "Melbourne morning" })).toBeVisible();
   await expect(page.getByLabel("Start near")).toHaveValue("0");
+  await expect(page.getByLabel("Day")).not.toHaveValue("");
+  await page.getByLabel("Day").fill("2026-09-25");
+  await page.getByLabel("From").fill("09:00");
+  await page.getByLabel("Until").fill("12:00");
   await expect(page.getByRole("region", { name: "Map of nearby places" }).locator("canvas")).toBeVisible();
-  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(10);
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(14);
+  await page.getByRole("checkbox", { name: /Hide places with no listed opening/ }).uncheck();
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByRole("listitem")).toHaveCount(16);
+  await expect(page.getByRole("list", { name: "Places worth visiting" }).getByText("Closed on selected date (venue notice)")).toHaveCount(2);
+  await page.getByRole("checkbox", { name: /Hide places with no listed opening/ }).check();
   await expect(page.getByRole("button", { name: "IMAX Melbourne" })).toBeVisible();
   await page.getByRole("button", { name: "IMAX Melbourne" }).click();
   await expect(page.getByRole("region", { name: "IMAX Melbourne details" })).toContainText("check sessions");
