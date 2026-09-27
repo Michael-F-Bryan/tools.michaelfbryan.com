@@ -16,7 +16,7 @@ test("the catalogue lists the component kitchen sink and both tools", async ({
   const catalogueEntries = page
     .getByRole("region", { name: "Catalogue" })
     .getByRole("listitem");
-  await expect(catalogueEntries).toHaveCount(3);
+  await expect(catalogueEntries).toHaveCount(4);
 
   const tool = page.getByRole("link", {
     name: /Coordinate frame visualiser/,
@@ -24,6 +24,7 @@ test("the catalogue lists the component kitchen sink and both tools", async ({
   await expect(tool).toBeVisible();
 
   await expect(page.getByRole("link", { name: /Melbourne morning/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /GEDCOM family tree viewer/ })).toBeVisible();
   const explainer = page.getByRole("link", {
     name: /Explainer component kitchen sink/,
   });
