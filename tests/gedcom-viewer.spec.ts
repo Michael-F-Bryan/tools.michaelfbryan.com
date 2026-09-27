@@ -75,8 +75,8 @@ test("surname accents distinguish branches without changing edge semantics", asy
   await page.goto(URL);
   await upload(page, tree.replace("Sam /North/", "Sam /South/"));
   const nodes = page.locator("[data-person-node]");
-  const north = await nodes.nth(0).locator("circle").first().getAttribute("stroke");
-  const south = await nodes.nth(1).locator("circle").first().getAttribute("stroke");
+  const north = await nodes.nth(0).locator("circle").first().getAttribute("fill");
+  const south = await nodes.nth(1).locator("circle").first().getAttribute("fill");
   expect(north).not.toBe(south);
   await expect(page.locator("[data-parent-edge]")).toHaveCount(2);
   await expect(page.locator("[data-partner-edge]")).toHaveCount(1);
@@ -85,6 +85,7 @@ test("surname accents distinguish branches without changing edge semantics", asy
 test("resource and charset errors do not replace a loaded tree", async ({ page }) => {
   await page.goto(URL);
   await upload(page);
+  await expect(page.getByRole("status")).toContainText("3 people loaded");
   await upload(page, tree.replace("UTF-8", "ANSEL"), "ansel.ged");
   await expect(page.getByRole("alert").filter({ hasText: "Unsupported character set" })).toBeVisible();
   await upload(page, tree + "\n" + "x".repeat(2 * 1024 * 1024), "large.ged");
@@ -99,7 +100,7 @@ test("loading a second file resets search and selection", async ({ page }) => {
   await page.getByRole("region", { name: "Search results" }).getByRole("button").first().click();
   await upload(page, tree.replaceAll("North", "South"), "second.ged");
   await expect(page.getByRole("status")).toContainText("second.ged");
-  await expect(page.getByRole("region", { name: "Person details" })).not.toContainText("Ada North");
+  await expect(page.getByRole("region", { name: "Person details" })).toBeHidden();
   await page.getByLabel("Find someone").fill("South");
   await expect(page.getByRole("region", { name: "Search results" }).getByRole("button")).toHaveCount(3);
 });
@@ -126,7 +127,7 @@ test("background pointer drag pans and cancelled touch stops panning", async ({ 
   const before = await transform();
   const box = (await svg.boundingBox())!;
   if (testInfo.project.name === "desktop-chromium") {
-    await page.mouse.move(box.x + 80, box.y + 80);
+    await page.mouse.move(box.x + 80, box.y + 200);
     await page.mouse.down();
     await page.mouse.move(box.x + 140, box.y + 120, { steps: 5 });
     await page.mouse.up();
@@ -134,8 +135,8 @@ test("background pointer drag pans and cancelled touch stops panning", async ({ 
   }
   const moved = await transform();
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + 80, y: box.y + 80, id: 101 }] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box.x + 120, y: box.y + 100, id: 101 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + 80, y: box.y + 200, id: 101 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box.x + 120, y: box.y + 240, id: 101 }] });
   await expect.poll(transform).not.toBe(moved);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
   const cancelled = await transform();
@@ -166,8 +167,8 @@ test("selection places distant relatives nearby and overview omits illegible lab
   await page.getByLabel("Find someone").fill("Person 0");
   await page.getByRole("region", { name: "Search results" }).getByRole("button", { name: /Person 0 Family/ }).click();
   const geometry = await page.locator("[data-person-node]").evaluateAll((nodes) => {
-    const a = nodes[0].getBoundingClientRect(), b = nodes[1].getBoundingClientRect();
-    return { dx: Math.abs(a.x - b.x), dy: Math.abs(a.y - b.y), labels: [nodes[0].querySelector("text")?.textContent, nodes[1].querySelector("text")?.textContent] };
+    const a = nodes[0].getBoundingClientRect(), b = nodes[133].getBoundingClientRect();
+    return { dx: Math.abs(a.x - b.x), dy: Math.abs(a.y - b.y), labels: [nodes[0].querySelector("text")?.textContent, nodes[133].querySelector("text")?.textContent] };
   });
   expect(geometry.dx).toBeLessThan(400);
   expect(geometry.dy).toBeLessThan(300);
@@ -243,6 +244,8 @@ test("selected relatives have readable phone labels", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await page.goto(URL);
   await upload(page);
+  await page.getByLabel("Find someone").fill("Ada");
+  await page.getByRole("region", { name: "Search results" }).getByRole("button").click();
   const labels = page.locator("[data-person-node] text");
   await expect(labels).toHaveCount(3);
   for (const label of await labels.all()) expect((await label.boundingBox())!.height).toBeGreaterThanOrEqual(11);
@@ -254,6 +257,7 @@ test("wheel preserves the same graph point under cursor after resize", async ({ 
   await upload(page);
   await page.setViewportSize({ width: 600, height: 800 });
   const svg = page.locator("svg[aria-label=\"Family relationship graph\"]");
+  await expect.poll(() => svg.getAttribute("viewBox")).toMatch(/^0 0 600 /);
   const box = (await svg.boundingBox())!;
   const x = box.x + box.width * .7, y = box.y + box.height * .45;
   const underCursor = () => svg.evaluate((element, point) => {
@@ -269,4 +273,51 @@ test("wheel preserves the same graph point under cursor after resize", async ({ 
   const after = await underCursor();
   expect(Math.abs(after.x - before.x)).toBeLessThan(1);
   expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+});
+
+
+test("loaded graph owns the viewport and selection keeps the field", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(URL);
+  await upload(page, tree.replace("0 TRLR", "0 @I4@ INDI\n1 NAME Una /Other/\n0 TRLR"));
+  const scene = page.locator("svg[aria-label=\"Family relationship graph\"]");
+  const box = (await scene.boundingBox())!;
+  expect(box.y).toBe(0);
+  expect(box.height).toBeGreaterThanOrEqual(840);
+  await page.getByLabel("Find someone").fill("Ada");
+  await page.getByRole("region", { name: "Search results" }).getByRole("button").click();
+  await expect(page.locator("[data-person-node]")).toHaveCount(4);
+  const opacity = await page.locator("[data-person-node]").evaluateAll(nodes => nodes.map(node => node.getAttribute("opacity")));
+  expect(new Set(opacity).size).toBeGreaterThan(1);
+  const sheet = (await page.getByRole("region", { name: "Person details" }).boundingBox())!;
+  expect(sheet.y).toBeGreaterThan(250);
+  expect(sheet.height).toBeLessThan(844 * .55);
+});
+
+test("node drag pulls its linked neighbour and settles", async ({ page }) => {
+  await page.goto(URL);
+  await upload(page);
+  const nodes = page.locator("[data-person-node]");
+  const before = await nodes.evaluateAll(items => items.map(item => item.getAttribute("transform")));
+  const target = (await nodes.first().locator("[data-node-target]").boundingBox())!;
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x + target.width / 2 + 110, target.y + target.height / 2 + 45, { steps: 8 });
+  const during = await nodes.evaluateAll(items => items.map(item => item.getAttribute("transform")));
+  expect(during[0]).not.toBe(before[0]);
+  await page.mouse.up();
+  await expect.poll(async () => nodes.nth(1).getAttribute("transform"), { timeout: 3000 }).not.toBe(before[1]);
+});
+
+
+test("keyboard selects a node and fit restores the whole field", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto(URL);
+  await upload(page);
+  await page.locator("[data-node-target]").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "Person details" })).toContainText("Ada North");
+  await page.getByRole("button", { name: "Fit whole tree" }).click();
+  await expect(page.getByRole("button", { name: "Close details" })).toHaveCount(0);
+  await expect(page.locator("[data-person-node]")).toHaveCount(3);
 });
