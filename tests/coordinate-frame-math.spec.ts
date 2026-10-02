@@ -35,7 +35,7 @@ import {
   type Vec3,
   WGS84_B,
   wrapDegrees,
-} from "../src/entries/tools/coordinate-frame-visualiser/math";
+} from "../src/entries/coordinate-frame-visualiser/math";
 
 function expectMat3Close(actual: Mat3, expected: Mat3, epsilon = 5e-4) {
   for (let r = 0; r < 3; r++) {

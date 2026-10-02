@@ -4,15 +4,18 @@
 
 Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The project currently contains the catalogue and a kitchen-sink explainer that exercises the shared visual vocabulary before subject-specific entries are added.
+The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, and a Melbourne place finder. The shared component reference lives separately at `/reference/components`.
 
 ## Repository structure
 
 - `src/app/page.tsx` renders the catalogue from the discovered entries.
-- `src/app/[collection]/[slug]/page.tsx` generates each entry's route, metadata, and shared page chrome.
-- `src/entries/<collection>/<slug>/definition.ts` contains an entry's title, description, and optional section index.
-- `src/entries/<collection>/<slug>/content.tsx` contains the tool or explainer itself.
-- `src/entries/index.ts` discovers entries and derives their kind, slug, and URL from the directory structure.
+- `src/app/[slug]/page.tsx` generates each entry's route and metadata.
+- `src/components/entry-page.tsx` owns the shared page chrome and article/workspace layouts.
+- `src/entries/<slug>/definition.ts` contains an entry's title, description, layout, and optional section index.
+- `src/entries/<slug>/content.tsx` contains the entry's body.
+- `src/entries/<slug>/preview.tsx` optionally supplies a static catalogue illustration.
+- `src/entries/index.ts` discovers entries and derives their slug and URL from the directory structure.
+- `src/app/reference/components/` contains the component reference, outside catalogue discovery.
 - `src/app/globals.css` contains the shared design tokens and global styles.
 - `src/components/` contains the shared page and explainer structures: `Container`, `PageTitle`, `Label`, `Section`, `Prose`, `Steps`, and `Figure`.
 - `tests/` contains browser-level tests for public routes.
@@ -55,16 +58,19 @@ Playwright starts its own development server on port 3107. To test a server that
 PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
 ```
 
-## Adding a tool or explainer
+## Adding an entry
 
-1. Create `src/entries/tools/<slug>/` or `src/entries/explainers/<slug>/`.
+1. Create `src/entries/<slug>/`.
 2. Export an `EntryDefinition` named `definition` from `definition.ts`.
-3. Default-export the tool or explainer body from `content.tsx`.
-4. Extend the Playwright coverage to prove the discovered catalogue entry opens the rendered page.
+3. Default-export the entry body from `content.tsx`.
+4. Optionally default-export a static React component from `preview.tsx`.
+5. Extend the Playwright coverage to prove the discovered catalogue entry opens the rendered page.
+
+Previews are decorative, non-interactive Server Components, normally inline SVGs using site tokens. The catalogue owns their dimensions and placement; each entry owns its drawing. Keep them legible at thumbnail size, without effects, network requests, or imports of the interactive tool. Entries without a preview use a quiet initial as a fallback.
 
 The build discovers the new entry automatically. Its definition supplies the catalogue, document metadata, and visible page chrome; no separate route or catalogue registration is required.
 
-The page renders the entry's kind, title, description, and optional in-page navigation; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-panel`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
+The page renders the entry's title, description, and optional in-page navigation; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-panel`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
 
 Shared components should represent behaviour or meaning that has already appeared in more than one published item. shadcn/ui is configured with Base UI primitives for accessible controls, while the site's visual identity remains in repository-owned components and design tokens.
 

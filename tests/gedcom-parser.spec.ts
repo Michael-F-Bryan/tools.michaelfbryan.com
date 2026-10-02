@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { parseGedcom } from "../src/entries/tools/gedcom-viewer/parser";
+import { parseGedcom } from "../src/entries/gedcom-viewer/parser";
 
 const header = "0 HEAD\n1 GEDC\n2 VERS 5.5.1\n1 CHAR UTF-8\n";
 

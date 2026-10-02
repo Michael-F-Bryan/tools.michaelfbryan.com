@@ -3,6 +3,6 @@ import type { EntryDefinition } from "@/lib/entry";
 export const definition = {
   title: "Coordinate frame visualiser",
   description:
-    "Turn a body in a local frame, place that frame on the Earth, and read every description of the same situation at once.",
+    "Explore a body’s position and orientation across local and Earth coordinate frames.",
   layout: "workspace",
 } satisfies EntryDefinition;

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("the Carlton area has nearby options, unknown sessions are honest, and filters link map and list", async ({ page }) => {
-  await page.goto("/tools/melbourne-morning");
+  await page.goto("/melbourne-morning");
   await expect(page.getByRole("heading", { name: "Melbourne morning" })).toBeVisible();
   await expect(page.getByLabel("Start near")).toHaveValue("0");
   await expect(page.getByLabel("Day")).not.toHaveValue("");
@@ -33,7 +33,7 @@ test("the Carlton area has nearby options, unknown sessions are honest, and filt
 });
 
 test("a chosen or live origin recentres the map", async ({ page, context }) => {
-  await page.goto("/tools/melbourne-morning");
+  await page.goto("/melbourne-morning");
   const map = page.getByRole("region", { name: "Map of nearby places" });
   const library = map.getByRole("button", { name: "State Library Victoria" });
   await expect(library).toBeVisible();
@@ -50,7 +50,7 @@ test("a chosen or live origin recentres the map", async ({ page, context }) => {
 test("denied location falls back to the chosen start", async ({ page, context }) => {
   const cdp = await context.newCDPSession(page);
   await cdp.send("Browser.setPermission", { permission: { name: "geolocation" }, setting: "denied", origin: "http://localhost:3107" });
-  await page.goto("/tools/melbourne-morning");
+  await page.goto("/melbourne-morning");
   await page.getByRole("button", { name: "Use my location" }).click();
   await expect(page.getByRole("status")).toContainText("using your chosen start");
 });

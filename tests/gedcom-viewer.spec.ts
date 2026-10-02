@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const URL = "/tools/gedcom-viewer";
+const URL = "/gedcom-viewer";
 const tree = `0 HEAD
 1 GEDC
 2 VERS 5.5.1

@@ -6,8 +6,9 @@ import { Step, Steps } from "@/components/steps";
 
 const components = [
   ["Container", "Centres the page and adds the side gutters."],
+  ["EntryPage", "Provides the title, description, article or workspace layout, and optional section navigation."],
   ["PageTitle", "Renders the large heading and keeps each word together."],
-  ["Label", "Small monospace text for entry types and section kickers."],
+  ["Label", "Small monospace text for section kickers and utility labels."],
   ["Section", "Pairs a kicker and heading with the usual vertical spacing."],
   ["SectionTitle", "Provides the same heading. The surrounding layout is up to the page."],
   ["Prose", "Caps the line length and offers base, large and extra-large text."],

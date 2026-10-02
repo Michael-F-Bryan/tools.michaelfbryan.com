@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     default: "Tools by Michael F. Bryan",
     template: "%s · Tools by Michael F. Bryan",
   },
-  description: "Tools and explainers by Michael F. Bryan.",
+  description: "Tools and experiments by Michael F. Bryan.",
   openGraph: {
     siteName: "Tools by Michael F. Bryan",
     type: "website",

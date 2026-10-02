@@ -1,5 +1,3 @@
-export type EntryCollection = "explainers" | "tools";
-
 export type EntrySection = Readonly<{
   id: string;
   label: string;

@@ -1,52 +1,56 @@
 import { expect, test } from "@playwright/test";
 
-const description =
-  "Every shared explainer component on one page, so I can compare them without hunting through old entries.";
-
-test("the catalogue lists the component kitchen sink and both tools", async ({
-  page,
-}) => {
+test("the catalogue opens entries at flat routes without publishing the reference", async ({ page }) => {
   await page.goto("/");
+  const catalogue = page.getByRole("region", { name: "Catalogue" });
+  await expect(catalogue.getByRole("listitem")).toHaveCount(3);
+  await expect(catalogue.getByRole("link", { name: /kitchen sink/i })).toHaveCount(0);
 
-  await expect(page).toHaveTitle(/Tools by Michael F\. Bryan/);
-  await expect(
-    page.getByRole("heading", { name: "Tools and explainers" }),
-  ).toBeVisible();
+  for (const [title, href] of [
+    ["Coordinate frame visualiser", "/coordinate-frame-visualiser"],
+    ["GEDCOM family tree viewer", "/gedcom-viewer"],
+    ["Melbourne morning", "/melbourne-morning"],
+  ]) {
+    await page.goto("/");
+    const link = page.getByRole("link", { name: new RegExp(title) });
+    await expect(link).toHaveAttribute("href", href);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`${href}$`));
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page.getByText(/^(Tool|Explainer)$/)).toHaveCount(0);
+  }
+});
 
-  const catalogueEntries = page
-    .getByRole("region", { name: "Catalogue" })
-    .getByRole("listitem");
-  await expect(catalogueEntries).toHaveCount(4);
-
-  const tool = page.getByRole("link", {
-    name: /Coordinate frame visualiser/,
-  });
-  await expect(tool).toBeVisible();
-
-  await expect(page.getByRole("link", { name: /Melbourne morning/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /GEDCOM family tree viewer/ })).toBeVisible();
-  const explainer = page.getByRole("link", {
-    name: /Explainer component kitchen sink/,
-  });
-
-  await expect(explainer).toContainText(description);
-  await explainer.click();
-
-  await expect(page).toHaveURL(/\/explainers\/component-kitchen-sink$/);
-  await expect(
-    page.getByRole("heading", { name: "Explainer component kitchen sink" }),
-  ).toBeVisible();
-  await expect(page.getByText(description, { exact: true })).toBeVisible();
-  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
-    "content",
-    description,
-  );
+test("the catalogue gives entries decorative previews and keyboard focus", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Tools & experiments", exact: true })).toBeVisible();
+  const rows = page.getByRole("region", { name: "Catalogue" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  for (const row of await rows.all()) {
+    await expect(row.locator('[aria-hidden="true"] svg')).toBeVisible();
+  }
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  const firstLink = rows.first().getByRole("link");
+  await expect(firstLink).toBeFocused();
+  expect(await firstLink.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const row of await rows.all()) {
+    await expect(row.locator('[aria-hidden="true"] svg')).toBeVisible();
+  }
 });
 
 test("the kitchen sink renders every shared explainer structure", async ({
   page,
 }) => {
-  await page.goto("/explainers/component-kitchen-sink");
+  await page.goto("/reference/components");
+  await expect(page).toHaveTitle(/Explainer component kitchen sink/);
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Every shared explainer component on one page, so I can compare them without hunting through old entries.",
+  );
 
   await expect(
     page.getByRole("heading", {
@@ -90,7 +94,7 @@ test("the kitchen sink renders every shared explainer structure", async ({
 });
 
 test("the shared shell uses the accepted cool palette", async ({ page }) => {
-  await page.goto("/explainers/component-kitchen-sink");
+  await page.goto("/reference/components");
 
   const palette = await page.evaluate(() => ({
     accent: getComputedStyle(
@@ -110,7 +114,7 @@ test("the shared shell uses the accepted cool palette", async ({ page }) => {
 });
 
 test("the explainer provides useful in-page navigation", async ({ page }) => {
-  await page.goto("/explainers/component-kitchen-sink");
+  await page.goto("/reference/components");
 
   const contents = page.getByRole("navigation", { name: "On this page" });
   await expect(contents).toBeVisible();

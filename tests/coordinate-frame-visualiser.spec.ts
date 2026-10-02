@@ -1,8 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { composeRotations, eulerToRotation, rotationEnuFromNed } from "../src/entries/tools/coordinate-frame-visualiser/math";
+import { composeRotations, eulerToRotation, rotationEnuFromNed } from "../src/entries/coordinate-frame-visualiser/math";
 
-const TOOL_URL = "/tools/coordinate-frame-visualiser";
+const TOOL_URL = "/coordinate-frame-visualiser";
 
 function num(text: string): number {
   return Number(text.trim().replace("−", "-").replace(/ /g, ""));
@@ -36,13 +36,13 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByRole("heading", { name: "Coordinate frame visualiser" })).toBeVisible();
     await expect(
       page.getByText(
-        "Turn a body in a local frame, place that frame on the Earth, and read every description of the same situation at once.",
+        "Explore a body’s position and orientation across local and Earth coordinate frames.",
         { exact: true },
       ),
     ).toBeVisible();
     await expect(page.locator('meta[name="description"]')).toHaveAttribute(
       "content",
-      "Turn a body in a local frame, place that frame on the Earth, and read every description of the same situation at once.",
+      "Explore a body’s position and orientation across local and Earth coordinate frames.",
     );
   });
 

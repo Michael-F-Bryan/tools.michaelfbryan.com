@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { availability, listedHoursForDate } from "../src/entries/tools/melbourne-morning/hours";
-import { places, type Place } from "../src/entries/tools/melbourne-morning/places";
+import { availability, listedHoursForDate } from "../src/entries/melbourne-morning/hours";
+import { places, type Place } from "../src/entries/melbourne-morning/places";
 
 const museum = places.find((place) => place.id === "melbourne-museum")!;
 const readings = places.find((place) => place.id === "readings-carlton")!;

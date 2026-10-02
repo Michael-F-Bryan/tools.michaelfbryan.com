@@ -1,45 +1,16 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 
 import { Container } from "@/components/container";
 import { Label } from "@/components/label";
 import { PageTitle } from "@/components/page-title";
 import { Prose } from "@/components/prose";
-import { entries, getEntry } from "@/entries";
+import type { EntryDefinition } from "@/lib/entry";
 
-type EntryPageProps = Readonly<{
-  params: Promise<{
-    collection: string;
-    slug: string;
-  }>;
-}>;
-
-export const dynamicParams = false;
-
-export function generateStaticParams() {
-  return entries.map(({ collection, slug }) => ({ collection, slug }));
-}
-
-async function resolveEntry(params: EntryPageProps["params"]) {
-  const { collection, slug } = await params;
-  return getEntry(collection, slug) ?? notFound();
-}
-
-export async function generateMetadata({
-  params,
-}: EntryPageProps): Promise<Metadata> {
-  const entry = await resolveEntry(params);
-
-  return {
-    title: entry.title,
-    description: entry.description,
-  };
-}
-
-export default async function EntryPage({ params }: EntryPageProps) {
-  const entry = await resolveEntry(params);
-  const Content = await entry.load();
-  const isWorkspace = entry.layout === "workspace";
+export function EntryPage({ definition, children }: Readonly<{
+  definition: EntryDefinition;
+  children: ReactNode;
+}>) {
+  const isWorkspace = definition.layout === "workspace";
 
   return (
     // A workspace's introduction is kept short so the interactive surface
@@ -54,21 +25,20 @@ export default async function EntryPage({ params }: EntryPageProps) {
           }
         >
           <header className="max-w-article lg:col-start-1 lg:row-start-1">
-            <Label tone="muted">{entry.kind}</Label>
-            <PageTitle className={isWorkspace ? "mt-3 text-3xl sm:text-5xl" : "mt-5"}>{entry.title}</PageTitle>
+            <PageTitle className={isWorkspace ? "text-3xl sm:text-5xl" : ""}>{definition.title}</PageTitle>
             <Prose size={isWorkspace ? "base" : "xl"} className={isWorkspace ? "mt-3" : "mt-7"}>
-              <p>{entry.description}</p>
+              <p>{definition.description}</p>
             </Prose>
           </header>
 
-          {!isWorkspace && entry.sections?.length ? (
+          {!isWorkspace && definition.sections?.length ? (
             <nav
               aria-label="On this page"
               className="border-y border-rule py-5 lg:sticky lg:top-8 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:border-y-0 lg:border-l lg:py-1 lg:pl-6"
             >
               <Label tone="muted">On this page</Label>
               <ol className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-1">
-                {entry.sections.map((section) => (
+                {definition.sections.map((section) => (
                   <li key={section.id}>
                     <a
                       href={`#${section.id}`}
@@ -85,7 +55,7 @@ export default async function EntryPage({ params }: EntryPageProps) {
           <article
             className={isWorkspace ? "lg:col-start-1 lg:row-start-2" : "max-w-article lg:col-start-1 lg:row-start-2"}
           >
-            <Content />
+            {children}
           </article>
         </div>
       </Container>

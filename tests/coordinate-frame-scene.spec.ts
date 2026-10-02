@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { applyToPoint, eulerToRotation, geodeticToEcef, type Geodetic } from "../src/entries/tools/coordinate-frame-visualiser/math";
-import { wholeChain } from "../src/entries/tools/coordinate-frame-visualiser/pose";
+import { applyToPoint, eulerToRotation, geodeticToEcef, type Geodetic } from "../src/entries/coordinate-frame-visualiser/math";
+import { wholeChain } from "../src/entries/coordinate-frame-visualiser/pose";
 import {
   anchorFacing,
   anchorScenePoint,
@@ -9,7 +9,7 @@ import {
   localTriadTips,
   pickOnEllipsoid,
   POSITION_SCALE,
-} from "../src/entries/tools/coordinate-frame-visualiser/position-geometry";
+} from "../src/entries/coordinate-frame-visualiser/position-geometry";
 import {
   clampElevation,
   MAX_ELEVATION_DEG,
@@ -18,7 +18,7 @@ import {
   sortByDepthAscending,
   type Camera,
   type ScenePoint,
-} from "../src/entries/tools/coordinate-frame-visualiser/projection";
+} from "../src/entries/coordinate-frame-visualiser/projection";
 
 test.describe("clampElevation", () => {
   test("passes through angles inside the allowed range", () => {
