@@ -22,8 +22,8 @@ function MeridianInset() {
     <figure className="mt-4 max-w-[16rem]">
       <svg viewBox="0 0 200 125" role="img" aria-hidden="true" className="block w-full">
         <ellipse cx="90" cy="65" rx="80" ry="55" fill="none" className="stroke-ink" strokeWidth={1} />
-        <line x1="4" y1="65" x2="186" y2="65" className="stroke-rule-subtle" strokeWidth={1} />
-        <line x1="90" y1="8" x2="90" y2="122" className="stroke-rule-subtle" strokeWidth={1} />
+        <line x1="4" y1="65" x2="186" y2="65" className="stroke-coordinate-grid" strokeWidth={1} />
+        <line x1="90" y1="8" x2="90" y2="122" className="stroke-coordinate-grid" strokeWidth={1} />
         <line x1="90" y1="65" x2="151.3" y2="100.4" className="stroke-rule" strokeWidth={1} strokeDasharray="3 3" />
         <line x1="122.4" y1="65" x2="165.2" y2="117.4" className="stroke-accent" strokeWidth={1.5} />
         <path d="M 134 65 A 12 12 0 0 1 130 74" fill="none" className="stroke-accent" strokeWidth={1.25} />

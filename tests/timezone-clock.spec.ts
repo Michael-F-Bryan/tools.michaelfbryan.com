@@ -167,7 +167,7 @@ test("adding, editing and removing spans supports overnight crossings", async ({
   // (hour/minute) separately, so span time inputs are targeted by their
   // known DOM structure (a `<label>` containing the "From"/"until" text and
   // the `<input type="time">`) instead, to count real inputs, not sub-parts.
-  const perthCard = page.locator("fieldset").first();
+  const perthCard = page.locator("main fieldset").first();
   await perthCard.getByRole("button", { name: "Add a span" }).click();
 
   const fromInputs = perthCard.locator('label:has-text("From") input[type="time"]');
@@ -185,7 +185,7 @@ test("adding, editing and removing spans supports overnight crossings", async ({
 });
 
 test("overlapping spans still leave each entry independently editable (no silent merge of stored spans)", async ({ page }) => {
-  const perthCard = page.locator("fieldset").first();
+  const perthCard = page.locator("main fieldset").first();
   await perthCard.getByRole("button", { name: "Add a span" }).click();
   const fromInputs = perthCard.locator('label:has-text("From") input[type="time"]');
   await fromInputs.nth(1).click();
@@ -235,7 +235,7 @@ test("reference choices track the configured people and survive sharing", async 
   await expect.poll(() => page.url()).toContain("UK+office");
   await page.reload();
   await expect(reference.locator("option:checked")).toHaveText("UK office");
-  await page.locator("fieldset").nth(1).getByLabel("Timezone", { exact: true }).selectOption("60");
+  await page.locator("main fieldset").nth(1).getByLabel("Timezone", { exact: true }).selectOption("60");
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("02:00");
   await expect(statusRow(page, "Perth")).toContainText("09:00");
   await page.getByRole("button", { name: "Remove UK office" }).click();
@@ -248,7 +248,7 @@ test("selected time, dial clicks and span endpoints snap to five minutes", async
   await expect(selected).toHaveValue("09:05");
   await selected.fill("23:59");
   await expect(selected).toHaveValue("00:00");
-  const card = page.locator("fieldset").first();
+  const card = page.locator("main fieldset").first();
   const from = card.locator('label:has-text("From") input');
   const until = card.locator('label:has-text("until") input');
   await from.fill("08:02");
@@ -273,7 +273,7 @@ test("used colours are disabled, released colours become available and new peopl
   await page.getByRole("button", { name: "Remove London" }).click();
   await expect(perth.getByRole("radio", { name: "Orange", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Add a person" }).click();
-  const newcomer = page.locator("fieldset").last();
+  const newcomer = page.locator("main fieldset").last();
   await expect(newcomer.getByRole("radio", { name: "Blue", exact: true })).toHaveAttribute("aria-checked", "true");
   await expect(newcomer.getByRole("radio", { name: "Pink", exact: true })).toBeDisabled();
 });

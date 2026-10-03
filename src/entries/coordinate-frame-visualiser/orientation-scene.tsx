@@ -173,11 +173,11 @@ export function OrientationScene({
     const d = pr([GRID_HALF_EXTENT, i, 0]);
     primitives.push({
       depth: (a.depth + b.depth) / 2,
-      node: <line key={`grid-a-${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-rule-subtle" strokeWidth={1} />,
+      node: <line key={`grid-a-${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-coordinate-grid" strokeWidth={1} />,
     });
     primitives.push({
       depth: (c.depth + d.depth) / 2,
-      node: <line key={`grid-b-${i}`} x1={c.x} y1={c.y} x2={d.x} y2={d.y} className="stroke-rule-subtle" strokeWidth={1} />,
+      node: <line key={`grid-b-${i}`} x1={c.x} y1={c.y} x2={d.x} y2={d.y} className="stroke-coordinate-grid" strokeWidth={1} />,
     });
   }
 

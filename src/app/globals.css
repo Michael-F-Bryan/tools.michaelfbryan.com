@@ -29,6 +29,8 @@
   --color-rule-subtle: var(--rule-subtle);
   --color-accent: var(--accent);
   --color-error: var(--error);
+  --color-success: var(--success);
+  --color-coordinate-grid: var(--coordinate-grid);
 
   /* Letter-spacing scale: tighter as type gets larger, wide for labels. */
   --tracking-display: -0.035em;
@@ -78,6 +80,9 @@
   --rule-subtle: #c7ccd2;
   --accent: #164dcc;
   --error: #b42318;
+  --success: #087857;
+  --coordinate-grid: var(--rule-subtle);
+  color-scheme: light;
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -97,6 +102,51 @@
   --input: var(--rule);
   --ring: var(--accent);
   --radius: 0.5rem;
+}
+
+/*
+ * Graphite dark mode. `[data-theme]` is set on `<html>` by the inline script
+ * in `app/layout.tsx` (explicit "light"/"dark") before the user's preference
+ * is known any other way; anything else ("system", or no attribute at all)
+ * defers to the OS via the media query below, so it keeps reacting live if
+ * the OS theme changes without a page reload.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --paper: #17191d;
+    --surface: #202329;
+    --panel: #282c33;
+    --ink: #f0f2f5;
+    --text-secondary: #c4cbd5;
+    --text-muted: #a0aaba;
+    --rule: #626d7c;
+    --rule-subtle: #3b424d;
+    --accent: #82a7ff;
+    --error: #ff9690;
+    --success: #48d4ad;
+    --coordinate-grid: #75808f;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper: #17191d;
+  --surface: #202329;
+  --panel: #282c33;
+  --ink: #f0f2f5;
+  --text-secondary: #c4cbd5;
+  --text-muted: #a0aaba;
+  --rule: #626d7c;
+  --rule-subtle: #3b424d;
+  --accent: #82a7ff;
+  --error: #ff9690;
+  --success: #48d4ad;
+  --coordinate-grid: #75808f;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @layer base {

@@ -36,7 +36,7 @@ export function StatusList({ referenceOffsetMinutes, selectedMinuteUtc, people }
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <span className="font-mono text-ink">{formatClockTime(localMinute)}</span>
-              <span className={available ? "font-bold text-[#009E73]" : "font-bold text-error"}>
+              <span className={available ? "font-bold text-success" : "font-bold text-error"}>
                 {available ? "Available" : "Unavailable"}
               </span>
               {dayOffsetLabel(dayOffset) ? <span className="text-muted">({dayOffsetLabel(dayOffset)})</span> : null}

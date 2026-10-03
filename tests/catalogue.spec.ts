@@ -31,7 +31,10 @@ test("the catalogue gives entries decorative previews and keyboard focus", async
   for (const row of await rows.all()) {
     await expect(row.locator('[aria-hidden="true"] svg')).toBeVisible();
   }
+  await expect(page.getByRole("radio", { name: "System", exact: true })).toBeEnabled();
   await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("radio", { name: "System", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
   const firstLink = rows.first().getByRole("link");
   await expect(firstLink).toBeFocused();

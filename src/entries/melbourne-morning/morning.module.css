@@ -7,13 +7,19 @@
 .controls button:hover, .row:hover { background: var(--panel); }
 .controls button:focus-visible, .filter button:focus-visible, .row:focus-visible, .pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .map { height: min(48vh, 380px); min-height: 260px; width: 100%; background: var(--panel); border: 1px solid var(--rule); touch-action: none; }
-.pin { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--surface); color: white; font-weight: 700; font-size: 15px; box-shadow: 0 1px 3px #17191d66; cursor: pointer; }
-.pin[data-selected="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+/*
+ * Pin colours sit on the always-light "positron" map tiles, not the page,
+ * so they're fixed literals rather than theme tokens — the same identity
+ * regardless of the site theme (the per-category fills below follow the
+ * same rule).
+ */
+.pin { width: 38px; height: 38px; border-radius: 50%; border: 2px solid #ffffff; color: white; font-weight: 700; font-size: 15px; box-shadow: 0 1px 3px #17191d66; cursor: pointer; }
+.pin[data-selected="true"] { outline: 3px solid #17191d; outline-offset: 2px; }
 .art { background: #164dcc; } .museum { background: #9b3c20; } .library { background: #326b47; }
-.originPin { width: 14px; height: 14px; border-radius: 50%; background: var(--ink); border: 3px solid white; box-shadow: 0 0 0 2px var(--ink); }
+.originPin { width: 14px; height: 14px; border-radius: 50%; background: #17191d; border: 3px solid #ffffff; box-shadow: 0 0 0 2px #17191d; }
 .filter { display: flex; flex-wrap: wrap; gap: .5rem; }
 .filter button { border: 1px solid var(--rule); padding: .4rem .8rem; font-size: .875rem; }
-.filter button[aria-pressed="true"] { background: var(--accent); color: white; border-color: var(--accent); }
+.filter button[aria-pressed="true"] { background: var(--accent); color: var(--paper); border-color: var(--accent); }
 .list { border-top: 1px solid var(--rule); }
 .row { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .5rem; align-items: center; padding: .75rem .25rem; text-align: left; border-bottom: 1px solid var(--rule-subtle); }
 .row[data-selected="true"] { border-left: 3px solid var(--accent); padding-left: .75rem; background: var(--surface); }

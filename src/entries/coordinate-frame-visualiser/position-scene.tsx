@@ -200,13 +200,13 @@ export function PositionScene({ anchor, convention, camera, onCameraChange, onAn
       <circle cx={centre.x} cy={centre.y} r={earthRadius} className="fill-surface stroke-ink" strokeWidth={1} />
 
       {equator.back.map((run, i) => (
-        <polyline key={`eq-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-rule-subtle" strokeDasharray="3 4" strokeWidth={1} />
+        <polyline key={`eq-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-coordinate-grid" strokeDasharray="3 4" strokeWidth={1} />
       ))}
       {primeMeridian.back.map((run, i) => (
-        <polyline key={`pm-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-rule-subtle" strokeDasharray="3 4" strokeWidth={1} />
+        <polyline key={`pm-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-coordinate-grid" strokeDasharray="3 4" strokeWidth={1} />
       ))}
       {anchorMeridian.back.map((run, i) => (
-        <polyline key={`am-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-rule-subtle" strokeDasharray="3 4" strokeWidth={1} />
+        <polyline key={`am-back-${i}`} points={pointsToPath(scaledCamera, run)} className="fill-none stroke-coordinate-grid" strokeDasharray="3 4" strokeWidth={1} />
       ))}
 
       {equator.front.map((run, i) => (

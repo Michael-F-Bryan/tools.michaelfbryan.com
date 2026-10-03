@@ -1,13 +1,13 @@
 .viewer { min-width: 0; }
 .importBar { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem 1.5rem; padding: 1rem; border: 1px solid var(--rule); background: var(--surface); font-size: .85rem; color: var(--text-secondary); }
 .importBar strong { color: var(--accent); }
-.upload { position: relative; display: inline-flex; align-items: center; min-height: 44px; padding: .5rem 1rem; background: var(--accent); color: white; cursor: pointer; font-weight: 700; }
+.upload { position: relative; display: inline-flex; align-items: center; min-height: 44px; padding: .5rem 1rem; background: var(--accent); color: var(--paper); cursor: pointer; font-weight: 700; }
 .upload input, .reload input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .upload:focus-within, .reload:focus-within { outline: 2px solid #a7c5ff; outline-offset: 3px; }
 .empty { min-height: 340px; display: flex; flex-direction: column; justify-content: center; padding: clamp(1rem, 5vw, 4rem); border: 1px solid var(--rule-subtle); background: var(--panel); margin-top: 1rem; }
 .empty h2 { font-size: clamp(1.4rem, 4vw, 2rem); font-weight: 700; }
 .empty p { max-width: 40rem; margin-top: 1rem; line-height: 1.6; color: var(--text-secondary); }
-.loaded { position: fixed; inset: 0; z-index: 50; overflow: hidden; background: #111a21; color: #f1f5fb; font-family: var(--font-sans), sans-serif; }
+.loaded { color-scheme: dark; position: fixed; inset: 0; z-index: 50; overflow: hidden; background: #111a21; color: #f1f5fb; font-family: var(--font-sans), sans-serif; }
 .scene, .scene svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .scene svg { touch-action: none; cursor: grab; }
 .scene svg:active { cursor: grabbing; }

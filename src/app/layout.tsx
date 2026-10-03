@@ -5,6 +5,8 @@ import Link from "next/link";
 
 import { Analytics } from "@/components/analytics";
 import { Container } from "@/components/container";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
 
@@ -33,10 +35,13 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en-AU" className={sans.variable}>
+    <html lang="en-AU" data-theme="system" suppressHydrationWarning className={sans.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-screen bg-paper text-ink antialiased">
         <header className="border-b border-rule">
-          <Container className="py-5">
+          <Container className="flex flex-wrap items-center justify-between gap-4 py-5">
             <Link
               href="/"
               className="font-bold tracking-title underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
@@ -44,6 +49,7 @@ export default function RootLayout({
               Michael F. Bryan <span className="text-accent">/</span>{" "}
               <span className="text-muted">Tools</span>
             </Link>
+            <ThemeToggle />
           </Container>
         </header>
 
