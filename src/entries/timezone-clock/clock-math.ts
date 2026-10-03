@@ -11,6 +11,10 @@ export function wrapMinute(minute: number): number {
   return ((minute % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
+export function snapMinute(minute: number): number {
+  return wrapMinute(Math.round(minute / 5) * 5);
+}
+
 /** The time-of-day (0–1439) a person with `offsetMinutes` reads at the shared `anchorMinute`. */
 export function localMinuteFor(anchorMinute: number, offsetMinutes: number): number {
   return wrapMinute(anchorMinute + offsetMinutes);

@@ -28,6 +28,7 @@ export type Person = Readonly<{
 }>;
 
 export type Arrangement = Readonly<{
+  referencePersonId?: string;
   /** The offset whose local midnight sits at the top of the dial. */
   referenceOffsetMinutes: number;
   /** The selected instant, as a UTC time-of-day in 0–1439 minutes. */

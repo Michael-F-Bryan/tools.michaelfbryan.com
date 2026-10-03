@@ -9,7 +9,7 @@ import {
   localMinuteFor,
   mergeSpansToArcs,
   minuteToAngle,
-  wrapMinute,
+  snapMinute,
 } from "./clock-math";
 import { angleFromCenter, fullRingPath, wedgePath } from "./geometry";
 import { MINUTES_PER_DAY, type Person } from "./types";
@@ -47,7 +47,7 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
     const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
     const angle = angleFromCenter(CENTER, CENTER, point.x, point.y, DEAD_ZONE_RADIUS);
     if (angle === null) return;
-    const referenceLocalMinute = angleToMinute(angle);
+    const referenceLocalMinute = snapMinute(angleToMinute(angle));
     onSelect(anchorMinuteFor(referenceLocalMinute, referenceOffsetMinutes));
   }
 
@@ -71,7 +71,7 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
 
   function handleKeyDown(event: React.KeyboardEvent<SVGCircleElement>) {
     const current = localMinuteFor(selectedMinuteUtc, referenceOffsetMinutes);
-    const step = event.shiftKey ? 1 : 5;
+    const step = 5;
     let next: number;
     switch (event.key) {
       case "ArrowRight":
@@ -92,13 +92,13 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
         next = 0;
         break;
       case "End":
-        next = MINUTES_PER_DAY - 1;
+        next = MINUTES_PER_DAY - 5;
         break;
       default:
         return;
     }
     event.preventDefault();
-    onSelect(anchorMinuteFor(wrapMinute(next), referenceOffsetMinutes));
+    onSelect(anchorMinuteFor(snapMinute(next), referenceOffsetMinutes));
   }
 
   const referenceLocalMinute = localMinuteFor(selectedMinuteUtc, referenceOffsetMinutes);

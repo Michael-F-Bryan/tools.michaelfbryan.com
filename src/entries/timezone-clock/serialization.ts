@@ -6,7 +6,7 @@
  * shorter and means two different sessions loading the same link don't
  * fight over identity.
  */
-import { MINUTES_PER_DAY, type Arrangement, type Person, type Span, createId } from "./types";
+import { MINUTES_PER_DAY, PALETTE, type Arrangement, type Person, type Span, createId } from "./types";
 
 const SCHEMA_VERSION = 1;
 export const PARAM_NAME = "tz";
@@ -14,7 +14,7 @@ export const PARAM_NAME = "tz";
 // Exported so the editor UI can enforce the exact same limits the URL
 // parser accepts — every state the editor can reach must also reopen from
 // its own shared link.
-export const MAX_PEOPLE = 12;
+export const MAX_PEOPLE = PALETTE.length;
 export const MAX_SPANS_PER_PERSON = 12;
 export const MAX_NAME_LENGTH = 60;
 const MIN_OFFSET = -720;
@@ -23,12 +23,13 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 type WireSpan = readonly [number, number];
 type WirePerson = Readonly<{ n: string; o: number; c: string; s: readonly WireSpan[] }>;
-type WireArrangement = Readonly<{ v: number; r: number; t: number; p: readonly WirePerson[] }>;
+type WireArrangement = Readonly<{ v: number; r: number; a?: number; t: number; p: readonly WirePerson[] }>;
 
 function toWire(arrangement: Arrangement): WireArrangement {
   return {
     v: SCHEMA_VERSION,
     r: arrangement.referenceOffsetMinutes,
+    a: arrangement.referencePersonId ? arrangement.people.findIndex((person) => person.id === arrangement.referencePersonId) : undefined,
     t: arrangement.selectedMinuteUtc,
     p: arrangement.people.map((person) => ({
       n: person.name,
@@ -93,7 +94,9 @@ function validateArrangement(value: unknown): Arrangement | null {
     people.push(person);
   }
 
-  return { referenceOffsetMinutes: record.r, selectedMinuteUtc: record.t, people };
+  if (record.a !== undefined && (!isFiniteInt(record.a) || record.a < 0 || record.a >= people.length)) return null;
+  const reference = people[typeof record.a === "number" ? record.a : Math.max(0, people.findIndex((person) => person.offsetMinutes === record.r))];
+  return { referencePersonId: reference.id, referenceOffsetMinutes: reference.offsetMinutes, selectedMinuteUtc: record.t, people };
 }
 
 function validatePerson(value: unknown): Person | null {

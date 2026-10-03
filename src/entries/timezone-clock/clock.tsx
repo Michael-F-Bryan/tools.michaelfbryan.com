@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { anchorMinuteFor, formatClockTime, localMinuteFor, parseClockTime } from "./clock-math";
-import { PRIMARY_BUTTON } from "./controls";
+import { anchorMinuteFor, formatClockTime, localMinuteFor, parseClockTime, snapMinute } from "./clock-math";
+import { FIELD_CLASS, FIELD_LABEL, PRIMARY_BUTTON } from "./controls";
 import { Dial } from "./dial";
 import { DEFAULT_ARRANGEMENT } from "./default-arrangement";
-import { OffsetField } from "./offset-field";
+
 import { PeopleEditor } from "./people-editor";
 import { searchForArrangement, type ParseResult } from "./serialization";
 import { StatusList } from "./status-list";
@@ -71,7 +71,10 @@ export function Clock() {
     }
   }
 
-  const referenceLocalMinute = localMinuteFor(arrangement.selectedMinuteUtc, arrangement.referenceOffsetMinutes);
+  const referencePerson = arrangement.people.find((person) => person.id === arrangement.referencePersonId)
+    ?? arrangement.people.find((person) => person.offsetMinutes === arrangement.referenceOffsetMinutes)
+    ?? arrangement.people[0];
+  const referenceLocalMinute = localMinuteFor(arrangement.selectedMinuteUtc, referencePerson.offsetMinutes);
 
   return (
     <div data-clock-ready={hydrated} className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[22rem_minmax(0,1fr)] lg:items-start">
@@ -86,7 +89,7 @@ export function Clock() {
         ) : null}
 
         <Dial
-          referenceOffsetMinutes={arrangement.referenceOffsetMinutes}
+          referenceOffsetMinutes={referencePerson.offsetMinutes}
           selectedMinuteUtc={arrangement.selectedMinuteUtc}
           people={arrangement.people}
           onSelect={(selectedMinuteUtc) => setArrangement((prev) => ({ ...prev, selectedMinuteUtc }))}
@@ -96,6 +99,7 @@ export function Clock() {
           <span className="block font-bold text-ink">Selected time (reference zone)</span>
           <input
             type="time"
+            step={300}
             className="mt-1 min-h-11 border border-rule bg-surface px-3 py-2 text-base sm:min-h-0 sm:py-1.5 sm:text-sm"
             value={formatClockTime(referenceLocalMinute)}
             onChange={(event) => {
@@ -103,18 +107,26 @@ export function Clock() {
               if (minute === null) return;
               setArrangement((prev) => ({
                 ...prev,
-                selectedMinuteUtc: anchorMinuteFor(minute, prev.referenceOffsetMinutes),
+                selectedMinuteUtc: anchorMinuteFor(snapMinute(minute), referencePerson.offsetMinutes),
               }));
             }}
           />
         </label>
 
-        <OffsetField
-          idPrefix="reference"
-          label="Reference zone (top = 00:00)"
-          value={arrangement.referenceOffsetMinutes}
-          onChange={(referenceOffsetMinutes) => setArrangement((prev) => ({ ...prev, referenceOffsetMinutes }))}
-        />
+        <label className="min-w-0">
+          <span className={FIELD_LABEL}>Clock shown for</span>
+          <select
+            id="reference-person"
+            className={FIELD_CLASS}
+            value={referencePerson.id}
+            onChange={(event) => {
+              const person = arrangement.people.find((person) => person.id === event.target.value)!;
+              setArrangement((prev) => ({ ...prev, referencePersonId: person.id, referenceOffsetMinutes: person.offsetMinutes }));
+            }}
+          >
+            {arrangement.people.map((person) => <option key={person.id} value={person.id}>{person.name || "Unnamed"}</option>)}
+          </select>
+        </label>
 
         <div className="grid gap-2">
           <button type="button" className={PRIMARY_BUTTON} onClick={copyLink}>
@@ -123,9 +135,7 @@ export function Clock() {
           <p role="status" className="min-h-5 text-sm text-secondary">
             {copyStatus}
           </p>
-          <p className="text-xs text-muted">
-            The copied link includes the names, time zones and spans entered below — anyone with the link can read them.
-          </p>
+
         </div>
       </div>
 
@@ -134,7 +144,7 @@ export function Clock() {
           <h2 className="text-lg font-bold text-ink">At the selected time</h2>
           <div className="mt-3">
             <StatusList
-              referenceOffsetMinutes={arrangement.referenceOffsetMinutes}
+              referenceOffsetMinutes={referencePerson.offsetMinutes}
               selectedMinuteUtc={arrangement.selectedMinuteUtc}
               people={arrangement.people}
             />
@@ -144,7 +154,10 @@ export function Clock() {
         <section aria-label="People">
           <h2 className="text-lg font-bold text-ink">People</h2>
           <div className="mt-3">
-            <PeopleEditor people={arrangement.people} onChange={(people) => setArrangement((prev) => ({ ...prev, people }))} />
+            <PeopleEditor people={arrangement.people} onChange={(people) => {
+              const reference = people.find((person) => person.id === referencePerson.id) ?? people[0];
+              setArrangement((prev) => ({ ...prev, people, referencePersonId: reference.id, referenceOffsetMinutes: reference.offsetMinutes }));
+            }} />
           </div>
         </section>
       </div>

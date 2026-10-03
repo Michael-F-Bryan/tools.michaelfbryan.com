@@ -1,6 +1,6 @@
 "use client";
 
-import { formatClockTime, wrapMinute } from "./clock-math";
+import { formatClockTime, snapMinute, wrapMinute } from "./clock-math";
 import { ColorSwatches } from "./color-swatches";
 import { FIELD_CLASS, FIELD_HINT, FIELD_LABEL, LINK_BUTTON, SECONDARY_BUTTON } from "./controls";
 import { OffsetField } from "./offset-field";
@@ -27,7 +27,8 @@ export function PeopleEditor({ people, onChange }: PeopleEditorProps) {
 
   function addPerson() {
     if (people.length >= MAX_PEOPLE) return;
-    const nextColor = PALETTE[people.length % PALETTE.length].hex;
+    const nextColor = PALETTE.find((swatch) => !people.some((person) => person.color.toLowerCase() === swatch.hex.toLowerCase()))?.hex;
+    if (!nextColor) return;
     onChange([...people, createPerson({ name: `Person ${people.length + 1}`, offsetMinutes: 0, color: nextColor, spans: [createSpan(540, 1020)] })]);
   }
 
@@ -93,12 +94,12 @@ export function PeopleEditor({ people, onChange }: PeopleEditorProps) {
 
           <OffsetField
             idPrefix={`offset-${person.id}`}
-            label="Time zone / UTC offset"
+            label="Timezone"
             value={person.offsetMinutes}
             onChange={(offsetMinutes) => updatePerson(person.id, { offsetMinutes })}
           />
 
-          <ColorSwatches label={`Colour for ${person.name || "this person"}`} value={person.color} onChange={(color) => updatePerson(person.id, { color })} />
+          <ColorSwatches label={`Colour for ${person.name || "this person"}`} value={person.color} unavailable={people.filter((other) => other.id !== person.id).map((other) => other.color)} onChange={(color) => updatePerson(person.id, { color })} />
 
           <div className="grid gap-2">
             <span className={FIELD_LABEL}>Available local spans</span>
@@ -110,12 +111,13 @@ export function PeopleEditor({ people, onChange }: PeopleEditorProps) {
                     <span className="text-muted">From</span>
                     <input
                       type="time"
+                      step={300}
                       className="min-h-11 border border-rule bg-surface px-2 py-1 text-sm sm:min-h-0"
                       value={formatClockTime(span.startMinute)}
                       onChange={(event) => {
                         const minute = event.target.valueAsNumber;
                         if (!Number.isFinite(minute)) return;
-                        updateSpan(person.id, span.id, { startMinute: Math.round(minute / 60000) });
+                        updateSpan(person.id, span.id, { startMinute: snapMinute(minute / 60000) });
                       }}
                     />
                   </label>
@@ -123,12 +125,13 @@ export function PeopleEditor({ people, onChange }: PeopleEditorProps) {
                     <span className="text-muted">until</span>
                     <input
                       type="time"
+                      step={300}
                       className="min-h-11 border border-rule bg-surface px-2 py-1 text-sm sm:min-h-0"
                       value={formatClockTime(span.endMinute)}
                       onChange={(event) => {
                         const minute = event.target.valueAsNumber;
                         if (!Number.isFinite(minute)) return;
-                        updateSpan(person.id, span.id, { endWallClock: Math.round(minute / 60000) });
+                        updateSpan(person.id, span.id, { endWallClock: snapMinute(minute / 60000) });
                       }}
                     />
                   </label>

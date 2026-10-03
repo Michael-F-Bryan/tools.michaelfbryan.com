@@ -81,7 +81,7 @@ test("a real touch drag selects a time on the dial", async ({ page, context }, t
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("06:00");
 });
 
-test("keyboard arrows nudge the selection in 5-minute steps, Shift for 1-minute", async ({ page }) => {
+test("keyboard arrows always nudge the selection in 5-minute steps", async ({ page }) => {
   const handle = handleLocator(page);
   await handle.focus();
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("09:00");
@@ -93,7 +93,7 @@ test("keyboard arrows nudge the selection in 5-minute steps, Shift for 1-minute"
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("09:00");
 
   await page.keyboard.press("Shift+ArrowRight");
-  await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("09:01");
+  await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("09:05");
 
   await page.keyboard.press("Home");
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("00:00");
@@ -111,7 +111,7 @@ test("changing the reference zone rotates the dial without changing the selected
   // should track the reference zone one-to-one as the reference changes.
   await expect(statusRow(page, "Perth")).toContainText("09:00");
 
-  await page.locator("#reference-preset").selectOption({ label: "UTC+00:00 — UTC / Western European (GMT)" });
+  await page.getByLabel("Clock shown for").selectOption({ label: "London" });
 
   // The instant is unchanged, so Perth's own local reading is unchanged —
   // only the reference-zone-labelled dial/input rotate to show it as 01:00.
@@ -125,7 +125,7 @@ test("day-offset labels cover more than one day apart for extreme offsets", asyn
   // own offset-selection round-trip, which isn't what's under test here.
   await page.goto(
     `${URL_PATH}?tz=${encodeURIComponent(
-      JSON.stringify({ v: 1, r: 840, t: 660, p: [{ n: "Perth", o: -720, c: "#0072B2", s: [[540, 1020]] }] }),
+      JSON.stringify({ v: 1, r: 840, t: 660, p: [{ n: "Reference", o: 840, c: "#009E73", s: [] }, { n: "Perth", o: -720, c: "#0072B2", s: [[540, 1020]] }] }),
     )}`,
   );
   await expect(statusRow(page, "Perth")).toContainText(/days (ahead|behind)/);
@@ -206,8 +206,60 @@ test("copy link produces a URL that reopens with the same arrangement, editable"
   await expect(page.getByLabel("Name").first()).toHaveValue("Berlin, edited");
 });
 
-test("the shared-link note is visible near the copy button", async ({ page }) => {
-  await expect(page.getByText(/link includes the names, time zones and spans/)).toBeVisible();
+test("the interface omits redundant browser and sharing copy", async ({ page }) => {
+  await expect(page.getByText(/entirely in your browser|anyone with the link|Exact \(h\)/)).toHaveCount(0);
+});
+
+test("reference choices track the configured people and survive sharing", async ({ page }) => {
+  const reference = page.getByLabel("Clock shown for");
+  await expect(reference.locator("option")).toHaveText(["Perth", "London", "New York"]);
+  await reference.selectOption({ label: "London" });
+  await page.getByLabel("Name").nth(1).fill("UK office");
+  await expect(reference.locator("option:checked")).toHaveText("UK office");
+  await expect.poll(() => page.url()).toContain("UK+office");
+  await page.reload();
+  await expect(reference.locator("option:checked")).toHaveText("UK office");
+  await page.locator("fieldset").nth(1).getByLabel("Timezone", { exact: true }).selectOption("60");
+  await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("02:00");
+  await expect(statusRow(page, "Perth")).toContainText("09:00");
+  await page.getByRole("button", { name: "Remove UK office" }).click();
+  await expect(reference.locator("option:checked")).toHaveText("Perth");
+});
+
+test("selected time, dial clicks and span endpoints snap to five minutes", async ({ page }) => {
+  const selected = page.getByLabel("Selected time (reference zone)");
+  await selected.fill("09:03");
+  await expect(selected).toHaveValue("09:05");
+  await selected.fill("23:59");
+  await expect(selected).toHaveValue("00:00");
+  const card = page.locator("fieldset").first();
+  const from = card.locator('label:has-text("From") input');
+  const until = card.locator('label:has-text("until") input');
+  await from.fill("08:02");
+  await expect(from).toHaveValue("08:00");
+  await until.fill("16:58");
+  await expect(until).toHaveValue("17:00");
+  const box = (await dialLocator(page).boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.71, box.y + box.height * 0.31);
+  const time = await selected.inputValue();
+  expect(Number(time.split(":")[1]) % 5).toBe(0);
+  await expect(page.getByLabel("Timezone", { exact: true })).toHaveCount(3);
+  await expect(page.getByRole("textbox", { name: /exact offset/ })).toHaveCount(0);
+});
+
+test("used colours are disabled, released colours become available and new people use a free colour", async ({ page }) => {
+  const perth = page.getByRole("radiogroup", { name: "Colour for Perth" });
+  const london = page.getByRole("radiogroup", { name: "Colour for London" });
+  await expect(perth.getByRole("radio", { name: "Orange", exact: true })).toBeDisabled();
+  await expect(london.getByRole("radio", { name: "Blue", exact: true })).toBeDisabled();
+  await perth.getByRole("radio", { name: "Pink", exact: true }).click();
+  await expect(london.getByRole("radio", { name: "Blue", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Remove London" }).click();
+  await expect(perth.getByRole("radio", { name: "Orange", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Add a person" }).click();
+  const newcomer = page.locator("fieldset").last();
+  await expect(newcomer.getByRole("radio", { name: "Blue", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(newcomer.getByRole("radio", { name: "Pink", exact: true })).toBeDisabled();
 });
 
 test("nothing in the arrangement reaches localStorage or sessionStorage", async ({ page }) => {
