@@ -186,14 +186,18 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
           })}
 
           <circle cx={CENTER} cy={CENTER} r={HUB_RADIUS} className="fill-surface stroke-rule" />
-          <text x={CENTER} y={CENTER - 4} textAnchor="middle" dominantBaseline="middle" className="fill-ink font-mono text-sm font-bold">
+          <text x={CENTER} y={CENTER} textAnchor="middle" dominantBaseline="middle" className="fill-ink font-mono text-sm font-bold">
             {formatClockTime(referenceLocalMinute)}
           </text>
-          <text x={CENTER} y={CENTER + 14} textAnchor="middle" dominantBaseline="middle" className="fill-muted font-mono text-[9px]">
-            reference
-          </text>
 
-          <line x1={CENTER} y1={CENTER} x2={handleX} y2={handleY} className="stroke-accent" strokeWidth={2} />
+          <line
+            x1={CENTER + (HUB_RADIUS + 4) * Math.sin(selectionRadians)}
+            y1={CENTER - (HUB_RADIUS + 4) * Math.cos(selectionRadians)}
+            x2={handleX}
+            y2={handleY}
+            className="stroke-accent"
+            strokeWidth={2}
+          />
         </g>
 
         <circle

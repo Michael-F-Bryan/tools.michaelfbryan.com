@@ -280,6 +280,15 @@ test("desktop layout has no horizontal overflow; narrow mobile stacks without ov
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(URL_PATH);
   await expect(page.locator('[data-clock-ready="true"]')).toBeVisible();
+  const dial = dialLocator(page);
+  await expect(dial.locator("text").filter({ hasText: /^reference$/ })).toHaveCount(0);
+  expect(await dial.evaluate((svg) => {
+    const hub = svg.querySelector("circle.fill-surface")!;
+    const ray = svg.querySelector("line.stroke-accent")!;
+    const dx = Number(ray.getAttribute("x1")) - Number(hub.getAttribute("cx"));
+    const dy = Number(ray.getAttribute("y1")) - Number(hub.getAttribute("cy"));
+    return Math.hypot(dx, dy) > Number(hub.getAttribute("r"));
+  })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("timezone-clock-desktop.png"), fullPage: true });
 
