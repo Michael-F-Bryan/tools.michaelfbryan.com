@@ -24,7 +24,11 @@ export function EntryPage({ definition, children }: Readonly<{
               : "grid items-start gap-10 lg:grid-cols-[minmax(0,52rem)_14rem] lg:gap-16"
           }
         >
-          <header className="max-w-article lg:col-start-1 lg:row-start-1">
+          {/* `min-w-0` overrides a grid item's default `min-width: auto`, which
+              otherwise lets a long, unbroken title (wrapped word-by-word by
+              `PageTitle`) hold its implicit grid track open to its unwrapped
+              width and overflow a narrow viewport instead of wrapping. */}
+          <header className="min-w-0 max-w-article lg:col-start-1 lg:row-start-1">
             <PageTitle className={isWorkspace ? "text-3xl sm:text-5xl" : ""}>{definition.title}</PageTitle>
             <Prose size={isWorkspace ? "base" : "xl"} className={isWorkspace ? "mt-3" : "mt-7"}>
               <p>{definition.description}</p>
@@ -53,7 +57,7 @@ export function EntryPage({ definition, children }: Readonly<{
           ) : null}
 
           <article
-            className={isWorkspace ? "lg:col-start-1 lg:row-start-2" : "max-w-article lg:col-start-1 lg:row-start-2"}
+            className={isWorkspace ? "min-w-0 lg:col-start-1 lg:row-start-2" : "max-w-article lg:col-start-1 lg:row-start-2"}
           >
             {children}
           </article>

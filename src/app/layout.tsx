@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { GoogleAnalytics } from "@next/third-parties/google";
 import { Atkinson_Hyperlegible } from "next/font/google";
 import Link from "next/link";
 
+import { Analytics } from "@/components/analytics";
 import { Container } from "@/components/container";
 
 import "./globals.css";
@@ -49,9 +49,7 @@ export default function RootLayout({
 
         {children}
 
-        {googleAnalyticsId ? (
-          <GoogleAnalytics gaId={googleAnalyticsId} />
-        ) : null}
+        {googleAnalyticsId ? <Analytics gaId={googleAnalyticsId} /> : null}
       </body>
     </html>
   );

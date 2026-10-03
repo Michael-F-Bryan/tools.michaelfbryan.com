@@ -16,12 +16,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload)\.spec\.ts$/,
+      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chromium",
-      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload)\.spec\.ts$/,
+      testIgnore: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize)\.spec\.ts$/,
       use: { ...devices["Pixel 7"] },
     },
     {
@@ -30,14 +30,21 @@ export default defineConfig({
       // TypeScript unit tests. Accepted so the math tests stay inside the
       // existing `pnpm test:e2e` gate instead of a second test runner.
       name: "unit",
-      testMatch: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload)\.spec\.ts$/,
+      testMatch: /(?:coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize)\.spec\.ts$/,
     },
   ],
+  // `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is set here (not in `.env`, which stays
+  // empty so local/preview traffic never reaches the real property) so
+  // `analytics-live.spec.ts` exercises the real "production analytics
+  // enabled" code path against the one shared dev server, rather than a
+  // second server on a second port — this worktree's `.next` dev lock only
+  // allows one `next dev` instance per directory regardless of port.
   webServer: externalBaseUrl
     ? undefined
     : {
         command: "pnpm exec next dev --port 3107",
         url: baseURL,
         reuseExistingServer: !process.env.CI,
+        env: { NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: "G-TESTTEST01" },
       },
 });
