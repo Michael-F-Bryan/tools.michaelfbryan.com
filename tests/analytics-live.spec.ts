@@ -2,9 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 
 // The shared dev server (see playwright.config.ts) runs with
 // NEXT_PUBLIC_GOOGLE_ANALYTICS_ID set, so these tests exercise the real
-// "production analytics enabled" code path. They don't run against an
-// externally supplied server (which wouldn't have that env var set).
-test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), "needs the shared config's own analytics-enabled dev server");
+// "production analytics enabled" code path. External servers are skipped
+// unless production verification explicitly opts in after confirming GA is enabled.
+test.skip(
+  Boolean(process.env.PLAYWRIGHT_BASE_URL) && process.env.PLAYWRIGHT_VERIFY_ANALYTICS !== "1",
+  "needs an analytics-enabled server (opt in with PLAYWRIGHT_VERIFY_ANALYTICS=1)",
+);
 
 const SECRET_NAME = "Ultra-Confidential-Launch-Team";
 const COLLECT_URL = /google-analytics\.com\/g\/collect|analytics\.google\.com\/g\/collect/;
@@ -43,8 +46,8 @@ test("a non-sensitive route sends a sanitised, path-only page_view with no query
   await page.goto("/");
   await expect(page.locator('script[src*="googletagmanager.com"]')).toHaveCount(1);
 
+  await expect.poll(async () => (await dataLayerPageViews(page)).length).toBeGreaterThan(0);
   const pageViews = await dataLayerPageViews(page);
-  expect(pageViews.length).toBeGreaterThan(0);
   const payload = pageViews[0][2];
   expect(payload.page_path).toBe("/");
   expect(payload.page_location).not.toContain("?");
@@ -104,6 +107,9 @@ test("navigating from the tool to another route refreshes GA's defaults with a s
   await page.getByRole("link", { name: /Michael F\. Bryan/ }).click();
   await expect(page).toHaveURL(/\/$/);
 
+  await expect.poll(async () =>
+    (await dataLayerPageViews(page)).filter((entry) => entry[2].page_path === "/").length,
+  ).toBeGreaterThan(0);
   const pageViews = await dataLayerPageViews(page);
   const homeViews = pageViews.filter((entry) => entry[2].page_path === "/");
   expect(homeViews.length).toBeGreaterThan(0);

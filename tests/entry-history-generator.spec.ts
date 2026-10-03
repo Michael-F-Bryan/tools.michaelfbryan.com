@@ -145,6 +145,36 @@ test("fails clearly instead of publishing wrong dates for a shallow clone", asyn
   fs.rmSync(shallow, { recursive: true, force: true });
 });
 
+test("a deployment build completes shallow history from its pinned commit without an origin remote", async () => {
+  const repo = makeTempRepo();
+  writeEntryFile(repo, "alpha", "definition.ts", "export const definition = {};\n");
+  const first = commitAll(repo, "add alpha", { date: "2024-01-01T00:00:00Z" });
+  writeEntryFile(repo, "alpha", "logic.ts", "export const value = 1;\n");
+  const deployed = commitAll(repo, "improve alpha", { date: "2024-01-02T00:00:00Z" });
+  // The branch tip moves on after the deployed commit. The build must not.
+  writeEntryFile(repo, "alpha", "logic.ts", "export const value = 2;\n");
+  commitAll(repo, "newer undeployed change", { date: "2024-01-03T00:00:00Z" });
+  const shallow = fs.mkdtempSync(path.join(os.tmpdir(), "entry-history-deploy-"));
+  try {
+    run(shallow, ["clone", "-q", "--depth", "2", `file://${repo}`, "."]);
+    run(shallow, ["checkout", "--detach", deployed]);
+    run(shallow, ["remote", "remove", "origin"]);
+    expect(run(shallow, ["rev-parse", "--is-shallow-repository"]).trim()).toBe("true");
+    const history = await generateEntryHistory({
+      repoRoot: shallow,
+      fetchHistory: { repositoryUrl: `file://${repo}`, commit: deployed },
+    });
+    expect(run(shallow, ["rev-parse", "--is-shallow-repository"]).trim()).toBe("false");
+    expect(run(shallow, ["rev-parse", "HEAD"]).trim()).toBe(deployed);
+    expect(history.alpha.status).toBe("available");
+    if (history.alpha.status !== "available") throw new Error("unreachable");
+    expect(history.alpha.commits.map((commit) => commit.sha)).toEqual([deployed, first]);
+  } finally {
+    fs.rmSync(shallow, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("fails clearly when there is no git repository at all", async () => {
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), "entry-history-plain-"));
   writeEntryFile(plain, "alpha", "definition.ts", "export const definition = {};\n");

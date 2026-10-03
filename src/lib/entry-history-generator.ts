@@ -18,6 +18,8 @@ export type GenerateEntryHistoryOptions = Readonly<{
   entriesDir?: string;
   /** Defaults to `<repoRoot>/.generated/entry-history.json`. */
   outputPath?: string;
+  /** Explicit build-only permission to fetch missing ancestry, pinned to HEAD. */
+  fetchHistory?: Readonly<{ repositoryUrl: string; commit: string }>;
 }>;
 
 const FIELD_SEPARATOR = "\x1f";
@@ -32,7 +34,7 @@ function git(repoRoot: string, args: readonly string[]): string {
  * history, which would make "created"/"updated" dates wrong rather than
  * absent. Fail loudly instead of publishing a plausible-looking lie.
  */
-function assertUsableGitHistory(repoRoot: string): void {
+function assertUsableGitHistory(repoRoot: string, source?: GenerateEntryHistoryOptions["fetchHistory"]): void {
   let insideWorkTree: string;
   try {
     insideWorkTree = git(repoRoot, ["rev-parse", "--is-inside-work-tree"]).trim();
@@ -47,7 +49,18 @@ function assertUsableGitHistory(repoRoot: string): void {
   }
 
   const isShallow = git(repoRoot, ["rev-parse", "--is-shallow-repository"]).trim();
-  if (isShallow === "true") {
+  if (isShallow === "true" && source) {
+    if (!/^[0-9a-f]{40}$/.test(source.commit) || git(repoRoot, ["rev-parse", "HEAD"]).trim() !== source.commit) {
+      throw new Error("Cannot fetch build history: the deployed commit must be a full SHA matching HEAD.");
+    }
+    console.info(`Fetching full entry history for ${source.commit}.`);
+    try {
+      git(repoRoot, ["fetch", "--unshallow", "--no-tags", source.repositoryUrl, source.commit]);
+    } catch (cause) {
+      throw new Error(`Could not fetch complete entry history for ${source.commit} from ${source.repositoryUrl}.`, { cause });
+    }
+  }
+  if (git(repoRoot, ["rev-parse", "--is-shallow-repository"]).trim() === "true") {
     throw new Error(
       "This git checkout is shallow, so entry development history would be incomplete or wrong. " +
         "Fetch full history (`git fetch --unshallow`, or `fetch-depth: 0` in CI) before running `pnpm dev` or `pnpm build`.",
@@ -114,7 +127,7 @@ export async function generateEntryHistory(
   const entriesDir = options.entriesDir ?? path.join(repoRoot, "src", "entries");
   const outputPath = options.outputPath ?? path.join(repoRoot, ".generated", "entry-history.json");
 
-  assertUsableGitHistory(repoRoot);
+  assertUsableGitHistory(repoRoot, options.fetchHistory);
 
   const history: Record<string, EntryHistory> = {};
   for (const slug of discoverEntrySlugs(entriesDir)) {

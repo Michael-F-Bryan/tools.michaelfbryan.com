@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 import { cn } from "@/lib/utils";
 
 import { RANGE_INPUT, SEGMENT_BUTTON, segmentTone } from "./controls";
@@ -14,6 +16,12 @@ type SequenceStripProps = Readonly<{
   onInterpretationChange: (interpretation: EulerInterpretation) => void;
   onProgressChange: (progress: number) => void;
 }>;
+
+// React checks the client snapshot after hydration. Until then, native
+// controls stay disabled so changes cannot be lost before handlers attach.
+const subscribe = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 const STAGE_TICKS = ["start", "after 1", "after 2", "after 3"] as const;
 
@@ -32,6 +40,7 @@ export function SequenceStrip({
   onInterpretationChange,
   onProgressChange,
 }: SequenceStripProps) {
+  const ready = useSyncExternalStore(subscribe, clientReady, serverReady);
   const focusedStage = focusedStageFor(progress);
   const anglesByStage = [angles.first, angles.second, angles.third];
 
@@ -43,6 +52,7 @@ export function SequenceStrip({
           <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-secondary">
             Order
             <select
+              disabled={!ready}
               aria-label="Rotation order"
               value={order}
               onChange={(event) => onOrderChange(event.target.value as TaitBryanOrder)}
@@ -59,6 +69,7 @@ export function SequenceStrip({
             {(["intrinsic", "extrinsic"] as const).map((candidate) => (
               <button
                 key={candidate}
+                disabled={!ready}
                 type="button"
                 aria-pressed={interpretation === candidate}
                 onClick={() => onInterpretationChange(candidate)}
@@ -77,6 +88,7 @@ export function SequenceStrip({
           <span className="font-mono text-xs text-muted">the body follows the slider</span>
         </label>
         <input
+          disabled={!ready}
           id="cfv-scrub"
           type="range"
           min={0}

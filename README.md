@@ -41,7 +41,10 @@ are displayed in UTC to keep static pages and client rendering consistent.
 
 This requires real, non-shallow git history: a shallow clone fails the build
 with a clear error rather than publishing wrong dates, so CI checks out with
-`fetch-depth: 0`. An entry with no qualifying commits yet (e.g. added but not
+`fetch-depth: 0`. Vercel production builds explicitly fetch missing ancestry
+from the public repository, pinned to `VERCEL_GIT_COMMIT_SHA`, before generating
+history. This leaves HEAD unchanged and fails the build if the fetch fails.
+Local development never fetches automatically. An entry with no qualifying commits yet (e.g. added but not
 yet committed) gets an explicit "unavailable" history instead of invented
 dates. Because generation only runs for `next dev`/`next build`, restart the
 dev server to pick up new commits — the file is read once per server

@@ -40,6 +40,7 @@ test.describe("Coordinate frame visualiser", () => {
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(page.locator('meta[name="description"]')).toHaveCount(1);
     await expect(page.locator('meta[name="description"]')).toHaveAttribute(
       "content",
       "Explore a body’s position and orientation across local and Earth coordinate frames.",
@@ -161,6 +162,30 @@ test.describe("Coordinate frame visualiser", () => {
     await expect(page.getByLabel("body x")).toHaveValue(bodyBefore[0]);
     await expect(page.getByLabel("body y")).toHaveValue(bodyBefore[1]);
     await expect(page.getByLabel("body z")).toHaveValue(bodyBefore[2]);
+  });
+
+  test("sequence controls wait for hydration and the first scrub is retained", async ({ page }) => {
+    let releaseScripts!: () => void;
+    const scriptsReleased = new Promise<void>((resolve) => { releaseScripts = resolve; });
+    await page.route("**/_next/**/*.js", async (route) => {
+      await scriptsReleased;
+      await route.continue();
+    });
+    try {
+      await page.goto(TOOL_URL, { waitUntil: "commit" });
+      const scrub = page.locator("#cfv-scrub");
+      await expect(scrub).toBeVisible();
+      await expect(scrub).toBeDisabled();
+      await expect(page.getByLabel("Rotation order")).toBeDisabled();
+      await expect(page.getByRole("button", { name: "extrinsic", exact: true })).toBeDisabled();
+      releaseScripts();
+      await expect(scrub).toBeEnabled();
+      await scrub.fill("0");
+      await expect(page.locator('li[aria-current="step"]')).toContainText("start");
+      await expect(page.locator("[data-body-axes-readout]")).toContainText("N +1.000");
+    } finally {
+      releaseScripts();
+    }
   });
 
   test("7. the scrubber moves the drawn body: start coincides with the local frame, the end is the full pose", async ({
