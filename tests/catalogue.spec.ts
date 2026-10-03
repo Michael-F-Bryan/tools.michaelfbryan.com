@@ -3,13 +3,14 @@ import { expect, test } from "@playwright/test";
 test("the catalogue opens entries at flat routes without publishing the reference", async ({ page }) => {
   await page.goto("/");
   const catalogue = page.getByRole("region", { name: "Catalogue" });
-  await expect(catalogue.getByRole("listitem")).toHaveCount(3);
+  await expect(catalogue.getByRole("listitem")).toHaveCount(4);
   await expect(catalogue.getByRole("link", { name: /kitchen sink/i })).toHaveCount(0);
 
   for (const [title, href] of [
     ["Coordinate frame visualiser", "/coordinate-frame-visualiser"],
     ["GEDCOM family tree viewer", "/gedcom-viewer"],
     ["Melbourne morning", "/melbourne-morning"],
+    ["QR code generator", "/qr-code"],
   ]) {
     await page.goto("/");
     const link = page.getByRole("link", { name: new RegExp(title) });
@@ -25,7 +26,7 @@ test("the catalogue gives entries decorative previews and keyboard focus", async
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Tools & experiments", exact: true })).toBeVisible();
   const rows = page.getByRole("region", { name: "Catalogue" }).getByRole("listitem");
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(4);
   for (const row of await rows.all()) {
     await expect(row.locator('[aria-hidden="true"] svg')).toBeVisible();
   }

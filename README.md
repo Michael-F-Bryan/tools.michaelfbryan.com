@@ -4,7 +4,7 @@
 
 Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, and a Melbourne place finder. The shared component reference lives separately at `/reference/components`.
+The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, a Melbourne place finder, and a browser-only QR code generator. The shared component reference lives separately at `/reference/components`.
 
 ## Repository structure
 
