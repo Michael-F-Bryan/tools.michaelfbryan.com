@@ -376,8 +376,9 @@ test("text-property escaping normalises carriage returns without injecting prope
   expect(escapeICal("Ada\r\nLOCATION:Injected\rSmith")).toBe("Ada\\nLOCATION:Injected\\nSmith");
 });
 
-test("inverted QR colours are not offered as safe", () => {
-  expect(hasSafeContrast("#ffffff", "#000000")).toBe(false);
+test("contrasting QR colours are accepted in either order", () => {
+  expect(hasSafeContrast("#ffffff", "#000000")).toBe(true);
+  expect(hasSafeContrast("#00ffff", "#000000")).toBe(true);
 });
 
 test.describe("slugify", () => {

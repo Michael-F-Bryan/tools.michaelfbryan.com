@@ -86,7 +86,7 @@ export function WifiForm({ value, errors, touched, onChange, onBlur }: FormProps
         checked={value.hidden}
         onChange={(hidden) => onChange({ hidden })}
       />
-      {value.hidden && <p className="text-sm text-muted">Hidden-network codes are not supported by every phone scanner. Test on the device that will join.</p>}
+      {value.hidden && <p className="text-sm text-muted">Hidden-network support depends on the phone scanner.</p>}
     </div>
   );
 }
@@ -231,7 +231,7 @@ export function SmsForm({ value, errors, touched, onChange, onBlur }: FormProps<
         label="Message (optional)"
         value={value.message}
         onChange={(message) => onChange({ message })}
-        hint="Uses the SMSTO: format to prepare a draft, not send it. Scanner and messaging-app support varies; test on your target device."
+        hint="Uses SMSTO: to encode a draft text message."
       />
     </div>
   );
@@ -315,7 +315,7 @@ export function CalendarForm({ value, errors, touched, onChange, onBlur }: FormP
         label="Description (optional)"
         value={value.description}
         onChange={(description) => onChange({ description })}
-        hint="Calendar apps vary in how they import a scanned event — check the result before relying on it."
+        hint="Encodes an iCalendar event (VEVENT)."
       />
     </div>
   );

@@ -20,13 +20,11 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /**
- * A conservative product guardrail, not a QR specification or a guarantee
- * of scanning under every lighting condition. Keep dark modules on light.
+ * A contrast threshold for the colour picker, independent of colour order.
  */
 export const MIN_SCANNABLE_CONTRAST = 4.5;
 
 export function hasSafeContrast(foreground: string, background: string): boolean {
   if (!HEX_COLOR_RE.test(foreground) || !HEX_COLOR_RE.test(background)) return false;
-  return relativeLuminance(foreground) < relativeLuminance(background)
-    && contrastRatio(foreground, background) >= MIN_SCANNABLE_CONTRAST;
+  return contrastRatio(foreground, background) >= MIN_SCANNABLE_CONTRAST;
 }
