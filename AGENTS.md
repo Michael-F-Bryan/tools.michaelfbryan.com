@@ -6,13 +6,15 @@ Read `README.md` once before structural or user-visible work, then inspect only 
 
 ## Architecture
 
-Add tools and explainers through `src/entries/<collection>/<slug>/`; discovery derives routes and catalogue records automatically. Do not add parallel routes or manual registries. The shared entry page owns the kind, title, description, and optional section navigation; `content.tsx` supplies the body. Keep `definition.sections` aligned with rendered heading IDs.
+Add entries through `src/entries/<slug>/`; discovery derives flat routes and catalogue records automatically. Do not add parallel entry routes or manual registries. The shared `EntryPage` owns the title, description, article/workspace layout, and optional section navigation; `content.tsx` supplies the body. Keep `definition.sections` aligned with rendered heading IDs. The component reference at `/reference/components` is outside catalogue discovery.
 
 Pages remain statically generated Server Components by default. Interactive tools use the narrowest useful Client Component boundary and process input in the browser unless a server dependency is genuinely required. Do not add persistence, telemetry, dependencies, or infrastructure without an immediate product need. Tool inputs and outputs must not leave the browser or reach analytics.
 
 ## Design system
 
 Reuse the tokens in `globals.css` and existing semantic components. Do not copy a shared component's class list into an entry; use the component unless its meaning is wrong for that job. Keep subject-specific layouts, illustrations, and ordinary one-off controls local to their entry.
+
+An optional `preview.tsx` default-exports a static, decorative Server Component for the catalogue, normally an inline SVG using site tokens. The catalogue owns its dimensions and placement; the entry owns the drawing. Keep previews legible at thumbnail size, without client state, effects, network requests, or imports of interactive tool bodies. Entries without a preview use an initial as a fallback.
 
 Use native semantic HTML for straightforward buttons, textareas, inputs, and alerts, styled locally with site tokens. Do not run `shadcn add` or create `src/components/ui/` wrappers merely to obtain them. Introduce Base UI or shadcn only when native HTML cannot provide required interaction behaviour, or when the same component contract has already recurred. Strip unused variants and generic styling from generated code.
 
