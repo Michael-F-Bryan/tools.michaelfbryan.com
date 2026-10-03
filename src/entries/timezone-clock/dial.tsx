@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import {
   anchorMinuteFor,
@@ -38,6 +38,13 @@ export type DialProps = Readonly<{
 export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSelect }: DialProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
+  const [previousOffset, setPreviousOffset] = useState(referenceOffsetMinutes);
+  const [rotation, setRotation] = useState(referenceOffsetMinutes / MINUTES_PER_DAY * 360);
+  if (previousOffset !== referenceOffsetMinutes) {
+    const delta = (referenceOffsetMinutes - previousOffset) / MINUTES_PER_DAY * 360;
+    setRotation(rotation + ((delta + 540) % 360 - 180));
+    setPreviousOffset(referenceOffsetMinutes);
+  }
 
   function updateFromClientPoint(clientX: number, clientY: number) {
     const svg = svgRef.current;
@@ -125,10 +132,14 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
         <g aria-hidden="true">
           <circle cx={CENTER} cy={CENTER} r={RING_OUTER_RADIUS + 1} className="fill-none stroke-rule-subtle" />
 
+          <g
+            className="availability-rings transition-transform duration-300 ease-out motion-reduce:transition-none"
+            style={{ transformOrigin: `${CENTER}px ${CENTER}px`, transform: `rotate(${rotation}deg)` }}
+          >
           {people.map((person, index) => {
             const innerRadius = RING_START_RADIUS + index * bandWidth + RING_GAP;
             const outerRadius = RING_START_RADIUS + (index + 1) * bandWidth - RING_GAP;
-            const shift = referenceOffsetMinutes - person.offsetMinutes;
+            const shift = -person.offsetMinutes;
             const arcs = mergeSpansToArcs(person.spans);
 
             return (
@@ -160,6 +171,8 @@ export function Dial({ referenceOffsetMinutes, selectedMinuteUtc, people, onSele
               </g>
             );
           })}
+
+          </g>
 
           {Array.from({ length: 24 }, (_, hour) => {
             const angle = hour * 15;

@@ -119,6 +119,22 @@ test("changing the reference zone rotates the dial without changing the selected
   await expect(page.getByLabel("Selected time (reference zone)")).toHaveValue("01:00");
 });
 
+test("reference changes briefly rotate the arcs, with reduced motion respected", async ({ page }) => {
+  const rings = dialLocator(page).locator(".availability-rings");
+  await expect(rings).toHaveCSS("transition-duration", "0.3s");
+  await page.getByLabel("Clock shown for").selectOption({ label: "London" });
+  await expect.poll(() => rings.evaluate((element) => element.getAnimations().some((animation) => animation.playState === "running")), { intervals: [16], timeout: 1000 }).toBe(true);
+  await rings.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  await expect(rings).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  await expect(statusRow(page, "Perth")).toContainText("09:00");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(rings).toHaveCSS("transition-property", "none");
+  await page.getByLabel("Clock shown for").selectOption({ label: "Perth" });
+  expect(await rings.evaluate((element) => element.getAnimations().length)).toBe(0);
+});
+
 test("day-offset labels cover more than one day apart for extreme offsets", async ({ page }) => {
   // Drive this precisely via the URL (same arrangement the unit test for
   // `relativeDayOffset`'s two-day case uses) rather than through the UI's
