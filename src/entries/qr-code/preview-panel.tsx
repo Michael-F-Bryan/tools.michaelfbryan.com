@@ -233,8 +233,7 @@ export function PreviewPanel({
       )}
       {!contrastOk && !renderError && (
         <p role="alert" className="mt-3 text-sm text-error">
-          Colours are too close in contrast or inverted ({ratio.toFixed(1)}:1). Use a dark foreground on a light background;
-          this tool requires at least {MIN_SCANNABLE_CONTRAST}:1 contrast. Test the result on your phone.
+          Colours are too close in contrast ({ratio.toFixed(1)}:1). Minimum contrast: {MIN_SCANNABLE_CONTRAST}:1.
         </p>
       )}
 
@@ -265,14 +264,6 @@ export function PreviewPanel({
       <p role="status" className="mt-2 min-h-5 text-sm text-secondary">
         {copyFeedback?.text ?? shareFeedback?.text ?? ""}
       </p>
-
-      <details className="mt-4 text-sm text-muted">
-        <summary className={DISCLOSURE_SUMMARY}>Check before printing</summary>
-        <p>
-        Scan the exported code yourself before printing or sharing it widely — appearance and content both affect
-        whether a given scanner can read it.
-        </p>
-      </details>
 
       <details className="mt-5 border-t border-rule-subtle pt-3">
         <summary className={DISCLOSURE_SUMMARY}>View raw data</summary>
@@ -344,10 +335,6 @@ export function PreviewPanel({
             </div>
           </fieldset>
           </details>
-
-          <p className="text-sm text-muted">
-            No logos or decorative modules — overlays like these reduce how reliably scanners can read the code.
-          </p>
         </div>
       </details>
 

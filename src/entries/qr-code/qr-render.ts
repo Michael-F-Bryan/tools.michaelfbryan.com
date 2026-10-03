@@ -5,10 +5,10 @@ export type ErrorCorrectionLevel = "L" | "M" | "Q" | "H";
 export const ERROR_CORRECTION_LEVELS: readonly ErrorCorrectionLevel[] = ["L", "M", "Q", "H"];
 
 export const ERROR_CORRECTION_DESCRIPTIONS: Record<ErrorCorrectionLevel, string> = {
-  L: "Low — about 7% error-correction capacity. Fits the most data at a given size.",
-  M: "Medium (default) — about 15% error-correction capacity. A good balance for screens and printouts.",
-  Q: "Quartile — about 25% error-correction capacity. More redundancy for exposed prints.",
-  H: "High — about 30% error-correction capacity. More redundancy, but a denser code. Print it larger, not smaller.",
+  L: "Low — about 7% error-correction capacity.",
+  M: "Medium (default) — about 15% error-correction capacity.",
+  Q: "Quartile — about 25% error-correction capacity.",
+  H: "High — about 30% error-correction capacity. More redundancy can increase code density.",
 };
 
 export type QrAppearance = {

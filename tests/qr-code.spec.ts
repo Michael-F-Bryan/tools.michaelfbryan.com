@@ -406,6 +406,41 @@ test("contrast gating disables export for near-identical colours and re-enables 
   await expect(page.getByRole("button", { name: "Download PNG" })).toBeEnabled();
 });
 
+test("the contrast error clears for contrasting colours in either order", async ({ page }) => {
+  await page.getByLabel("Web address").fill("https://example.com");
+  await page.getByText("Appearance", { exact: true }).click();
+  await page.getByLabel("Foreground colour").fill("#00ffff");
+  await page.getByLabel("Background colour").fill("#ff00ff");
+  await expect(page.locator("#qr-preview").getByRole("alert")).toContainText("too close in contrast");
+  await expect(page.locator("#qr-preview").getByRole("alert")).not.toContainText("inverted");
+  await page.getByLabel("Background colour").fill("#000000");
+  await expect(page.locator("#qr-preview").getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download PNG" })).toBeEnabled();
+  const png = await downloadAndDecode(page, "Download PNG", "image/png");
+  expect(png.decoded.text).toBe("https://example.com");
+  await page.getByLabel("Foreground colour").fill("#000000");
+  await page.getByLabel("Background colour").fill("#00ffff");
+  await expect(page.locator("#qr-preview").getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download PNG" })).toBeEnabled();
+});
+
+test("the generator provides facts without instructions to check or justify its output", async ({ page }) => {
+  await expect(page.getByText("Check before printing", { exact: true })).toHaveCount(0);
+  await page.getByText("Appearance", { exact: true }).click();
+  await expect(page.getByText(/No logos or decorative modules/)).toHaveCount(0);
+  for (const type of ["wifi", "sms", "calendar"]) {
+    await page.getByLabel("QR code type").selectOption(type);
+    if (type === "wifi") {
+      await expect(page.getByLabel("Network name (SSID)")).toBeFocused();
+      await page.getByLabel("Network name (SSID)").fill("Guest");
+      await page.getByLabel("Password", { exact: true }).fill("example-password");
+      await page.getByLabel("Network is hidden").check();
+      await expect(page.getByText("Hidden-network support depends on the phone scanner.")).toBeVisible();
+    }
+    await expect(page.getByText(/test on|check the result|test the result|scan the exported code/i)).toHaveCount(0);
+  }
+});
+
 test("error correction choice is explained and changes the encoded symbol without changing the payload", async ({ page }) => {
   await page.getByLabel("Web address").fill("https://example.com");
   await page.getByText("Appearance", { exact: true }).click();
