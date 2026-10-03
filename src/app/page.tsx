@@ -4,6 +4,8 @@ import { Container } from "@/components/container";
 import { PageTitle } from "@/components/page-title";
 import { entries } from "@/entries";
 
+const dateFormatter = new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeZone: "UTC" });
+
 export default function Home() {
   return (
     <main>
@@ -14,7 +16,7 @@ export default function Home() {
 
         <section aria-label="Catalogue" className="max-w-4xl pb-24">
           <ol className="border-t border-rule">
-            {entries.map(({ href, title, description, Preview }) => (
+            {entries.map(({ href, title, description, Preview, history }) => (
               <li key={href}>
                 <Link
                   href={href}
@@ -29,6 +31,9 @@ export default function Home() {
                     </span>
                     <span className="mt-2 block max-w-measure leading-7 text-secondary">
                       {description}
+                    </span>
+                    <span className="mt-2 block text-sm text-muted">
+                      {history.status === "available" ? `Last updated ${dateFormatter.format(new Date(history.updatedAt))}` : "Last updated date unavailable"}
                     </span>
                   </span>
                 </Link>

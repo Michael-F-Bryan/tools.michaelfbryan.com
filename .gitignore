@@ -19,6 +19,9 @@
 /.next/
 /out/
 
+# generated entry development history (see next.config.ts)
+/.generated/
+
 # production
 /build
 

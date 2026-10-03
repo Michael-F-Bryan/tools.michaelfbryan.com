@@ -6,7 +6,8 @@ import { Step, Steps } from "@/components/steps";
 
 const components = [
   ["Container", "Centres the page and adds the side gutters."],
-  ["EntryPage", "Provides the title, description, article or workspace layout, and optional section navigation."],
+  ["EntryPage", "Provides the title, description, article or workspace layout, optional section navigation, and — for discovered entries — the Updated/Development history/Source intro line."],
+  ["DevelopmentHistoryDialog", "The accessible dialog behind \"Development history\": created/updated dates and the real, scrollable commit list for one entry."],
   ["PageTitle", "Renders the large heading and keeps each word together."],
   ["Label", "Small monospace text for section kickers and utility labels."],
   ["Section", "Pairs a kicker and heading with the usual vertical spacing."],

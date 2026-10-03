@@ -25,5 +25,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function Page({ params }: PageProps) {
   const entry = await resolveEntry(params);
   const Content = await entry.load();
-  return <EntryPage definition={entry}><Content /></EntryPage>;
+  return (
+    <EntryPage definition={entry} slug={entry.slug} history={entry.history}>
+      <Content />
+    </EntryPage>
+  );
 }

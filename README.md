@@ -24,6 +24,29 @@ Pages are React Server Components and are generated statically. Interactive tool
 
 Entry discovery uses Turbopack's `import.meta.glob()` support. Both development and production builds must use Turbopack.
 
+### Entry development history
+
+Each entry's intro line shows a real "Updated" date, a "Development history"
+dialog (created/updated dates and the commits that touched that entry's
+directory), and a "Source" link. `next.config.ts`'s phase function calls
+`generateEntryHistory` (`src/lib/entry-history-generator.ts`) before compilation on
+both `next dev` and `next build`, which reads `git log` for each
+`src/entries/<slug>` directory and writes `.generated/entry-history.json`
+(git-ignored; left untouched when its content hasn't changed). `src/entries/index.ts`
+reads that file at module load and attaches each entry's history, which is
+also how the catalogue sorts by most-recently-updated. The known former
+`src/entries/tools/<slug>` and `src/entries/explainers/<slug>` directories
+are included so the flat-layout migration does not reset history. Dates
+are displayed in UTC to keep static pages and client rendering consistent.
+
+This requires real, non-shallow git history: a shallow clone fails the build
+with a clear error rather than publishing wrong dates, so CI checks out with
+`fetch-depth: 0`. An entry with no qualifying commits yet (e.g. added but not
+yet committed) gets an explicit "unavailable" history instead of invented
+dates. Because generation only runs for `next dev`/`next build`, restart the
+dev server to pick up new commits — the file is read once per server
+lifetime, not per request.
+
 ## Development
 
 This project uses Node.js 22 and pnpm.

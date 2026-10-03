@@ -1,13 +1,43 @@
 import type { ReactNode } from "react";
 
 import { Container } from "@/components/container";
+import { DevelopmentHistoryDialog } from "@/components/development-history-dialog";
 import { Label } from "@/components/label";
 import { PageTitle } from "@/components/page-title";
 import { Prose } from "@/components/prose";
-import type { EntryDefinition } from "@/lib/entry";
+import { GITHUB_REPO_URL, type EntryDefinition } from "@/lib/entry";
+import type { EntryHistory } from "@/lib/entry-history";
 
-export function EntryPage({ definition, children }: Readonly<{
+const dateFormatter = new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeZone: "UTC" });
+
+/**
+ * The entry's intro line: when "slug" is given (every catalogue entry, but
+ * not the component reference page, which discovery never sees), it shows
+ * the real "Updated" date, a "Development history" dialog, and a "Source"
+ * link — never a disclosure that doubles as the page's primary content.
+ */
+function EntryMeta({ slug, title, history }: Readonly<{ slug: string; title: string; history: EntryHistory }>) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-secondary">
+      <span>{history.status === "available" ? `Updated ${dateFormatter.format(new Date(history.updatedAt))}` : "Updated date unavailable"}</span>
+      <DevelopmentHistoryDialog slug={slug} title={title} history={history} />
+      <a
+        href={`${GITHUB_REPO_URL}/tree/main/src/entries/${slug}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline-offset-4 hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+      >
+        Source
+      </a>
+    </div>
+  );
+}
+
+export function EntryPage({ definition, slug, history, children }: Readonly<{
   definition: EntryDefinition;
+  /** Omitted for pages outside catalogue discovery, e.g. the component reference. */
+  slug?: string;
+  history?: EntryHistory;
   children: ReactNode;
 }>) {
   const isWorkspace = definition.layout === "workspace";
@@ -33,6 +63,7 @@ export function EntryPage({ definition, children }: Readonly<{
             <Prose size={isWorkspace ? "base" : "xl"} className={isWorkspace ? "mt-3" : "mt-7"}>
               <p>{definition.description}</p>
             </Prose>
+            {slug && history ? <EntryMeta slug={slug} title={definition.title} history={history} /> : null}
           </header>
 
           {!isWorkspace && definition.sections?.length ? (

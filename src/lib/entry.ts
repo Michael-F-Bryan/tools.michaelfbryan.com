@@ -1,3 +1,6 @@
+/** Where an entry's source and its commits live, for the "Source" link and development-history commit links. */
+export const GITHUB_REPO_URL = "https://github.com/Michael-F-Bryan/tools.michaelfbryan.com";
+
 export type EntrySection = Readonly<{
   id: string;
   label: string;
