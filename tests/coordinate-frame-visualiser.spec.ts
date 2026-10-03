@@ -555,9 +555,11 @@ test.describe("Coordinate frame visualiser", () => {
   });
 
   test("14. no tool data leaves the browser; no console errors", async ({ page }) => {
-    const requests: string[] = [];
+    // The site has no favicon; exclude that unrelated browser lookup.
+    await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
+    const requests: { url: string; body: string }[] = [];
     const consoleErrors: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
+    page.on("request", (request) => requests.push({ url: request.url(), body: request.postData() ?? "" }));
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
@@ -572,11 +574,14 @@ test.describe("Coordinate frame visualiser", () => {
     await latitude.fill("12.3456");
     await latitude.blur();
 
-    for (const url of requests) {
+    for (const { url, body } of requests) {
       const parsed = new URL(url);
-      expect(["localhost", "127.0.0.1"]).toContain(parsed.hostname);
-      expect(url).not.toContain("123.456");
-      expect(url).not.toContain("12.3456");
+      // The shared test server enables analytics to exercise sanitisation.
+      const allowed = ["localhost", "127.0.0.1", "www.googletagmanager.com"].includes(parsed.hostname)
+        || parsed.hostname.endsWith(".google-analytics.com");
+      expect(allowed).toBe(true);
+      expect(`${url} ${body}`).not.toContain("123.456");
+      expect(`${url} ${body}`).not.toContain("12.3456");
     }
     expect(consoleErrors).toEqual([]);
   });

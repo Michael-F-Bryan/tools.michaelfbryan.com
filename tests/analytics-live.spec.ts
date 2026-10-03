@@ -53,7 +53,7 @@ test("a non-sensitive route sends a sanitised, path-only page_view with no query
 test("loading the tool directly from a shared link never puts the arrangement in any outbound request", async ({ page }) => {
   const requests = recordRequests(page);
   await page.goto(secretUrlFor(SECRET_NAME));
-  await expect(page.getByText(SECRET_NAME)).toBeVisible();
+  await expect(page.getByRole("listitem").getByText(SECRET_NAME, { exact: true })).toBeVisible();
   await page.waitForTimeout(1500); // let GA's real beacon, if any, actually fire
 
   // A shared query URL goes to our own host on navigation; it must not go to third parties.
