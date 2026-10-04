@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useSyncExternalStore } from "react";
 
-import { cn } from "@/lib/utils";
+import { Menu } from "@base-ui/react/menu";
 import {
   THEME_CHANGE_EVENT,
   THEME_STORAGE_KEY,
@@ -49,27 +49,43 @@ export function ThemeToggle() {
   }
 
   return (
-    <fieldset disabled={!hydrated} className="flex divide-x divide-rule border border-rule text-xs">
-      <legend className="sr-only">Colour theme</legend>
-      {OPTIONS.map((option) => (
-        <label
-          key={option.value}
-          className={cn(
-            "flex min-h-11 cursor-pointer items-center px-2 py-1.5 font-mono uppercase tracking-label transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
-            preference === option.value ? "bg-accent text-paper" : "text-secondary hover:text-ink",
-          )}
-        >
-          <input
-            type="radio"
-            name="theme-preference"
-            value={option.value}
-            checked={preference === option.value}
-            onChange={() => choose(option.value)}
-            className="sr-only"
-          />
-          {option.label}
-        </label>
-      ))}
-    </fieldset>
+    <Menu.Root modal={false}>
+      <Menu.Trigger
+        disabled={!hydrated}
+        aria-label="Colour theme"
+        title={`Colour theme: ${preference}`}
+        className="flex size-11 shrink-0 cursor-pointer items-center justify-center text-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor" stroke="none" />
+        </svg>
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner align="end" sideOffset={4} className="z-50">
+          <Menu.Popup aria-label="Colour theme" className="w-42 border border-rule-subtle bg-surface p-1 shadow-lg outline-none">
+            <Menu.RadioGroup value={preference} onValueChange={choose}>
+              {OPTIONS.map((option) => (
+                <Menu.RadioItem
+                  key={option.value}
+                  value={option.value}
+                  closeOnClick
+                  className="flex min-h-11 cursor-pointer items-center gap-2.5 px-3 text-base text-secondary outline-none data-[checked]:bg-panel data-[checked]:text-ink data-[highlighted]:bg-panel data-[highlighted]:text-ink focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+                >
+                  <span aria-hidden="true" className="w-4 shrink-0">
+                    <Menu.RadioItemIndicator>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="m3 8 3 3 7-7" />
+                      </svg>
+                    </Menu.RadioItemIndicator>
+                  </span>
+                  {option.label}
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

@@ -1,10 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function choose(page: Page, name: "System" | "Light" | "Dark") {
-  const group = page.getByRole("group", { name: "Colour theme" });
-  await expect(group.getByRole("radio", { name, exact: true })).toBeEnabled();
-  await group.locator("label", { hasText: name }).click();
-  await expect(group.getByRole("radio", { name, exact: true })).toBeChecked();
+  const trigger = page.getByRole("button", { name: "Colour theme", exact: true });
+  await trigger.click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(trigger).toHaveAttribute("title", `Colour theme: ${name.toLowerCase()}`);
+}
+
+async function expectPreference(page: Page, name: "System" | "Light" | "Dark") {
+  await page.getByRole("button", { name: "Colour theme", exact: true }).click();
+  await expect(page.getByRole("menuitemradio", { name, exact: true })).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
 }
 
 async function expectScheme(page: Page, scheme: "light" | "dark") {
@@ -16,13 +24,13 @@ test("System follows the OS; an explicit choice persists, then resets", async ({
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expectScheme(page, "dark");
-  await expect(page.getByRole("radio", { name: "System", exact: true })).toBeChecked();
+  await expectPreference(page, "System");
   await page.emulateMedia({ colorScheme: "light" });
   await expectScheme(page, "light");
   await choose(page, "Dark");
   await page.reload();
   await expectScheme(page, "dark");
-  await expect(page.getByRole("radio", { name: "Dark", exact: true })).toBeChecked();
+  await expectPreference(page, "Dark");
   await choose(page, "Light");
   await page.emulateMedia({ colorScheme: "dark" });
   await expectScheme(page, "light");
@@ -53,7 +61,7 @@ test("a second tab tracks overrides and reset to System", async ({ page, context
   await choose(other, "Light");
   await expectScheme(page, "light");
   await choose(other, "System");
-  await expect(page.getByRole("radio", { name: "System", exact: true })).toBeChecked();
+  await expectPreference(page, "System");
   await expectScheme(page, "light");
   await other.close();
 });
@@ -73,18 +81,61 @@ test("storage failure still allows this tab to switch themes", async ({ page }) 
   await expectScheme(page, "dark");
 });
 
-test("keyboard selection works and retains visible focus", async ({ page }) => {
+test("keyboard selection, Escape and focus return work", async ({ page }) => {
   await page.goto("/");
-  const system = page.getByRole("radio", { name: "System", exact: true });
-  await expect(system).toBeEnabled();
-  await system.focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("radio", { name: "Light", exact: true })).toBeChecked();
-  await page.keyboard.press("ArrowRight");
-  const dark = page.getByRole("radio", { name: "Dark", exact: true });
-  await expect(dark).toBeChecked();
+  const trigger = page.getByRole("button", { name: "Colour theme", exact: true });
+  await expect(trigger).toBeEnabled();
+  await trigger.focus();
+  await expect(trigger).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Home");
+  await expect(page.getByRole("menuitemradio", { name: "System", exact: true })).toBeFocused();
+  await page.keyboard.press("End");
+  const dark = page.getByRole("menuitemradio", { name: "Dark", exact: true });
   await expect(dark).toBeFocused();
-  await expect(dark.locator("..")).toHaveCSS("outline-style", "solid");
+  await expect(dark).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Enter");
+  await expectScheme(page, "dark");
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitemradio", { name: "Dark", exact: true })).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("pointer selection closes the menu; outside presses dismiss it", async ({ page, isMobile }) => {
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Colour theme", exact: true });
+  await expect(trigger).toBeEnabled();
+  if (isMobile) await trigger.tap(); else await trigger.click();
+  const dark = page.getByRole("menuitemradio", { name: "Dark", exact: true });
+  if (isMobile) await dark.tap(); else await dark.click();
+  await expectScheme(page, "dark");
+  await expect(page.getByRole("menu")).toBeHidden();
+  if (isMobile) await trigger.tap(); else await trigger.click();
+  const heading = page.getByRole("heading", { name: "Tools & experiments", exact: true });
+  if (isMobile) await heading.tap(); else await heading.click();
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expectScheme(page, "dark");
+});
+
+test("the icon stays on the brand row and the popup fits a narrow phone", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Colour theme", exact: true });
+  await expect(trigger).toBeEnabled();
+  const icon = (await trigger.boundingBox())!;
+  const brand = (await page.locator("header a").boundingBox())!;
+  expect(icon.width).toBeGreaterThanOrEqual(44);
+  expect(icon.height).toBeGreaterThanOrEqual(44);
+  expect(Math.abs((brand.y + brand.height / 2) - (icon.y + icon.height / 2))).toBeLessThan(2);
+  await trigger.click();
+  const popup = (await page.getByRole("menu").boundingBox())!;
+  expect(popup.x).toBeGreaterThanOrEqual(0);
+  expect(popup.x + popup.width).toBeLessThanOrEqual(320);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("coordinate geometry stays unchanged and grid lines remain legible", async ({ page }) => {
