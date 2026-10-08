@@ -39,8 +39,8 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="min-h-screen bg-paper text-ink antialiased">
-        <header className="border-b border-rule">
+      <body className="flex min-h-dvh flex-col bg-paper text-ink antialiased">
+        <header className="shrink-0 border-b border-rule">
           <Container className="flex flex-wrap items-center justify-between gap-4 py-5">
             <Link
               href="/"

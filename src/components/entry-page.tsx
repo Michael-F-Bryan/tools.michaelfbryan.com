@@ -42,6 +42,23 @@ export function EntryPage({ definition, slug, history, children }: Readonly<{
 }>) {
   const isWorkspace = definition.layout === "workspace";
 
+  if (definition.layout === "immersive") {
+    return (
+      <main className="flex min-h-0 flex-1 flex-col">
+        <Container className="w-full shrink-0 py-4">
+          <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <h1 className="text-2xl font-bold tracking-title">{definition.title}</h1>
+              <p className="text-sm text-secondary">{definition.description}</p>
+            </div>
+            {slug && history ? <EntryMeta slug={slug} title={definition.title} history={history} /> : null}
+          </header>
+        </Container>
+        <article className="flex min-h-0 flex-1 flex-col">{children}</article>
+      </main>
+    );
+  }
+
   return (
     // A workspace's introduction is kept short so the interactive surface
     // starts within the first screen, on phones included.

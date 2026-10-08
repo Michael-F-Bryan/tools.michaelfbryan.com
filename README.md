@@ -4,7 +4,7 @@
 
 Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, a Melbourne place finder, a browser-only QR code generator, a timezone availability clock, and Afterlight, a constellation instrument. The shared component reference lives separately at `/reference/components`.
+The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, a Melbourne place finder, a browser-only QR code generator, a timezone availability clock, Afterlight, a constellation instrument, and Ebb, a field of sentences that gradually forget and recombine. The shared component reference lives separately at `/reference/components`.
 
 ## Repository structure
 
@@ -95,6 +95,8 @@ PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
 Previews are decorative, non-interactive Server Components, normally inline SVGs using site tokens. The catalogue owns their dimensions and placement; each entry owns its drawing. Keep them legible at thumbnail size, without effects, network requests, or imports of the interactive tool. Entries without a preview use a quiet initial as a fallback.
 
 The build discovers the new entry automatically. Its definition supplies the catalogue, document metadata, and visible page chrome; no separate route or catalogue registration is required.
+
+The `immersive` layout uses a compact introduction and an edge-to-edge body that fills the remaining viewport, as in Ebb. The `workspace` layout uses the full page container; `article` keeps the reading measure and optional section index.
 
 The page renders the entry's title, description, and optional in-page navigation; `content.tsx` supplies only the body. An explainer body is usually a stack of `Section`s holding `Prose`, `Steps`, and `Figure`s, with subject-specific layouts and illustrations written inline against the tokens in `globals.css` (`bg-surface`, `bg-panel`, `border-rule`, `text-accent`, `tracking-label`, `max-w-measure`).
 

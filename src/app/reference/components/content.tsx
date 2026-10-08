@@ -7,7 +7,7 @@ import { Step, Steps } from "@/components/steps";
 const components = [
   ["Container", "Centres the page and adds the side gutters."],
   ["ThemeToggle", "The header’s appearance icon opens a System / Light / Dark menu. System follows the device setting; explicit choices are remembered across visits. Use it here to inspect every component in both palettes."],
-  ["EntryPage", "Provides the title, description, article or workspace layout, optional section navigation, and — for discovered entries — the Updated/Development history/Source intro line."],
+  ["EntryPage", "Provides the title, description, article, workspace or immersive layout (as in Ebb), optional section navigation, and — for discovered entries — the Updated/Development history/Source intro line."],
   ["DevelopmentHistoryDialog", "The accessible dialog behind \"Development history\": created/updated dates and the real, scrollable commit list for one entry."],
   ["PageTitle", "Renders the large heading and keeps each word together."],
   ["Label", "Small monospace text for section kickers and utility labels."],

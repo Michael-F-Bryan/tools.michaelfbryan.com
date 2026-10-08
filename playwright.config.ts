@@ -19,12 +19,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testIgnore: /(?:afterlight-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
+      testIgnore: /(?:afterlight-model|ebb-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chromium",
-      testIgnore: /(?:afterlight-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
+      testIgnore: /(?:afterlight-model|ebb-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
       use: { ...devices["Pixel 7"] },
     },
     {
@@ -33,7 +33,7 @@ export default defineConfig({
       // TypeScript unit tests. Accepted so the math tests stay inside the
       // existing `pnpm test:e2e` gate instead of a second test runner.
       name: "unit",
-      testMatch: /(?:afterlight-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
+      testMatch: /(?:afterlight-model|ebb-model|coordinate-frame-(?:math|scene)|melbourne-hours|qr-code-payload|timezone-clock-math|analytics-sanitize|entry-history-generator)\.spec\.ts$/,
     },
   ],
   // `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is set here (not in `.env`, which stays

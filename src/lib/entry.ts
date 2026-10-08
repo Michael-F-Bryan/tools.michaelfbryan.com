@@ -15,7 +15,8 @@ export type EntryDefinition = Readonly<{
    * a side column for in-page navigation. `"workspace"` lets the body use
    * the full page width instead, for tools whose layout needs the room
    * (e.g. side-by-side scene and inspector panels). The header text keeps
-   * the article measure either way.
+   * the article measure either way. `"immersive"` fills the viewport below
+   * site navigation with a compact intro and an edge-to-edge body.
    */
-  layout?: "article" | "workspace";
+  layout?: "article" | "workspace" | "immersive";
 }>;
