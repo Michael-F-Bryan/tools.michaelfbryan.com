@@ -1,0 +1,54 @@
+/* The instrument is a night sky, independently of the surrounding site theme. */
+.instrument {
+  --sky-ink: #efe5cf;
+  --sky-muted: #a4b6ba;
+  --sky-line: #52676d;
+  --sky-accent: #e3bd81;
+  color-scheme: dark;
+  position: relative;
+  height: clamp(480px, 70svh, 720px);
+  overflow: hidden;
+  background: #101b22;
+  color: var(--sky-ink);
+  font-family: Georgia, "Times New Roman", serif;
+}
+.instrument canvas {position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.instrument canvas:focus-visible {outline:2px solid var(--sky-accent);outline-offset:-4px}
+.invitation {position:absolute;top:32%;left:9%;pointer-events:none;transition:opacity 1.5s}
+.invitation[data-hidden="true"] {opacity:0}
+.invitation p {font-size:clamp(30px,4vw,56px);line-height:1.15;margin:0 0 18px;letter-spacing:-1.5px}
+.invitation span {font-size:17px;line-height:1.7;color:var(--sky-muted)}
+.readout {position:absolute;right:28px;bottom:185px;display:flex;flex-direction:column;text-align:right;gap:8px;pointer-events:none;font:11px/1.5 var(--font-mono);color:var(--sky-muted)}
+.readout span:first-child {color:var(--sky-accent)}
+.controls {position:absolute;bottom:22px;left:28px;right:28px}
+.primary,.secondary {display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.secondary {margin-top:10px}
+.instrument button {font:12px var(--font-mono);color:var(--sky-ink);border:1px solid var(--sky-line);border-radius:3px;background:#14232a;min-height:44px;padding:10px 16px;cursor:pointer}
+.instrument button:hover {border-color:var(--sky-accent);background:#233238}
+.instrument button:focus-visible,.instrument input:focus-visible {outline:2px solid var(--sky-accent);outline-offset:3px}
+.instrument button:disabled {opacity:.4;cursor:default}
+.primary button:first-child {border-color:var(--sky-accent);color:var(--sky-accent);min-width:140px}
+.instrument button[aria-pressed="true"] {background:#344047}
+.tempo {display:flex;align-items:center;gap:10px;margin-left:12px;font:11px var(--font-mono);color:var(--sky-muted);min-height:44px}
+.tempo input {width:95px;accent-color:var(--sky-accent)}
+.tempo output {min-width:24px}
+.footnote {font:10px/1.6 var(--font-mono);letter-spacing:.3px;color:var(--sky-muted);margin:14px 0 0}
+.status {position:absolute;bottom:100%;margin:0 0 15px;font:12px/1.5 var(--font-mono);color:var(--sky-accent);max-width:80%}
+@media(max-width:600px) {
+  .instrument {height:580px}
+  .invitation {left:8%;top:30%}
+  .invitation p {font-size:clamp(26px,7vw,39px)}
+  .invitation span {font-size:15px}
+  .controls {left:14px;right:14px;bottom:16px}
+  .instrument button {padding:10px 11px;font-size:11px}
+  .primary {gap:6px}
+  .tempo {margin-left:0;gap:6px}
+  .tempo input {width:60px}
+  .primary button:first-child {min-width:120px}
+  .secondary {gap:5px}
+  .secondary button {flex:1;white-space:nowrap}
+  .readout {right:18px;bottom:220px}
+  .readout span:last-child {display:none}
+  .footnote {font-size:10px}
+}
+@media(prefers-reduced-motion:reduce) {.invitation {transition:none}}

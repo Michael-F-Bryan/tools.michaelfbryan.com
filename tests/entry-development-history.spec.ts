@@ -8,6 +8,7 @@ type EntryHistory =
   | { status: "unavailable"; reason: string };
 
 const ENTRIES = [
+  { slug: "afterlight", title: "Afterlight" },
   { slug: "coordinate-frame-visualiser", title: "Coordinate frame visualiser" },
   { slug: "gedcom-viewer", title: "GEDCOM family tree viewer" },
   { slug: "melbourne-morning", title: "Melbourne morning" },
