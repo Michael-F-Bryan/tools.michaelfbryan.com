@@ -4,7 +4,7 @@
 
 Source code for **tools.michaelfbryan.com**, a collection of browser-based tools and visual technical explainers by [Michael F. Bryan](https://www.michaelfbryan.com/).
 
-The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, a Melbourne place finder, a browser-only QR code generator, a timezone availability clock, Afterlight, a constellation instrument, and Ebb, a field of sentences that gradually forget and recombine. The shared component reference lives separately at `/reference/components`.
+The catalogue contains a coordinate-frame visualiser, a GEDCOM family-tree viewer, a Melbourne place finder, a browser-only QR code generator, a timezone availability clock, Afterlight, a constellation instrument, Ebb, a field of sentences that gradually forget and recombine, and The Cost of a Word, a small Three.js game about one night in a ruined watchtower. The shared component reference lives separately at `/reference/components`.
 
 ## Repository structure
 
