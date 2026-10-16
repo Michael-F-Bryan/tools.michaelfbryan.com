@@ -164,10 +164,11 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
   lintel.position.copy(polar(DOOR_T, R + 0.05, HALL + 1.82));
   lintel.rotation.y = DOOR_T;
   const glamourMat = mat("#7c7d8b", { transparent: true, opacity: 0.96, emissive: new THREE.Color("#2a2340") });
-  const glamour = mesh(new THREE.BoxGeometry(1.05, 1.8, 0.3), glamourMat);
-  glamour.position.copy(polar(DOOR_T, R + 0.12, HALL + 0.9));
+  const glamour = mesh(new THREE.BoxGeometry(1.05, 1.8, 0.45), glamourMat);
+  glamour.position.copy(polar(DOOR_T, R + 0.05, HALL + 0.9));
   glamour.rotation.y = DOOR_T;
   const steps = 9;
+  const rubbleBlock = new THREE.BoxGeometry(0.34, 0.26, 0.3);
   const stairGroup = new THREE.Group();
   const rubble = new THREE.Group();
   const ice = new THREE.Group();
@@ -182,11 +183,11 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
     const sheet = mesh(new THREE.BoxGeometry(0.9, 0.1, 0.75), iceMat, ice);
     sheet.position.copy(polar(t, R + 0.6, y + 0.2));
     sheet.rotation.set(0.05, t, 0.08);
-    for (let k = 0; k < 2; k++) {
-      const chunk = mesh(rocks, stoneDark, rubble);
-      chunk.position.copy(polar(t + (k ? 0.05 : -0.05), R + 0.5 + k * 0.25, y + 0.35 + k * 0.25));
-      chunk.scale.setScalar(0.3 + ((i + k) % 3) * 0.08);
-      chunk.rotation.set(i, k, i * k);
+    for (let k = 0; k < 3; k++) {
+      const chunk = mesh(rubbleBlock, stoneDark, rubble);
+      chunk.position.copy(polar(t + (k - 1) * 0.05, R + 0.45 + (k % 2) * 0.3, y + 0.28 + k * 0.16));
+      chunk.scale.setScalar(0.8 + ((i + k) % 3) * 0.25);
+      chunk.rotation.set(i + k, k * 1.3, i * 0.7);
     }
   }
 
@@ -260,13 +261,15 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
   const dragon = buildDragon(mat);
   dragon.group.position.set(-1.5, HALL, -0.45);
   dragon.group.rotation.y = -0.62;
+  dragon.group.scale.setScalar(1.15);
   add(dragon.group);
   const mound = new THREE.Group();
   add(mound);
-  for (let i = 0; i < 12; i++) {
-    const r = mesh(rocks, stone, mound);
-    r.position.set(-1.6 + (i % 4) * 0.55 - 0.6, HALL + 0.25 + (i % 3) * 0.22, -0.5 + Math.floor(i / 4) * 0.45 - 0.3);
-    r.scale.setScalar(0.32 + (i % 3) * 0.1);
+  const moundMat = mat("#6c6a74", { emissive: new THREE.Color("#1c1630") });
+  for (let i = 0; i < 16; i++) {
+    const r = mesh(rocks, moundMat, mound);
+    r.position.set(-2.3 + (i % 4) * 0.6, HALL + 0.25 + (i % 3) * 0.25, -1.1 + Math.floor(i / 4) * 0.45);
+    r.scale.setScalar(0.38 + (i % 3) * 0.12);
     r.rotation.set(i, i * 2, i * 3);
   }
 
@@ -423,7 +426,7 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
     // Vael
     const asleep = !vaelAwake(s);
     dragon.animate(t, still, { asleep, wing: s.wing, look: rider.position });
-    dragon.setGhost(s.vaelHidden ? 0.18 : 1);
+    dragon.setGhost(s.vaelHidden ? 0.08 : 1);
     mound.visible = s.vaelHidden;
     if (s.ending === "flight") {
       if (flightStart < 0) flightStart = now;
@@ -627,8 +630,9 @@ function buildDragon(mat: (color: string, extra?: THREE.MeshLambertMaterialParam
       neck.rotation.z = s.asleep ? -0.55 : (still ? 0 : Math.sin(t * 0.7) * 0.04);
       const blink = s.asleep || (!still && t % 4.3 < 0.12);
       eyes.forEach(e => (e.scale.y = blink ? 0.15 : 1));
-      hurt.rotation.x = [1.05, 0.55, 0.22][s.wing];
-      hurt.rotation.z = s.wing === 2 && !still ? Math.sin(t * 1.2) * 0.08 : 0;
+      hurt.rotation.x = [1.2, 0.65, -0.45][s.wing];
+      hurt.rotation.z = s.wing === 2 && !still ? Math.sin(t * 1.4) * 0.18 : 0;
+      good.rotation.x = s.wing === 2 ? 0.45 + (still ? 0 : Math.sin(t * 1.4) * 0.12) : -0.25;
       bandage.visible = s.wing < 2;
     },
   };

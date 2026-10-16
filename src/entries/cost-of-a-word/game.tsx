@@ -97,6 +97,7 @@ export function Game() {
             <span className={styles.clock}>{clock(game.minutes)}</span>
             <span>{game.ending ? "The night is over" : left <= 60 ? `They arrive in ${duration(left)}` : `Dawn in ${duration(left)}`}</span>
           </p>
+          <p className={styles.threat} data-alerted={game.alerted || undefined}>{threat(game)}</p>
           <div className={styles.night} aria-hidden="true"><span style={{ width: `${Math.min(100, (game.minutes / arrival(game)) * 100)}%` }} /></div>
           <Strength label="You" value={game.energy} />
           <Strength label="Vael" value={game.vaelEnergy} note={asleep ? "asleep" : undefined} />
@@ -223,6 +224,14 @@ function Strength({ label, value, note }: { label: string; value: number; note?:
       <span>{value}{note ? ` · ${note}` : ""}</span>
     </p>
   );
+}
+
+function threat(s: GameState): string {
+  if (s.ending) return s.ending === "flight" ? "The sky" : "Dawn";
+  if (s.alerted) return "They know you are here";
+  if (s.torchesSnuffed) return "Their torches are out";
+  if (s.minutes >= 90) return "Torches on the north road";
+  return "The road is dark";
 }
 
 function duration(minutes: number) {

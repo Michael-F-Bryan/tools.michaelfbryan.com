@@ -58,7 +58,7 @@ test("a reckless spell is challenged by Vael, then kills you; the night can begi
   await expect(page.getByText("1 of 8 known")).toBeVisible();
 });
 
-test("hiding the fire and sending it out before dawn leads the soldiers away", async ({ page }) => {
+test("hiding the fire and sending it out before dawn leads the soldiers away", async ({ page }, info) => {
   await page.goto("/cost-of-a-word");
   await go(page, "The parapet");
   await page.getByRole("button", { name: /^Read the ward-stone/ }).click();
@@ -77,6 +77,85 @@ test("hiding the fire and sending it out before dawn leads the soldiers away", a
   await page.getByRole("button", { name: "Wait for dawn" }).click();
   await expect(page.getByRole("heading", { name: "The walking light" })).toBeFocused();
   await expect(page.getByText("You survived the night")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("decoy.png") });
+});
+
+test("a dark tower and a sealed stair hold until morning", async ({ page }, info) => {
+  await page.goto("/cost-of-a-word");
+  await page.getByRole("button", { name: /^Search your satchel/ }).click();
+  await page.getByRole("button", { name: "Can they see our fire?" }).click();
+  await word(page, "hesh still").click();
+  await word(page, "brae flame").click();
+  await page.getByRole("button", { name: "Speak the words" }).click();
+  await expect(log(page)).toContainText("The cold arrives at once.");
+  await go(page, "The doorway");
+  await page.getByRole("button", { name: /^Read the carved lintel/ }).click();
+  await word(page, "ithra move").click();
+  await word(page, "kor stone").click();
+  await page.getByRole("button", { name: "Speak the words" }).click();
+  await expect(log(page)).toContainText("Now no one comes up.");
+  await page.screenshot({ path: info.outputPath("barricade.png") });
+  await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await expect(page.getByRole("heading", { name: "The stair" })).toBeFocused();
+  await page.screenshot({ path: info.outputPath("stand.png") });
+});
+
+const speak = async (page: Page, verb: string, noun: string, share = false) => {
+  await word(page, verb).click();
+  await word(page, noun).click();
+  const shared = page.getByRole("checkbox", { name: "Share the cost with Vael" });
+  if (share) await shared.check(); else await shared.uncheck();
+  await page.getByRole("button", { name: /^Speak (the words|anyway)$/ }).click();
+};
+const doing = (page: Page, label: string) => page.getByRole("button", { name: new RegExp(`^${label}`) }).click();
+
+test("mending the wing twice, with Vael sharing the cost, ends in flight", async ({ page }, info) => {
+  await page.goto("/cost-of-a-word");
+  await go(page, "The doorway");
+  await doing(page, "Read the carved lintel");
+  await go(page, "The cistern");
+  await doing(page, "Look into the cistern");
+  await speak(page, "ithra move", "kor stone");
+  await expect(log(page)).toContainText("You learned anwe: flesh.");
+  await go(page, "Vael's corner");
+  await doing(page, "Look at the wing");
+  await page.getByRole("button", { name: "Is there a word for healing?" }).click();
+  await speak(page, "orun mend", "anwe flesh", true);
+  await expect(log(page)).toContainText("Once more, when you have the strength.");
+  await go(page, "The hearth");
+  await doing(page, "Rest by the fire");
+  await doing(page, "Rest by the fire");
+  await go(page, "Vael's corner");
+  await speak(page, "orun mend", "anwe flesh", true);
+  await expect(log(page)).toContainText("Rider, I can fly.");
+  await page.screenshot({ path: info.outputPath("healed.png") });
+  await doing(page, "Climb on and fly");
+  await expect(page.getByRole("heading", { name: "Wings" })).toBeFocused();
+});
+
+test("hiding the fire, the doorway and Vael lets the soldiers walk past", async ({ page }, info) => {
+  await page.goto("/cost-of-a-word");
+  await go(page, "The parapet");
+  await doing(page, "Read the ward-stone");
+  await page.getByRole("button", { name: "Can they see our fire?" }).click();
+  await go(page, "The hearth");
+  await speak(page, "skaul hide", "brae flame");
+  await go(page, "The doorway");
+  await doing(page, "Read the carved lintel");
+  await speak(page, "skaul hide", "kor stone");
+  await go(page, "The cistern");
+  await doing(page, "Look into the cistern");
+  await speak(page, "ithra move", "kor stone");
+  await go(page, "The hearth");
+  await doing(page, "Rest by the fire");
+  await go(page, "Vael's corner");
+  await speak(page, "skaul hide", "anwe flesh");
+  await expect(log(page)).toContainText("Hide me?");
+  await page.getByRole("button", { name: "Speak anyway" }).click();
+  await expect(log(page)).toContainText("I feel ridiculous.");
+  await page.screenshot({ path: info.outputPath("hidden.png") });
+  await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await expect(page.getByRole("heading", { name: "Rubble" })).toBeFocused();
 });
 
 test("waiting with the fire lit gets you taken, after Vael pushes back", async ({ page }) => {

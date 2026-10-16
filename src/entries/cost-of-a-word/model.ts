@@ -501,7 +501,16 @@ function advance(d: Draft, minutes: number) {
     const events: [number, () => void][] = [[arrival(d), () => { d.ending = dawnEnding(d); }]];
     if (!d.torchesSeen) events.push([TORCHES_SEEN, () => {
       d.torchesSeen = true;
-      say(d, "vael", "Torches on the north road. Far off, but there. Don't look at them for long. They don't get further away.");
+      say(d, "vael", "Torches on the north road. Far off, but there. They'll send a scout ahead in a few hours, the way soldiers do. Anything bright up here, he will see.");
+    }]);
+    if (!d.done.includes("beat-late")) events.push([360, () => {
+      d.done.push("beat-late");
+      say(d, "vael", d.alerted ? "The air is changing. They're already moving, Rider. I can hear harness." : "The air is changing. Birds will start soon. I have never wanted birds to be quiet before.");
+    }]);
+    if (!d.done.includes("beat-hour")) events.push([arrival(d) - 60, () => {
+      d.done.push("beat-hour");
+      say(d, "narrator", "The torches have reached the river crossing below the hill. An hour, perhaps less.");
+      say(d, "vael", d.wing === 2 ? "My wing is whole. We don't have to be here when they arrive." : "Whatever we are going to do, Rider, we do it now.");
     }]);
     if (!d.scoutPassed) events.push([SCOUT, () => {
       d.scoutPassed = true;
@@ -541,7 +550,8 @@ function dawnEnding(s: GameState): EndingId {
   if (decoyActive(s) && !s.alerted) return "decoy";
   if (!s.alerted && s.fire !== "lit" && s.doorHidden && (s.vaelHidden || s.wallMended)) return "unseen";
   const sealed = s.stair !== "open";
-  if (sealed && awake && s.vaelEnergy >= (s.alerted ? 40 : 15)) return "stand";
+  // Warned soldiers come with ropes; only a dragon with real strength left frightens them off.
+  if (sealed && awake && s.vaelEnergy >= (s.alerted ? 60 : 30)) return "stand";
   return "taken";
 }
 

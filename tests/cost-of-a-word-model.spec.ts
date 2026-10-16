@@ -84,9 +84,16 @@ test("a decoy sent too early gutters out and gives you away; sent late, they fol
   expect(reduce(late, { type: "wait" }).ending).toBe("decoy");
 });
 
-test("a sealed stair and a dragon who is awake hold the tower", () => {
-  const state = play(talk("fire"), cast("move", "flame"), cast("move", "flame"), go("door"), doing("lintel"), cast("move", "stone"), { type: "wait" });
-  expect(state.ending).toBe("stand");
+test("a sealed stair and a dragon with strength left hold the tower", () => {
+  const dark = play(doing("satchel"), talk("fire"), cast("still", "flame"), go("door"), doing("lintel"), cast("move", "stone"), { type: "wait" });
+  expect(dark.alerted).toBe(false);
+  expect(dark.ending).toBe("stand");
+  // Seen by the scout, they come ready to climb: Vael must be stronger to scare them off.
+  const seen = play(go("door"), doing("lintel"), cast("move", "stone"), { type: "wait" });
+  expect(seen.ending).toBe("taken");
+  const rested = play(go("door"), doing("lintel"), cast("move", "stone"), go("hearth"), ...rest(1), { type: "wait" });
+  expect(rested.alerted).toBe(true);
+  expect(rested.ending).toBe("stand");
 });
 
 test("snuffing the soldiers' torches buys time", () => {
