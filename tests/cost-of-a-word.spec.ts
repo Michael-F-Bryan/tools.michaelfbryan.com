@@ -75,12 +75,15 @@ test("hiding the fire and sending it out before dawn leads the soldiers away", a
   await page.getByRole("button", { name: "Speak the words" }).click();
   await expect(log(page)).toContainText("drifts through the breach");
   await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await expect(log(page)).toContainText("Three stay behind");
+  await expect(page.getByText(/3 soldiers · searching/)).toBeVisible();
+  for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Keep still" }).click();
   await expect(page.getByRole("heading", { name: "The walking light" })).toBeFocused();
   await expect(page.getByText("You survived the night")).toBeVisible();
   await page.screenshot({ path: info.outputPath("decoy.png") });
 });
 
-test("a dark tower and a sealed stair hold until morning", async ({ page }, info) => {
+test("a dark tower is found at dawn, and roars and falling stone break the soldiers", async ({ page }, info) => {
   await page.goto("/cost-of-a-word");
   await page.getByRole("button", { name: /^Search your satchel/ }).click();
   await page.getByRole("button", { name: "Can they see our fire?" }).click();
@@ -96,7 +99,28 @@ test("a dark tower and a sealed stair hold until morning", async ({ page }, info
   await expect(log(page)).toContainText("Now no one comes up.");
   await page.screenshot({ path: info.outputPath("barricade.png") });
   await page.getByRole("button", { name: "Wait for dawn" }).click();
-  await expect(page.getByRole("heading", { name: "The stair" })).toBeFocused();
+  // Dawn: the hall is focused so keyboard play carries straight on.
+  await expect(page.getByRole("heading", { name: /The doorway\s*at dawn/ })).toBeFocused();
+  await expect(page.getByText(/12 soldiers · searching/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Wait for dawn" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Keep still" }).click();
+  await page.getByRole("button", { name: "Keep still" }).click();
+  await expect(log(page)).toContainText("Every head on the hill turns toward you.");
+  await expect(page.getByText(/12 soldiers · coming up the hill/)).toBeVisible();
+  const track = page.getByRole("list", { name: "How close they are" });
+  await expect(track.locator('[aria-current="step"]')).toHaveText("Hill");
+  await page.getByRole("button", { name: "Vael roars" }).click();
+  await expect(track.locator('[aria-current="step"]')).toHaveText("Slope");
+  await page.getByRole("button", { name: "Vael roars" }).click();
+  await expect(track.locator('[aria-current="step"]')).toHaveText("Stair");
+  expect(await noOverflow(page)).toBe(true);
+  await page.screenshot({ path: info.outputPath("siege.png") });
+  await word(page, "ithra move").click();
+  await word(page, "kor stone").click();
+  await expect(page.getByText(/Tip the loose stones/)).toBeVisible();
+  await expect(page.getByText(/Cost 25 · one turn, and loud/)).toBeVisible();
+  await page.getByRole("button", { name: "Speak the words" }).click();
+  await expect(page.getByRole("heading", { name: "They broke" })).toBeFocused();
   await page.screenshot({ path: info.outputPath("stand.png") });
 });
 
@@ -155,6 +179,8 @@ test("hiding the fire, the doorway and Vael lets the soldiers walk past", async 
   await expect(log(page)).toContainText("I feel ridiculous.");
   await page.screenshot({ path: info.outputPath("hidden.png") });
   await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await expect(log(page)).toContainText("There is nothing up here for them to see.");
+  for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Keep still" }).click();
   await expect(page.getByRole("heading", { name: "Rubble" })).toBeFocused();
 });
 
@@ -163,8 +189,11 @@ test("waiting with the fire lit gets you taken, after Vael pushes back", async (
   await page.getByRole("button", { name: "Wait for dawn" }).click();
   await expect(log(page)).toContainText("I'd like a better plan than that");
   await page.getByRole("button", { name: "Wait for dawn" }).click();
-  await expect(page.getByRole("heading", { name: "Taken at dawn" })).toBeVisible();
   await expect(log(page)).toContainText("He saw us.");
+  await expect(log(page)).toContainText("The first are already on the slope.");
+  await page.getByRole("button", { name: "Brace" }).click();
+  await page.getByRole("button", { name: "Brace" }).click();
+  await expect(page.getByRole("heading", { name: "Taken at dawn" })).toBeFocused();
 });
 
 test("keyboard play keeps focus inside the game when a one-off action disappears", async ({ page }) => {

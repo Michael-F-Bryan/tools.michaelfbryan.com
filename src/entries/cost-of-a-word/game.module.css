@@ -28,6 +28,11 @@
 .clock { color: var(--n-ink); font-family: var(--font-mono, monospace); font-size: 20px; letter-spacing: 0.04em; }
 .threat { margin: 0; color: var(--n-muted); }
 .threat[data-alerted] { color: var(--n-danger); }
+.siege { display: grid; gap: 6px; padding-top: 6px; border-top: 1px solid var(--n-line); }
+.track { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 10px; color: var(--n-muted); }
+.track li { padding: 3px 2px; border-top: 3px solid var(--n-line); text-align: center; }
+.track li[data-passed] { border-top-color: color-mix(in srgb, var(--n-danger) 50%, var(--n-line)); }
+.track li[aria-current="step"] { border-top-color: var(--n-danger); color: var(--n-ink); }
 .night { height: 3px; background: var(--n-line); }
 .night span { display: block; height: 100%; background: linear-gradient(90deg, #5b6bb8, var(--n-accent)); }
 .strength { display: grid; grid-template-columns: 2.6rem 1fr auto; align-items: center; gap: 8px; color: var(--n-muted); }
@@ -107,4 +112,7 @@
   .log { height: 11rem; }
   .hud { top: 8px; left: 8px; padding: 8px 10px; width: min(13rem, calc(100% - 16px)); }
   .clock { font-size: 17px; }
+  .hud { gap: 4px; font-size: 11px; }
+  .hud[data-dawn] .night { display: none; }
+  .siege { padding-top: 4px; gap: 4px; }
 }

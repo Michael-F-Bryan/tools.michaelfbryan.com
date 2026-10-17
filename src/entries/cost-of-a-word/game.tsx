@@ -3,7 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import {
-  ENDINGS, NOUNS, PLACES, PLACE_ORDER, VERBS, WORDS,
+  ENDINGS, NOUNS, PLACES, PLACE_ORDER, REACH, SEARCH_TURNS, VERBS, WORDS,
   arrival, clock, decoyActive, initialState, placeActions, planSpell, reduce, split, topics, vaelAwake,
   type Action, type EndingId, type GameState, type Noun, type Verb,
 } from "./model";
@@ -63,6 +63,7 @@ export function Game() {
   const vaelShort = Boolean(costs && costs.vael > 0 && costs.vael > game.vaelEnergy - 5);
   const confirming = Boolean(plan?.objection && game.objected.includes(plan.key));
   const left = Math.max(0, arrival(game) - game.minutes);
+  const dawn = game.dawn;
 
   function cast() {
     if (!verb || !noun) return;
@@ -92,15 +93,26 @@ export function Game() {
         <div ref={canvasHost} className={styles.canvas} />
         <p className={styles.fallback}>The tower can’t be drawn in this browser, but the night still plays out below.</p>
         <p className="sr-only">{describe(game)}</p>
-        <div className={styles.hud}>
+        <div className={styles.hud} data-dawn={dawn && !game.ending ? true : undefined}>
           <p className={styles.time}>
             <span className={styles.clock}>{clock(game.minutes)}</span>
-            <span>{game.ending ? "The night is over" : left <= 60 ? `They arrive in ${duration(left)}` : `Dawn in ${duration(left)}`}</span>
+            <span>{game.ending ? "The night is over" : dawn ? `Dawn · turn ${dawn.turn + 1}` : left <= 60 ? `They arrive in ${duration(left)}` : `Dawn in ${duration(left)}`}</span>
           </p>
           <p className={styles.threat} data-alerted={game.alerted || undefined}>{threat(game)}</p>
           <div className={styles.night} aria-hidden="true"><span style={{ width: `${Math.min(100, (game.minutes / arrival(game)) * 100)}%` }} /></div>
           <Strength label="You" value={game.energy} />
           <Strength label="Vael" value={game.vaelEnergy} note={asleep ? "asleep" : undefined} />
+          {dawn && !game.ending ? (
+            <div className={styles.siege}>
+              <p className={styles.threat}>{dawn.soldiers} soldiers · {dawn.found ? "coming up the hill" : `searching, ${Math.max(0, SEARCH_TURNS - dawn.turn)} turns of patience left`}</p>
+              {dawn.found
+                ? <Strength label="Nerve" value={dawn.nerve} />
+                : <Strength label="Alarm" value={dawn.suspicion} />}
+              <ol className={styles.track} aria-label="How close they are">
+                {REACH.map((name, i) => <li key={name} aria-current={dawn.found && i === dawn.reach ? "step" : undefined} data-passed={dawn.found && i < dawn.reach || undefined}>{name}</li>)}
+              </ol>
+            </div>
+          ) : null}
         </div>
         {spoken ? <p key={spoken.id} className={styles.spoken} aria-hidden="true" onAnimationEnd={() => setSpoken(null)}>{spoken.text}</p> : null}
       </div>
@@ -142,7 +154,7 @@ export function Game() {
                   <div className={styles.plan} data-danger={lethal || vaelShort || undefined}>
                     <p><strong>{WORDS[verb!].word} {WORDS[noun!].word}</strong> · {plan.meaning}</p>
                     <p className={styles.cost}>
-                      Cost {plan.cost}{sharing ? ` (you ${costs!.rider}, Vael ${costs!.vael})` : ""} · {plan.minutes} min
+                      Cost {plan.cost}{sharing ? ` (you ${costs!.rider}, Vael ${costs!.vael})` : ""} · {dawn ? (plan.target && verb !== "still" ? "one turn, and loud" : "one turn") : `${plan.minutes} min`}
                       {lethal ? <strong> · This would kill you.</strong> : vaelShort ? <strong> · Vael can’t spare that.</strong> : null}
                     </p>
                   </div>
@@ -159,19 +171,20 @@ export function Game() {
               </section>
 
               <section className={styles.section} aria-labelledby="cost-here">
-                <h2 id="cost-here" ref={here} tabIndex={-1} className={styles.label}>{PLACES[game.place].name}</h2>
+                <h2 id="cost-here" ref={here} tabIndex={-1} className={styles.label}>{PLACES[game.place].name}{dawn ? <span>at dawn</span> : null}</h2>
+                {dawn ? <p className={styles.muted}>{dawn.found ? "Break their nerve before they reach the doorway. Every word, roar and step costs a turn." : "If they see nothing and hear nothing, they will give up. Every word but hesh carries in the quiet."}</p> : null}
                 <div className={styles.buttons}>
                   {placeActions(game).map(choice => (
                     <button key={choice.id} type="button" onClick={() => act({ type: "do", id: choice.id })}>
-                      {choice.label}{choice.minutes ? <> <span>{choice.minutes} min</span></> : null}
+                      {choice.label}{choice.minutes && !dawn ? <> <span>{choice.minutes} min</span></> : null}
                     </button>
                   ))}
-                  <button type="button" onClick={() => act({ type: "wait" })}>Wait for dawn</button>
+                  {dawn ? null : <button type="button" onClick={() => act({ type: "wait" })}>Wait for dawn</button>}
                 </div>
               </section>
 
               <section className={styles.section} aria-labelledby="cost-where">
-                <h2 id="cost-where" className={styles.label}>Go to</h2>
+                <h2 id="cost-where" className={styles.label}>Go to{dawn ? <span>a turn each</span> : null}</h2>
                 <div className={styles.places}>
                   {PLACE_ORDER.map(place => (
                     <button key={place} type="button" aria-pressed={place === game.place} onClick={() => act({ type: "go", place })}>
@@ -183,7 +196,7 @@ export function Game() {
 
               <section className={styles.section} aria-labelledby="cost-vael">
                 <h2 id="cost-vael" className={styles.label}>Speak with Vael <span>mind to mind</span></h2>
-                {asleep ? <p className={styles.muted}>Vael is asleep.</p> : (
+                {dawn ? <p className={styles.muted}>No time to talk. She is with you, every second of it.</p> : asleep ? <p className={styles.muted}>Vael is asleep.</p> : (
                   <div className={styles.buttons}>
                     {topics(game).map(choice => (
                       <button key={choice.id} type="button" onClick={() => act({ type: "talk", topic: choice.id })}>{choice.label}</button>
@@ -228,6 +241,7 @@ function Strength({ label, value, note }: { label: string; value: number; note?:
 
 function threat(s: GameState): string {
   if (s.ending) return s.ending === "flight" ? "The sky" : "Dawn";
+  if (s.dawn) return s.dawn.found ? "They have found you" : "They are searching the hill";
   if (s.alerted) return "They know you are here";
   if (s.torchesSnuffed) return "Their torches are out";
   if (s.minutes >= 90) return "Torches on the north road";
@@ -244,5 +258,6 @@ function describe(s: GameState): string {
   const stair = { open: "The outside stair is open.", blocked: "The outside stair is buried in rubble.", iced: "The outside stair is sheeted in ice." }[s.stair];
   const vael = `${s.vaelHidden ? "Vael is disguised as rubble" : "Vael lies against the wall"}, ${vaelAwake(s) ? "awake" : "asleep"}, her wing ${["badly broken", "half mended", "healed"][s.wing]}.`;
   const extras = [s.doorHidden && "The doorway is disguised as wall.", s.wallMended && "The breach is walled up.", decoyActive(s) && "A wandering light drifts in the valley."].filter(Boolean).join(" ");
-  return `You are at ${PLACES[s.place].name.toLowerCase()}. ${fire} ${stair} ${vael} ${extras}`;
+  const siege = s.dawn ? (s.dawn.found ? ` ${s.dawn.soldiers} soldiers have reached the ${REACH[s.dawn.reach].toLowerCase()}.` : ` ${s.dawn.soldiers} soldiers are searching the foot of the hill.`) : "";
+  return `You are at ${PLACES[s.place].name.toLowerCase()}. ${fire} ${stair} ${vael} ${extras}${siege}`;
 }

@@ -43,6 +43,29 @@ const MAX_ENERGY = 100;
 
 export type LogEntry = Readonly<{ id: number; speaker: Speaker; text: string }>;
 
+/** How far up the hill the soldiers have come: the foot of the hill, the slope, the outside stair, the doorway. */
+export type Reach = 0 | 1 | 2 | 3;
+export const REACH: readonly string[] = ["Hill", "Slope", "Stair", "Door"];
+
+/**
+ * Dawn is played turn by turn. Until the soldiers find you they search, and
+ * whatever they can see, or hear, raises their suspicion. Once they find you
+ * they come up the hill, and only breaking their nerve stops them.
+ */
+export type Dawn = Readonly<{
+  turn: number;
+  soldiers: number;
+  nerve: number;
+  suspicion: number;
+  reach: Reach;
+  found: boolean;
+  climb: number;
+  roars: number;
+  decoyed: boolean;
+  held: boolean;
+}>;
+export const SEARCH_TURNS = 3;
+
 export type GameState = Readonly<{
   minutes: number;
   place: PlaceId;
@@ -68,6 +91,7 @@ export type GameState = Readonly<{
   topics: readonly string[];
   objected: readonly string[];
   log: readonly LogEntry[];
+  dawn: Dawn | null;
   ending: EndingId | null;
 }>;
 
@@ -102,6 +126,7 @@ export function initialState(): GameState {
       { id: 0, speaker: "narrator", text: "The watchtower has no roof over its hall and no door in its doorway. You lit the fire because your hands stopped working. Vael lies curled against the cold wall, one wing folded wrong." },
       { id: 1, speaker: "vael", text: "Imperial soldiers. At dawn, probably. I can smell their horses on the wind, and their bad cooking. You know one word of the old tongue, Rider. Ithra. Move. It is a beginning." },
     ],
+    dawn: null,
     ending: null,
   };
 }
@@ -121,6 +146,21 @@ export function vaelAwake(state: GameState): boolean {
 
 export function decoyActive(state: GameState): boolean {
   return state.decoyAt !== null && !state.decoyBurnt;
+}
+
+/** What a searcher on the hill could see from below. */
+export function signs(state: GameState): string[] {
+  const out: string[] = [];
+  if (state.fire === "lit") out.push("the fire");
+  if (!state.doorHidden) out.push("the doorway");
+  if (!state.vaelHidden && !state.wallMended) out.push("Vael");
+  return out;
+}
+
+/** Suspicion a quiet turn of searching adds, given what is visible. */
+export function searchGain(state: GameState, noise: number): number {
+  const per = state.dawn?.decoyed ? 15 : 35;
+  return Math.max(0, signs(state).length * per + noise - (noise ? 0 : 10));
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +187,31 @@ type Spell = {
 function spellFor(state: GameState, verb: Verb, noun: Noun): Spell | { none: string } {
   const at = state.place;
   const fireHere = state.fire === "lit" || state.fire === "hidden";
+
+  if (state.dawn) {
+    const dawn = state.dawn;
+    if (verb === "move" && noun === "stone" && at === "door") return {
+      meaning: dawn.reach >= 1 ? "Tip the loose stones of the doorway down onto the men below." : "Send loose stones crashing down the hill at the searchers.", cost: 25, minutes: 5,
+      apply: d => { say(d, "spell", "Ithra kor. The loose stones round the doorway lurch and go, a roaring slide of them down the stair and the hill."); knockBack(d); frighten(d, 30); },
+    };
+    if (verb === "move" && noun === "stone" && at === "parapet") return {
+      meaning: "Tear a battlement loose and drop it on the men below. They are close now; it is far less work than throwing it at the road.", cost: 60, minutes: 5,
+      apply: d => { say(d, "spell", "Ithra kor. A merlon the size of a cart tears free and falls. It hits the hillside below the stair like thunder, and the hill shakes."); knockBack(d); frighten(d, 45); },
+    };
+    if (verb === "move" && noun === "flame" && at === "hearth" && fireHere) return {
+      meaning: "Hurl the fire out through the doorway and down onto the stair.", cost: 20, minutes: 5,
+      apply: d => { d.fire = "out"; say(d, "spell", "Ithra brae. The whole fire leaps out of its ring, through the doorway and down the stair in a long roaring streamer."); frighten(d, 25); },
+    };
+    if (verb === "still" && noun === "flesh" && at === "door" && dawn.found && dawn.reach === 2) return {
+      meaning: "Hold the lead climber still, so nobody behind him can pass.", cost: 20, minutes: 5,
+      apply: d => { setDawn(d, { held: true }); say(d, "spell", "Hesh anwe. The first man on the stair stops dead, one hand reaching up, and does not move again."); },
+    };
+    if (verb === "move" && noun === "water" && at === "cistern" && dawn.found && dawn.reach === 2) return {
+      meaning: "Heave the cistern out of the window and down onto the climbers.", cost: 25, minutes: 5,
+      apply: d => { say(d, "spell", "Ithra mira. The cistern empties itself out of the breach in one black wave and falls on the men on the stair."); knockBack(d); frighten(d, 10); },
+    };
+    if (noun === "flame" && verb === "still" && at === "parapet") return { none: "It is daylight. There are no torches to snuff." };
+  }
 
   if (at === "hearth") {
     if (noun === "flame") {
@@ -320,9 +385,16 @@ function spellFor(state: GameState, verb: Verb, noun: Noun): Spell | { none: str
   return { none: "The words slide off. Nothing here answers to them." };
 }
 
+/** At dawn there is no time for slow work, however well it would go at night. */
+function spellNow(state: GameState, verb: Verb, noun: Noun): Spell | { none: string } {
+  const spell = spellFor(state, verb, noun);
+  if (state.dawn && !("none" in spell) && spell.minutes > 15) return { none: `No time. That is ${spell.minutes} minutes of work, and they are coming up the hill.` };
+  return spell;
+}
+
 export function planSpell(state: GameState, verb: Verb, noun: Noun, share: boolean): SpellPlan {
   const key = `${state.place}:${verb}:${noun}`;
-  const spell = spellFor(state, verb, noun);
+  const spell = spellNow(state, verb, noun);
   if ("none" in spell) return { key, meaning: spell.none, cost: 1, minutes: 5, target: false };
   const objection = typeof spell.objection === "function" ? spell.objection(state) : spell.objection;
   const { rider } = split(spell.cost, share && vaelAwake(state));
@@ -349,6 +421,12 @@ export type Choice = Readonly<{ id: string; label: string; minutes: number }>;
 export function placeActions(state: GameState): Choice[] {
   const has = (id: string) => state.done.includes(id);
   const out: Choice[] = [];
+  if (state.dawn) {
+    out.push({ id: "hold", label: state.dawn.found ? "Brace" : "Keep still", minutes: 5 });
+    if (vaelAwake(state) && state.vaelEnergy >= 15) out.push({ id: "roar", label: "Vael roars", minutes: 5 });
+    if (state.place === "nest" && state.wing === 2 && vaelAwake(state)) out.push({ id: "fly", label: "Climb on and fly", minutes: 0 });
+    return out;
+  }
   switch (state.place) {
     case "hearth":
       if (!has("satchel")) out.push({ id: "satchel", label: "Search your satchel", minutes: 10 });
@@ -379,6 +457,7 @@ export function placeActions(state: GameState): Choice[] {
 export function topics(state: GameState): Choice[] {
   const heard = (id: string) => state.topics.includes(id);
   const out: Choice[] = [];
+  if (state.dawn) return out;
   if (!heard("fire")) out.push({ id: "fire", label: "Can they see our fire?", minutes: 5 });
   if (!heard("hurt") && !state.done.includes("wing")) out.push({ id: "hurt", label: "How bad is it?", minutes: 5 });
   if (!heard("mend") && state.done.includes("wing")) out.push({ id: "mend", label: "Is there a word for healing?", minutes: 5 });
@@ -488,6 +567,19 @@ function examine(d: Draft, id: string) {
     case "fly":
       d.ending = "flight";
       return;
+    case "hold":
+      say(d, "narrator", d.dawn?.found ? "You set your back to the wall and wait for them." : "You crouch in the dark of the hall and keep very, very still.");
+      return;
+    case "roar": {
+      const roars = d.dawn?.roars ?? 0;
+      d.vaelEnergy -= 15;
+      d.vaelHidden = false;
+      say(d, "narrator", ["Vael rears up through the breach and roars. It is a sound you feel in your teeth and spine, and it rolls down the hill like a wave.", "Vael roars again, hoarser now.", "Vael roars a third time. It cracks in the middle. The men below have started to get used to it."][Math.min(roars, 2)]);
+      reveal(d);
+      setDawn(d, { roars: roars + 1 });
+      frighten(d, [25, 15, 8][Math.min(roars, 2)]);
+      return;
+    }
   }
 }
 
@@ -498,7 +590,7 @@ function advance(d: Draft, minutes: number) {
   const target = d.minutes + minutes;
   for (;;) {
     // Dawn is listed first so that it wins ties: a light that would gutter at the moment they arrive is still burning.
-    const events: [number, () => void][] = [[arrival(d), () => { d.ending = dawnEnding(d); }]];
+    const events: [number, () => void][] = [[arrival(d), () => startDawn(d)]];
     if (!d.torchesSeen) events.push([TORCHES_SEEN, () => {
       d.torchesSeen = true;
       say(d, "vael", "Torches on the north road. Far off, but there. They'll send a scout ahead in a few hours, the way soldiers do. Anything bright up here, he will see.");
@@ -540,19 +632,110 @@ function advance(d: Draft, minutes: number) {
     if (time > target) break;
     d.minutes = Math.max(d.minutes, time);
     fire();
-    if (d.ending) return;
+    if (d.ending || d.dawn) return;
   }
   d.minutes = target;
 }
 
-function dawnEnding(s: GameState): EndingId {
-  const awake = vaelAwake(s);
-  if (decoyActive(s) && !s.alerted) return "decoy";
-  if (!s.alerted && s.fire !== "lit" && s.doorHidden && (s.vaelHidden || s.wallMended)) return "unseen";
-  const sealed = s.stair !== "open";
-  // Warned soldiers come with ropes; only a dragon with real strength left frightens them off.
-  if (sealed && awake && s.vaelEnergy >= (s.alerted ? 60 : 30)) return "stand";
-  return "taken";
+function setDawn(d: Draft, patch: Partial<Dawn>) {
+  if (d.dawn) d.dawn = { ...d.dawn, ...patch };
+}
+
+function startDawn(d: Draft) {
+  const base = { turn: 0, climb: 0, roars: 0, held: false };
+  if (d.alerted) {
+    d.dawn = { ...base, soldiers: 12, nerve: 70, suspicion: 100, reach: 1, found: true, decoyed: false };
+    say(d, "narrator", "They come before the light, twelve of them, with ropes over their shoulders. They know exactly where you are. The first are already on the slope.");
+    say(d, "vael", "Here they come. Whatever you have left, Rider, spend it well.");
+    return;
+  }
+  const decoyed = decoyActive(d);
+  d.dawn = { ...base, soldiers: decoyed ? 3 : 12, nerve: decoyed ? 30 : 50, suspicion: 0, reach: 0, found: false, decoyed };
+  if (decoyed) say(d, "narrator", "At first light the column reaches the hill, and the sergeant sees your lantern walking south across the fields. He swears and sends nine men after it. Three stay behind to search the ruin.");
+  else say(d, "narrator", "At first light twelve soldiers spread out across the foot of the hill and begin to search the ruin, slowly, poking at shadows with their spears.");
+  const seen = signs(d);
+  say(d, "vael", seen.length
+    ? `They'll look for a while, then give up. Anything they can see up here, they'll find, and they can see ${list(seen)}. Don't move unless you have to.`
+    : "There is nothing up here for them to see. Don't move. Don't even think loudly.");
+}
+
+/** Shouting, crashing stone and roaring all tell the hill where you are. */
+function reveal(d: Draft) {
+  if (!d.dawn || d.dawn.found) return;
+  setDawn(d, { found: true, suspicion: 100 });
+  say(d, "narrator", "Every head on the hill turns toward the tower.");
+}
+
+function frighten(d: Draft, amount: number) {
+  if (!d.dawn) return;
+  reveal(d);
+  const nerve = Math.max(0, d.dawn.nerve - amount);
+  setDawn(d, { nerve });
+  if (nerve === 0) {
+    say(d, "narrator", "They break. One man turns and runs, then three, then all of them, down the hill and out across the fields, the sergeant shouting after them.");
+    d.ending = "stand";
+  } else say(d, "narrator", nerve < 25 ? "Some of them are looking back down the hill, toward the road and safety." : "They falter, then come on.");
+}
+
+function knockBack(d: Draft) {
+  if (d.dawn && d.dawn.reach >= 2 && d.dawn.reach < 3) {
+    setDawn(d, { reach: 1, climb: 0, held: false });
+    say(d, "narrator", "The men on the stair are swept back down onto the slope.");
+  }
+}
+
+/** The soldiers' half of a dawn turn, after yours. */
+function dawnTurn(d: Draft, noise: number) {
+  if (!d.dawn || d.ending) return;
+  d.minutes += 5;
+  if (d.vaelAsleepUntil !== null && d.minutes >= d.vaelAsleepUntil) {
+    d.vaelAsleepUntil = null;
+    say(d, "vael", "I'm awake. I'm awake. Why is it light? Why are there soldiers?");
+  }
+  const dawn = d.dawn;
+  const turn = dawn.turn + 1;
+  setDawn(d, { turn });
+  if (!dawn.found) {
+    const suspicion = Math.min(100, dawn.suspicion + searchGain(d, noise));
+    setDawn(d, { suspicion });
+    if (suspicion >= 100) {
+      const seen = signs(d);
+      setDawn(d, { found: true });
+      say(d, "narrator", `A soldier stops, stares up at ${seen[0] ?? "the tower"}, and shouts. Every head on the hill turns toward you.`);
+      say(d, "vael", "They've seen us. No more hiding, Rider.");
+    } else if (turn >= SEARCH_TURNS) {
+      say(d, "narrator", dawn.decoyed ? "The three searchers give up, curse the cold, and jog off after the others." : "The sergeant calls his men in. They form up on the road and march away south.");
+      d.ending = dawn.decoyed ? "decoy" : "unseen";
+    } else say(d, "narrator", suspicion < 30 ? "They poke through the rubble at the foot of the hill. No one looks up." : suspicion < 70 ? "A soldier pauses below the stair and stares up at the tower for a long moment." : "Two of them are arguing, pointing up at the tower. One starts toward the stair.");
+    return;
+  }
+  if (dawn.held) {
+    setDawn(d, { held: false });
+    say(d, "narrator", "The lead climber hangs frozen on the stair while the men behind him shout and shove.");
+    return;
+  }
+  if (dawn.reach < 2) {
+    const reach = (dawn.reach + 1) as Reach;
+    setDawn(d, { reach });
+    say(d, "narrator", reach === 1 ? "They start up the slope at a run." : "They reach the foot of the outside stair.");
+    return;
+  }
+  if (d.stair === "open") {
+    setDawn(d, { reach: 3 });
+  } else {
+    const climb = dawn.climb + 1;
+    const need = d.stair === "blocked" ? 2 : 3;
+    setDawn(d, { climb, reach: climb >= need ? 3 : 2 });
+    if (climb < need) say(d, "narrator", d.stair === "blocked" ? "They are climbing the rubble, hand over hand." : "Boots skid on the ice. Someone falls, swearing. They try again.");
+  }
+  if (d.dawn!.reach === 3) {
+    say(d, "narrator", "A helmet rises over the threshold. Then another.");
+    d.ending = "taken";
+  }
+}
+
+function list(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -576,14 +759,16 @@ export function reduce(state: GameState, action: Action): GameState {
       if (action.place === d.place) return state;
       d.place = action.place;
       say(d, "narrator", ARRIVALS[action.place](d));
-      advance(d, PLACES[action.place].travel);
+      if (d.dawn) dawnTurn(d, 0);
+      else advance(d, PLACES[action.place].travel);
       break;
     }
     case "do": {
       const choice = placeActions(state).find(c => c.id === action.id);
       if (!choice) return state;
       examine(d, action.id);
-      if (!d.ending) advance(d, choice.minutes);
+      if (d.dawn) dawnTurn(d, 0);
+      else if (!d.ending) advance(d, choice.minutes);
       break;
     }
     case "talk": {
@@ -606,7 +791,7 @@ export function reduce(state: GameState, action: Action): GameState {
         say(d, "vael", plan.objection);
         return d;
       }
-      const spell = spellFor(state, action.verb, action.noun);
+      const spell = spellNow(state, action.verb, action.noun);
       const { rider, vael } = split(plan.cost, share);
       if (vael > 0 && vael > d.vaelEnergy - 5) {
         say(d, "vael", "No. I don't have that much left to give you. Not without dying, and I'd rather not.");
@@ -622,10 +807,13 @@ export function reduce(state: GameState, action: Action): GameState {
       d.energy -= rider;
       if ("none" in spell) say(d, "spell", `${capital(WORDS[action.verb].word)} ${WORDS[action.noun].word}. ${spell.none}`);
       else spell.apply(d);
-      if (!d.ending) advance(d, plan.minutes);
+      // Hesh is a quiet word. Everything else carries.
+      if (d.dawn) dawnTurn(d, action.verb === "still" ? 0 : 15);
+      else if (!d.ending) advance(d, plan.minutes);
       break;
     }
     case "wait": {
+      if (state.dawn) return state;
       if (!state.objected.includes("wait") && state.stair === "open" && !decoyActive(state) && !state.doorHidden && state.wing < 2) {
         d.objected.push("wait");
         say(d, "vael", "You want to sit here and wait for them? With the stair open and nothing hidden? I'll fight, Rider, but I'd like a better plan than that.");
@@ -670,9 +858,9 @@ function capital(text: string) {
 
 export const ENDINGS: Record<EndingId, { title: string; survived: boolean; text: string }> = {
   flight: { title: "Wings", survived: true, text: "Vael drags herself through the breach and you climb onto her neck. She drops off the edge of the hill like a stone, and then her wings open, both of them, and the stone becomes a bird. Behind you, much later, the soldiers find a warm hearth and a dead Rider's word scratched in the dark." },
-  decoy: { title: "The walking light", survived: true, text: "At dawn the soldiers come up the road and see a lantern moving south across the fields. The sergeant curses and sends them after it at a canter. They do not look back at the dark tower. By the time the light goes out, they are three miles away, and so are you." },
-  unseen: { title: "Rubble", survived: true, text: "They come at first light and stand at the foot of the hill. A sergeant looks up at a ruin with no doorway and a slope of fallen stone, and decides it is not worth his boots. You listen to them ride away for a long time before either of you breathes." },
-  stand: { title: "The stair", survived: true, text: "They reach the stair and find it gone. One of them starts to climb the wall. Then Vael thrusts her head out through the breach and roars, a sound you feel in your spine, and they discover pressing business elsewhere. They will be back with more men. You have a day. A day is a great deal." },
-  taken: { title: "Taken at dawn", survived: false, text: "They come up the hill at first light. There is a doorway and an open stair, and a tired Rider and a hurt dragon with nowhere to go. The last thing you hear before the sack goes over your head is Vael, in your mind, refusing to stop talking to you." },
+  decoy: { title: "The walking light", survived: true, text: "The sergeant followed a lantern walking south, and the three men he left behind found nothing on the hill that breathed. By the time your light goes out in a far field, they are three miles away, and so are you." },
+  unseen: { title: "Rubble", survived: true, text: "They searched the hill until the sergeant's patience ran out. Whatever they saw up here, it did not look like a Rider and a dragon. You listen to them march away for a long time before either of you breathes." },
+  stand: { title: "They broke", survived: true, text: "Twelve men came up the hill for a hurt dragon and a Rider who knew a handful of words, and they ran. They will be back with more men. You have a day. A day is a great deal." },
+  taken: { title: "Taken at dawn", survived: false, text: "They came through the doorway, and a tired Rider and a hurt dragon had nowhere left to go. The last thing you hear before the sack goes over your head is Vael, in your mind, refusing to stop talking to you." },
   spent: { title: "The cost of a word", survived: false, text: "The spell did not stop when you ran out. Magic costs what the work would cost, and you did not have it. Vael's voice is in your head, very loud and then very far away. The soldiers find a dragon at dawn, and she does not let them near you." },
 };
