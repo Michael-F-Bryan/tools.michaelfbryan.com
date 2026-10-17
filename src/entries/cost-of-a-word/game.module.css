@@ -110,7 +110,17 @@
   .panel { border-left: 0; border-top: 1px solid var(--n-line); }
   .scroll { position: static; padding: 14px 14px calc(20px + env(safe-area-inset-bottom, 0px)); }
   .log { height: 11rem; }
-  .hud { top: 8px; left: 8px; padding: 8px 10px; width: min(13rem, calc(100% - 16px)); }
+  /* A strip across the top, over the sky, so the hall and Vael stay in view. */
+  .hud { top: 6px; left: 6px; right: 6px; width: auto; padding: 6px 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: row dense; column-gap: 14px; }
+  .time, .threat { grid-column: 1; }
+  .strength { grid-column: 2; }
+  .night, .siege { grid-column: 1 / -1; }
+  .siege { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 14px; align-items: center; }
+  .siege .threat { grid-column: 1 / -1; }
+  .siege .track { grid-column: 1; grid-row: 2; }
+  .siege .strength { grid-column: 2; grid-row: 2; }
+  .time { flex-wrap: wrap; column-gap: 8px; }
+  .spoken { top: 55%; }
   .clock { font-size: 17px; }
   .hud { gap: 4px; font-size: 11px; }
   .hud[data-dawn] .night { display: none; }

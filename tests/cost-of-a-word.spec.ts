@@ -114,6 +114,8 @@ test("a dark tower is found at dawn, and roars and falling stone break the soldi
   await page.getByRole("button", { name: "Vael roars" }).click();
   await expect(track.locator('[aria-current="step"]')).toHaveText("Stair");
   expect(await noOverflow(page)).toBe(true);
+  // Let the soldiers finish walking to the stair before capturing the scene.
+  await page.waitForTimeout(1500);
   await page.screenshot({ path: info.outputPath("siege.png") });
   await word(page, "ithra move").click();
   await word(page, "kor stone").click();
@@ -266,6 +268,33 @@ test("without WebGL the night is still playable", async ({ page }) => {
   await expect(page.getByText(/can’t be drawn in this browser/)).toBeVisible();
   await go(page, "The cistern");
   await expect(page.getByRole("heading", { name: "The cistern" })).toBeVisible();
+  // Dawn plays out without the scene too.
+  await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await page.getByRole("button", { name: "Wait for dawn" }).click();
+  await expect(page.getByText(/12 soldiers · coming up the hill/)).toBeVisible();
+  await page.getByRole("button", { name: "Vael roars" }).click();
+  await expect(log(page)).toContainText("Vael rears up through the breach and roars.");
+  await page.getByRole("button", { name: "Brace" }).click();
+  await expect(page.getByRole("heading", { name: "Taken at dawn" })).toBeFocused();
+});
+
+test("dawn plays from the keyboard: focus stays on the turn controls", async ({ page }) => {
+  await page.goto("/cost-of-a-word");
+  const wait = page.getByRole("button", { name: "Wait for dawn" });
+  await wait.focus();
+  await page.keyboard.press("Enter");
+  await expect(wait).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: /The hearth\s*at dawn/ })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  const roar = page.getByRole("button", { name: "Vael roars" });
+  await expect(roar).toBeFocused();
+  expect(await roar.evaluate(el => getComputedStyle(el).outlineStyle)).toBe("solid");
+  await page.keyboard.press("Enter");
+  await expect(roar).toBeFocused();
+  await expect(log(page)).toContainText("They're at the stair, and nothing stops them climbing it.");
+  expect(await noOverflow(page)).toBe(true);
 });
 
 test("leaving the page releases the WebGL context; reduced motion still draws", async ({ page }) => {

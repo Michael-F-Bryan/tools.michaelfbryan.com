@@ -5,6 +5,7 @@ import { DAWN, PLACE_ORDER, arrival, decoyActive, vaelAwake, type GameState, typ
 export type TowerScene = {
   update(state: GameState): void;
   cast(verb: Verb): void;
+  roar(): void;
   dispose(): void;
 };
 
@@ -280,6 +281,32 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
   rider.position.copy(STAND.hearth);
   add(rider);
 
+  // The soldiers, who only climb the hill at dawn.
+  const soldierBody = new THREE.ConeGeometry(0.17, 0.55, 5);
+  const soldierHead = new THREE.IcosahedronGeometry(0.11, 0);
+  const spear = new THREE.BoxGeometry(0.03, 0.9, 0.03);
+  const tabard = mat("#c43a2a", { emissive: new THREE.Color("#3a0a06") });
+  const steel = mat("#d5dae2", { emissive: new THREE.Color("#2a2d33") });
+  const shaft = mat("#5e4630");
+  const soldiers = Array.from({ length: 12 }, (_, i) => {
+    const figure = new THREE.Group();
+    mesh(soldierBody, tabard, figure).position.y = 0.27;
+    mesh(soldierHead, steel, figure).position.y = 0.62;
+    const s = mesh(spear, shaft, figure);
+    s.position.set(0.16, 0.45, 0);
+    s.rotation.z = -0.15 + (i % 3) * 0.1;
+    figure.visible = false;
+    figure.scale.setScalar(1.35);
+    figure.position.copy(soldierPlace(i, 0, 0, 0, 1));
+    add(figure);
+    return figure;
+  });
+  const roarMat = glow("#ffe0a8", { transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+  const roarRing = mesh(new THREE.RingGeometry(0.85, 1, 28), roarMat);
+  roarRing.rotation.x = -Math.PI / 2;
+  roarRing.visible = false;
+  let roarStart = -1;
+
   // Places you can click, with a faint ring under the current one.
   const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const hits = PLACE_ORDER.map(place => {
@@ -388,7 +415,7 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
     // Soldiers
     const due = arrival(s);
     const progress = THREE.MathUtils.clamp((s.minutes - 60) / (due - 60), 0, 1);
-    torches.points.visible = s.minutes >= 90 && !s.torchesSnuffed && s.ending !== "flight";
+    torches.points.visible = s.minutes >= 90 && !s.torchesSnuffed && !s.dawn && s.ending !== "flight";
     for (let i = 0; i < 12; i++) {
       const u = THREE.MathUtils.clamp(0.06 + progress * 0.62 - i * 0.006, 0, 1);
       const p = roadPath.getPointAt(u);
@@ -425,7 +452,27 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
 
     // Vael
     const asleep = !vaelAwake(s);
-    dragon.animate(t, still, { asleep, wing: s.wing, look: rider.position });
+    const roarAge = roarStart < 0 ? -1 : (now - roarStart) / 1000;
+    const roaring = roarAge >= 0 && roarAge < 1.6 ? Math.sin((roarAge / 1.6) * Math.PI) : 0;
+    dragon.animate(t, still, { asleep, wing: s.wing, look: rider.position, roaring });
+    roarRing.visible = roarAge >= 0 && roarAge < 1.4;
+    if (roarRing.visible) {
+      roarRing.position.set(-0.4, HALL + 1.2, 0.2);
+      roarRing.scale.setScalar(1 + roarAge * 7);
+      roarMat.opacity = 0.7 * (1 - roarAge / 1.4);
+    } else if (roarAge >= 1.6) roarStart = -1;
+
+    // Soldiers
+    const dawn = s.dawn;
+    soldiers.forEach((figure, i) => {
+      figure.visible = Boolean(dawn) && i < (dawn?.soldiers ?? 0);
+      if (!dawn || !figure.visible) return;
+      const place = soldierTarget(i, s, t, still);
+      const moving = figure.position.distanceTo(place) > 0.05;
+      figure.position.lerp(place, still ? 1 : 0.08);
+      figure.children[0].position.y = 0.27 + (moving && !still ? Math.abs(Math.sin(t * 11 + i)) * 0.06 : 0);
+      figure.rotation.y = Math.atan2(-figure.position.x, -figure.position.z) + (s.ending === "stand" ? Math.PI : 0);
+    });
     dragon.setGhost(s.vaelHidden ? 0.08 : 1);
     mound.visible = s.vaelHidden;
     if (s.ending === "flight") {
@@ -469,7 +516,8 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
 
     // Camera: a slow breath around the diorama, leaning toward where you are.
     const aspect = camera.aspect;
-    const distance = aspect < 1 ? 20 + (1 - aspect) * 18 : 17.5;
+    // Pull back at dawn so the hill and the men on it are in frame.
+    const distance = (aspect < 1 ? 20 + (1 - aspect) * 18 : 17.5) + (s.dawn ? 3.5 : 0);
     focus.lerp(target.clone().lerp(new THREE.Vector3(stand.x, stand.y + 0.6, stand.z), 0.22), still ? 1 : 0.03);
     const azimuth = 0.62 + (still ? 0 : Math.sin(t * 0.07) * 0.05);
     const elevation = 0.36 + (still ? 0 : Math.sin(t * 0.05) * 0.015);
@@ -496,6 +544,9 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
       }
       if (!options.reducedMotion()) moteStart = castTime;
     },
+    roar() {
+      if (!options.reducedMotion()) roarStart = performance.now();
+    },
     dispose() {
       disposed = true;
       cancelAnimationFrame(frameId);
@@ -518,6 +569,40 @@ export function mountTowerScene(host: HTMLElement, options: Options): TowerScene
       canvas.remove();
     },
   };
+}
+
+/** The hilltop is flat to about this radius, then falls away. */
+function hillY(radius: number) {
+  return radius <= 8.4 ? 0 : -(radius - 8.4) * 1.15;
+}
+
+function soldierPlace(i: number, angle: number, radius: number, spread: number, rows: number) {
+  const a = angle + (i % Math.ceil(12 / rows)) * spread;
+  const r = radius + Math.floor(i / Math.ceil(12 / rows)) * 0.55;
+  return polar(a, r, hillY(r));
+}
+
+function soldierTarget(i: number, s: GameState, t: number, still: boolean): THREE.Vector3 {
+  const dawn = s.dawn!;
+  if (s.ending === "stand") return soldierPlace(i, 0.7, 13, 0.1, 2);
+  if (s.ending === "unseen" || s.ending === "decoy") return soldierPlace(i, 1.4, 15, 0.05, 3);
+  if (!dawn.found) {
+    const wander = still ? 0 : Math.sin(t * 0.25 + i * 1.7) * 0.07;
+    const radius = 8.9 - (dawn.suspicion / 100) * 2.2 + (i % 3) * 0.45;
+    return polar(-0.5 + (i / 12) * 2.8 + wander, radius, hillY(radius));
+  }
+  if (dawn.reach === 0) return soldierPlace(i, 0.55, 8.2, 0.13, 2);
+  if (dawn.reach === 1) return soldierPlace(i, 0.75, 5.8, 0.12, 2);
+  const steps = 9;
+  const onStair = dawn.reach === 3 ? 6 : 2 + dawn.climb * 2;
+  if (dawn.reach === 3 && i < 3) return polar(DOOR_T + (i - 1) * 0.12, R - 0.8, HALL);
+  if (i < onStair) {
+    // Step 0 is the top of the stair; the man with the highest index leads.
+    const step = THREE.MathUtils.clamp(steps - 1 - i - dawn.climb * 2, 0, steps - 1);
+    const y = HALL - (step + 1) * (HALL / steps) + 0.16;
+    return polar(DOOR_T - 0.22 - step * 0.13, R + 0.6, y + (dawn.held && i === onStair - 1 ? 0.1 : 0));
+  }
+  return soldierPlace(i, DOOR_T - 1.55, R + 1.6, 0.16, 2);
 }
 
 function makePoints(count: number, color: string, size: number) {
@@ -621,13 +706,13 @@ function buildDragon(mat: (color: string, extra?: THREE.MeshLambertMaterialParam
   return {
     group,
     setGhost(opacity: number) { for (const m of materials) { m.opacity = opacity; m.depthWrite = opacity > 0.5; } eyeMat.transparent = opacity < 1; eyeMat.opacity = opacity; },
-    animate(t: number, still: boolean, s: { asleep: boolean; wing: 0 | 1 | 2; look: THREE.Vector3 }) {
+    animate(t: number, still: boolean, s: { asleep: boolean; wing: 0 | 1 | 2; look: THREE.Vector3; roaring: number }) {
       breathe = still ? 0 : Math.sin(t * (s.asleep ? 0.9 : 1.6));
       body.scale.y = 0.62 + breathe * 0.025;
       const local = group.worldToLocal(s.look.clone());
       const yaw = Math.atan2(-(local.z - 0.1), local.x - 1.05);
       neck.rotation.y = s.asleep ? 0.3 : THREE.MathUtils.lerp(neck.rotation.y, THREE.MathUtils.clamp(yaw, -1, 1), still ? 1 : 0.05);
-      neck.rotation.z = s.asleep ? -0.55 : (still ? 0 : Math.sin(t * 0.7) * 0.04);
+      neck.rotation.z = s.asleep ? -0.55 : s.roaring * 0.7 + (still ? 0 : Math.sin(t * 0.7) * 0.04);
       const blink = s.asleep || (!still && t % 4.3 < 0.12);
       eyes.forEach(e => (e.scale.y = blink ? 0.15 : 1));
       hurt.rotation.x = [1.2, 0.65, -0.45][s.wing];

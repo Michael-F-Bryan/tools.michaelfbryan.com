@@ -175,7 +175,7 @@ export function Game() {
                 {dawn ? <p className={styles.muted}>{dawn.found ? "Break their nerve before they reach the doorway. Every word, roar and step costs a turn." : "If they see nothing and hear nothing, they will give up. Every word but hesh carries in the quiet."}</p> : null}
                 <div className={styles.buttons}>
                   {placeActions(game).map(choice => (
-                    <button key={choice.id} type="button" onClick={() => act({ type: "do", id: choice.id })}>
+                    <button key={choice.id} type="button" onClick={() => { if (choice.id === "roar") tower.current?.roar(); act({ type: "do", id: choice.id }); }}>
                       {choice.label}{choice.minutes && !dawn ? <> <span>{choice.minutes} min</span></> : null}
                     </button>
                   ))}

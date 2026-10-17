@@ -578,6 +578,7 @@ function examine(d: Draft, id: string) {
       reveal(d);
       setDawn(d, { roars: roars + 1 });
       frighten(d, [25, 15, 8][Math.min(roars, 2)]);
+      if (!d.ending && d.vaelEnergy < 15) say(d, "vael", "That was the last roar in me. The rest is up to your words.");
       return;
     }
   }
@@ -674,7 +675,10 @@ function frighten(d: Draft, amount: number) {
   if (nerve === 0) {
     say(d, "narrator", "They break. One man turns and runs, then three, then all of them, down the hill and out across the fields, the sergeant shouting after them.");
     d.ending = "stand";
-  } else say(d, "narrator", nerve < 25 ? "Some of them are looking back down the hill, toward the road and safety." : "They falter, then come on.");
+  } else if (nerve < 25) {
+    say(d, "narrator", "Some of them are looking back down the hill, toward the road and safety.");
+    if (!d.done.includes("wavering")) { d.done.push("wavering"); say(d, "vael", "They're wavering. One more push."); }
+  } else say(d, "narrator", "They falter, then come on.");
 }
 
 function knockBack(d: Draft) {
@@ -718,6 +722,7 @@ function dawnTurn(d: Draft, noise: number) {
     const reach = (dawn.reach + 1) as Reach;
     setDawn(d, { reach });
     say(d, "narrator", reach === 1 ? "They start up the slope at a run." : "They reach the foot of the outside stair.");
+    if (reach === 2) say(d, "vael", d.stair === "open" ? "They're at the stair, and nothing stops them climbing it. Now, Rider. Whatever you have, now." : "They're at the stair. The rubble will hold them a little. Stone from above would hold them more.");
     return;
   }
   if (d.stair === "open") {
