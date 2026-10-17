@@ -61,9 +61,25 @@ pnpm dev
 
 The development server is available at http://localhost:3000.
 
+### Nix and direnv
+
+`flake.nix` provides Node.js 22, the exact pnpm version from `package.json`'s `packageManager` field, Git, and, on Linux, a Nix-packaged Chromium for Playwright. `flake.lock` pins nixpkgs; `pnpm-lock.yaml` still pins the JavaScript dependencies. Vercel and CI do not use the flake.
+
+With direnv installed and hooked into your shell, allow the repository's `.envrc` once:
+
+```console
+direnv allow
+```
+
+The environment then loads whenever you enter the directory. Without direnv, use `nix develop`, or run a single command with `nix develop -c pnpm install --frozen-lockfile`.
+
+The shell sets `pnpm_config_pm_on_fail=error`, so pnpm refuses to run instead of downloading another version of itself if `packageManager` changes. When changing that field, update `version` and `hash` for pnpm in `flake.nix` to match (`nix store prefetch-file https://registry.npmjs.org/pnpm/-/pnpm-<version>.tgz` prints the hash). Run `nix flake update` to move nixpkgs forward.
+
+On Linux the shell sets `AGENT_BROWSER_EXECUTABLE_PATH` to the Nix Chromium, which `playwright.config.ts` launches instead of a downloaded browser, so skip `playwright install`. On macOS, install Playwright's Chromium as below.
+
 ### Checks
 
-Install Playwright's Chromium browser once:
+Outside the Linux Nix shell, install Playwright's Chromium browser once:
 
 ```console
 pnpm exec playwright install chromium
