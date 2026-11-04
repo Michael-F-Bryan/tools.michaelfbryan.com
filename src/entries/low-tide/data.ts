@@ -59,18 +59,18 @@ export type ResourceInfo = Readonly<{
   duration: number;
   yield: number;
   food: boolean;
-  /** Salvage value at the end of the run. */
+  /** Salvage value at the end of the run, for the first `SALVAGE_CAP` of each. */
   value: number;
   label: string;
 }>;
 
 export const RESOURCES: Record<Resource, ResourceInfo> = {
-  driftwood: { band: 0, duration: 14_000, yield: 1, food: false, value: 2, label: "Driftwood" },
-  stone: { band: 0, duration: 18_000, yield: 1, food: false, value: 2, label: "Stone" },
-  clay: { band: 1, duration: 18_000, yield: 1, food: false, value: 3, label: "Clay" },
-  reed: { band: 1, duration: 16_000, yield: 1, food: false, value: 3, label: "Reeds" },
-  clams: { band: 1, duration: 20_000, yield: 2, food: true, value: 2, label: "Clams" },
-  kelp: { band: 2, duration: 20_000, yield: 1, food: false, value: 4, label: "Kelp" },
+  driftwood: { band: 0, duration: 14_000, yield: 1, food: false, value: 1, label: "Driftwood" },
+  stone: { band: 0, duration: 18_000, yield: 1, food: false, value: 1, label: "Stone" },
+  clay: { band: 1, duration: 18_000, yield: 1, food: false, value: 1, label: "Clay" },
+  reed: { band: 1, duration: 16_000, yield: 1, food: false, value: 1, label: "Reeds" },
+  clams: { band: 1, duration: 20_000, yield: 1, food: true, value: 1, label: "Clams" },
+  kelp: { band: 2, duration: 20_000, yield: 1, food: false, value: 2, label: "Kelp" },
   fish: { band: 2, duration: 24_000, yield: 2, food: true, value: 3, label: "Fish" },
   pearl: { band: 2, duration: 34_000, yield: 1, food: false, value: 60, label: "Pearl" },
   brass: { band: 3, duration: 28_000, yield: 1, food: false, value: 25, label: "Brass" },
@@ -194,8 +194,10 @@ export const BUILT_LABELS: Record<Built, string> = Object.fromEntries(
   RECIPES.map((recipe) => [recipe.out, recipe.label]),
 ) as Record<Built, string>;
 
-/** Score for each structure standing at the end. */
-export const STRUCTURE_VALUE = 30;
+/** Score for each structure standing at the end. Building must beat hoarding. */
+export const STRUCTURE_VALUE = 50;
+/** Only this many of any one item count toward salvage, so spamming the shingle has a ceiling. */
+export const SALVAGE_CAP = 6;
 export const MATERIAL_VALUE: Record<"rope" | "brick", number> = { rope: 6, brick: 8 };
 export const BEACON_BONUS = 500;
 export const TIDE_REMAINING_BONUS = 40;

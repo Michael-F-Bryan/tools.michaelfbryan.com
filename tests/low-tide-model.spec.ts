@@ -245,10 +245,11 @@ test("ringing a finished beacon ends the run early with the bonus; otherwise the
   state = { ...state, built: ["bellTower", "lantern"] };
   state = combine(state, "bellTower", "lantern");
   expect(state.built).toEqual(["beacon"]);
-  state = give(state, { pearl: 1 });
+  state = give(state, { pearl: 1, driftwood: 40 });
   state = dispatch(state, { type: "ring" });
-  expect(state.ended).toMatchObject({ reason: "beacon", beacon: 500, tidesLeft: 11, tidesLeftBonus: 440, salvage: 60, structures: 30 });
-  expect(state.ended?.score).toBe(60 + 30 + 500 + 440);
+  // Only the first six of any one item count, so forty driftwood are worth six.
+  expect(state.ended).toMatchObject({ reason: "beacon", beacon: 500, tidesLeft: 11, tidesLeftBonus: 440, salvage: 66, structures: 50 });
+  expect(state.ended?.score).toBe(66 + 50 + 500 + 440);
   expect(advance(state, 10_000)).toBe(state);
   expect(send(state, 0, 0, "driftwood")).toBe(state);
 
@@ -257,7 +258,7 @@ test("ringing a finished beacon ends the run early with the bonus; otherwise the
   full = advance(full, TIDES_PER_RUN * TIDE_MS + 5);
   expect(full.ended?.reason).toBe("tides");
   expect(full.time).toBe(TIDES_PER_RUN * TIDE_MS);
-  expect(full.ended?.structures).toBe(30);
+  expect(full.ended?.structures).toBe(50);
 });
 
 test("advance is stable however finely time is sliced", () => {
