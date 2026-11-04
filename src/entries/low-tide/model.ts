@@ -129,7 +129,8 @@ function rng(seed: number): () => number {
  * The tide table for a run. Depth is how many bands are exposed. The first tide
  * is always generous enough to start (2 or 3); depth-1 tides never come in a
  * pair, so the mudflat and its food are reachable at least every other tide;
- * and at least two tides reach the wreck so a beacon is always possible.
+ * at least two tides reach the wreck, one of them in the second half, so a
+ * beacon is always possible once the player knows what it needs.
  */
 export function tideTable(seed: number): number[] {
   const next = rng(seed);
@@ -151,7 +152,8 @@ export function tideTable(seed: number): number[] {
       if (i > 0 && tides[i - 1] === 1 && depth === 1) depth = 2;
       tides.push(depth);
     }
-    if (tides.filter((depth) => depth === 4).length >= 2) return tides;
+    const wreckTides = tides.map((depth, i) => (depth === 4 ? i : -1)).filter((i) => i >= 0);
+    if (wreckTides.length >= 2 && wreckTides.some((i) => i >= TIDES_PER_RUN / 2)) return tides;
   }
   // Statistically unreachable; keep the type honest.
   return Array.from({ length: TIDES_PER_RUN }, (_, i) => (i % 4) + 1);
@@ -336,6 +338,30 @@ export function canCombine(state: State, a: Item, b: Item): Recipe | null {
 /** Recipes the player has already discovered (this run or earlier). */
 export function knownRecipes(state: State): Recipe[] {
   return RECIPES.filter((recipe) => state.codex.includes(recipeKey(recipe.inputs[0], recipe.inputs[1])));
+}
+
+export type RecipeHint = Readonly<{
+  recipe: Recipe;
+  /** An input the player is holding right now, so the hint can say "something with reeds". Null if they hold neither. */
+  held: Item | null;
+}>;
+
+/**
+ * Undiscovered recipes the player could plausibly go for, nearest first: those
+ * with an input already in hand come before the rest, and anything whose
+ * prerequisite structure is missing or whose output is already standing is
+ * left out. Lets the UI point at a goal without giving away the pair.
+ */
+export function recipeHints(state: State): RecipeHint[] {
+  const hints: RecipeHint[] = [];
+  for (const recipe of RECIPES) {
+    if (state.codex.includes(recipeKey(recipe.inputs[0], recipe.inputs[1]))) continue;
+    if (recipe.requires && !hasBuilt(state, recipe.requires)) continue;
+    if (recipe.structure && hasBuilt(state, recipe.out)) continue;
+    const held = recipe.inputs.find((input) => hasItem(state, input)) ?? null;
+    hints.push({ recipe, held });
+  }
+  return hints.sort((a, b) => Number(b.held !== null) - Number(a.held !== null));
 }
 
 export function totalFood(state: State): number {

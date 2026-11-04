@@ -10,6 +10,7 @@ import {
   isDark,
   jobDuration,
   newRun,
+  recipeHints,
   tideTable,
   TIDE_MS,
   TIDES_PER_RUN,
@@ -20,7 +21,7 @@ import {
   type Resource,
   type State,
 } from "../src/entries/low-tide/model";
-import { CODEX_KEY, loadCodex, loadRun, RUN_KEY, saveCodex, saveRun } from "../src/entries/low-tide/storage";
+import { CODEX_KEY, loadBest, loadCodex, loadRun, recordBest, RUN_KEY, saveCodex, saveRun } from "../src/entries/low-tide/storage";
 
 /** A seeded run whose tide table satisfies `where`, so tests do not depend on luck. */
 function runWhere(where: (tides: number[]) => boolean, codex: string[] = []): State {
@@ -47,6 +48,7 @@ test("tide tables are seeded, start generously, never strand the crew, and alway
     expect(tides[0]).toBeLessThanOrEqual(3);
     for (let i = 1; i < tides.length; i++) expect(tides[i - 1] === 1 && tides[i] === 1).toBe(false);
     expect(tides.filter((depth) => depth === 4).length).toBeGreaterThanOrEqual(2);
+    expect(tides.slice(TIDES_PER_RUN / 2)).toContain(4);
     for (const depth of tides) expect(depth >= 1 && depth <= 4).toBe(true);
   }
   expect(tideTable(1)).not.toEqual(tideTable(2));
@@ -214,6 +216,22 @@ test("structures change the rules: net, waders, lantern, raft, shelter, kiln", (
   expect(fired.inventory.brick).toBe(1);
 });
 
+test("recipe hints point at reachable goals, nearest first, without giving the pair away", () => {
+  let state = give(runWhere(() => true), { reed: 1 });
+  let hints = recipeHints(state);
+  // Brick needs a kiln, so it is not offered yet; everything else is.
+  expect(hints.map((hint) => hint.recipe.out)).not.toContain("brick");
+  expect(hints).toHaveLength(10);
+  expect(hints.slice(0, 3).map((hint) => hint.held)).toEqual(["reed", "reed", "reed"]);
+  expect(hints.slice(3).every((hint) => hint.held === null)).toBe(true);
+
+  state = give({ ...state, built: ["kiln"], codex: ["clay+stone"] }, { clay: 1 });
+  hints = recipeHints(state);
+  expect(hints.map((hint) => hint.recipe.out)).toContain("brick");
+  expect(hints.map((hint) => hint.recipe.out)).not.toContain("kiln");
+  expect(hints[0].held).toBeTruthy();
+});
+
 test("a queued job waits until it can finish before the flood, then starts by itself", () => {
   let state = runWhere((tides) => tides[0] === 2 && tides[1] === 4);
   state = dispatch(state, { type: "queue", crew: 0, band: 3, resource: "brass" });
@@ -304,6 +322,12 @@ test("saves round-trip through localStorage, reload resumes paused, and the code
     saveCodex(["kelp+reed"]);
     saveCodex(["driftwood+rope", "kelp+reed"]);
     expect(loadCodex()).toEqual(["driftwood+rope", "kelp+reed"]);
+
+    expect(loadBest()).toBeNull();
+    expect(recordBest({ score: 120, beacon: false, seed: 1 })).toEqual({ score: 120, beacon: false, seed: 1 });
+    expect(recordBest({ score: 90, beacon: true, seed: 2 })).toEqual({ score: 120, beacon: false, seed: 1 });
+    expect(recordBest({ score: 900, beacon: true, seed: 3 })).toEqual({ score: 900, beacon: true, seed: 3 });
+    expect(loadBest()).toEqual({ score: 900, beacon: true, seed: 3 });
 
     store.set(RUN_KEY, "{not json");
     expect(loadRun()).toBeNull();

@@ -57,6 +57,36 @@ export function saveCodex(codex: readonly string[]): void {
   }
 }
 
+export const BEST_KEY = "low-tide:best:v1";
+
+export type Best = Readonly<{ score: number; beacon: boolean; seed: number }>;
+
+/** Keeps the higher of the stored and offered scores. Returns what is now stored. */
+export function recordBest(candidate: Best): Best {
+  const existing = loadBest();
+  const best = existing && existing.score >= candidate.score ? existing : candidate;
+  try {
+    storage()?.setItem(BEST_KEY, JSON.stringify(best));
+  } catch {
+    // Ignore: a best score is a nicety.
+  }
+  return best;
+}
+
+export function loadBest(): Best | null {
+  const store = storage();
+  if (!store) return null;
+  try {
+    const parsed: unknown = JSON.parse(store.getItem(BEST_KEY) ?? "null");
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.score !== "number" || typeof record.beacon !== "boolean" || typeof record.seed !== "number") return null;
+    return { score: record.score, beacon: record.beacon, seed: record.seed };
+  } catch {
+    return null;
+  }
+}
+
 export function loadCodex(): string[] {
   const store = storage();
   if (!store) return [];
