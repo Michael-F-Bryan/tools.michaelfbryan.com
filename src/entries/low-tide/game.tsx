@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  availableJobs, canCombine, depthOf, floodTime, forecast, isDark, recipeKey, tideElapsed, totalFood,
+  availableJobs, canCombine, depthOf, floodTime, forecast, isDark, recipeHints, recipeKey, tideElapsed, totalFood,
   BAND_NAMES, BANDS, BUILT_LABELS, RECIPES, RESOURCES, TIDE_MS,
   type Band, type Built, type Crew, type Item, type Resource, type State,
 } from "./model";
@@ -39,7 +39,7 @@ function seconds(ms: number) {
 }
 
 export function Game() {
-  const { state, dispatch } = useGame();
+  const { state, best, dispatch } = useGame();
   if (!state) {
     return (
       <div className={styles.game}>
@@ -47,10 +47,12 @@ export function Game() {
       </div>
     );
   }
-  return <Camp state={state} dispatch={dispatch} />;
+  return <Camp state={state} best={best} dispatch={dispatch} />;
 }
 
-function Camp({ state, dispatch }: { state: State; dispatch: ReturnType<typeof useGame>["dispatch"] }) {
+type Props = { state: State } & Omit<ReturnType<typeof useGame>, "state">;
+
+function Camp({ state, best, dispatch }: Props) {
   const [picked, setTray] = useState<Item[]>([]);
   const [showCodex, setShowCodex] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -90,6 +92,7 @@ function Camp({ state, dispatch }: { state: State; dispatch: ReturnType<typeof u
   const recipe = tray.length === 2 ? canCombine(state, tray[0], tray[1]) : null;
   const knownRecipe = trayKey ? recipeFor(trayKey) : null;
   const inTray = (item: Item) => tray.filter(entry => entry === item).length;
+  const hints = recipeHints(state);
 
   function toggleTray(item: Item) {
     const count = inTray(item);
@@ -120,7 +123,10 @@ function Camp({ state, dispatch }: { state: State; dispatch: ReturnType<typeof u
           <h2 id="low-tide-ending" ref={endingRef} tabIndex={-1}>
             {end.reason === "beacon" ? `A harbour, on tide ${state.tide + 1}` : "The flat is under water"}
           </h2>
-          <p className={styles.score}><span>Score</span> <strong>{end.score}</strong></p>
+          <p className={styles.score}>
+            <span>Score</span> <strong>{end.score}</strong>
+            {best ? <span className={styles.best}>{best.score > end.score ? `best on this browser ${best.score}` : best.score === end.score && end.score > 0 ? "your best so far" : ""}</span> : null}
+          </p>
           <dl className={styles.breakdown}>
             <dt>Salvage on the tarp</dt><dd>{end.salvage}</dd>
             <dt>{state.built.length} structures standing</dt><dd>{end.structures}</dd>
@@ -294,15 +300,20 @@ function Camp({ state, dispatch }: { state: State; dispatch: ReturnType<typeof u
               <p className={styles.muted}>Goal: a beacon, which is a lantern on a bell tower. Everything else buys time or reach.</p>
             )}
             <button type="button" className={styles.linkish} aria-expanded={showCodex} onClick={() => setShowCodex(open => !open)}>
-              Codex · {state.codex.length} of {RECIPES.length} recipes
+              Codex · {state.codex.length} of {RECIPES.length} recipes{hints.some(hint => hint.held) ? ` · ${hints.filter(hint => hint.held).length} within reach` : ""}
             </button>
             {showCodex ? (
               <ul className={styles.codex} aria-label="Codex">
                 {state.codex.map(key => {
                   const found = recipeFor(key);
-                  return <li key={key}>{key.split("+").map(part => itemName(part as Item)).join(" + ")} → {found ? found.label.toLowerCase() : "?"}</li>;
+                  return <li key={key}><span>{key.split("+").map(part => itemName(part as Item)).join(" + ")} → <strong>{found ? found.label.toLowerCase() : "?"}</strong></span>{found ? <span className={styles.muted}>{found.effect}</span> : null}</li>;
                 })}
-                {state.codex.length < RECIPES.length ? <li className={styles.muted}>{RECIPES.length - state.codex.length} still to find.</li> : null}
+                {hints.map(({ recipe, held }) => (
+                  <li key={recipe.out} data-hint>
+                    <span>{held ? `${itemName(held)} + ?` : "? + ?"} → <strong>{recipe.label.toLowerCase()}</strong></span>
+                    <span className={styles.muted}>{recipe.effect}</span>
+                  </li>
+                ))}
               </ul>
             ) : null}
           </div>
