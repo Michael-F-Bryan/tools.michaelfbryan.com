@@ -56,7 +56,7 @@ function update(state: State): void {
   if (state.codex.length > 0) saveCodex(state.codex);
   let best = previous.best;
   if (state.ended && !previous.state.ended) {
-    best = recordBest({ score: state.ended.score, beacon: state.ended.reason === "beacon", seed: state.seed });
+    best = recordBest({ score: state.ended.score, beacon: state.ended.reason === "beacon", boat: state.ended.reason === "boat", seed: state.seed });
   }
   current = { state, best };
   for (const listener of listeners) listener();

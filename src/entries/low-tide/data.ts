@@ -24,6 +24,9 @@ export type Resource =
 export type Built =
   | "rope"
   | "brick"
+  | "hull"
+  | "sail"
+  | "salt"
   | "waders"
   | "sled"
   | "fishTrap"
@@ -33,8 +36,10 @@ export type Built =
   | "shelter"
   | "winch"
   | "lantern"
+  | "saltworks"
   | "bellTower"
-  | "beacon";
+  | "beacon"
+  | "boat";
 
 export type Item = Resource | Built;
 
@@ -95,6 +100,8 @@ export type Blueprint = Readonly<{
   tier: Tier;
   /** What it costs. Materials come from the inventory; structures (bell tower, lantern) from `built`. */
   inputs: Readonly<Partial<Record<Item, number>>>;
+  /** A structure that must stand (and is not consumed) before this can be built. */
+  requires?: Built;
   /** Structures stand at camp and change the rules; materials sit in the inventory. */
   structure: boolean;
   label: string;
@@ -199,6 +206,43 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     flavour: "Brass cupped round a wick of oil. The night tide is yours.",
   },
   {
+    out: "hull",
+    tier: 2,
+    inputs: { driftwood: 3, rope: 1 },
+    structure: false,
+    label: "Hull",
+    effect: "Half of a boat. Add a sail.",
+    flavour: "Three planks and a rope, caulked with mud. It holds water out, mostly.",
+  },
+  {
+    out: "sail",
+    tier: 2,
+    inputs: { reed: 3, rope: 1 },
+    structure: false,
+    label: "Sail",
+    effect: "Half of a boat. Add a hull.",
+    flavour: "Reed matting on a rope edge. It catches wind you cannot feel.",
+  },
+  {
+    out: "saltworks",
+    tier: 2,
+    inputs: { clay: 2, kelp: 2 },
+    requires: "kiln",
+    structure: true,
+    label: "Saltworks",
+    effect: "Needs a kiln. At every turn, one salt (worth 25, uncapped). The earlier, the better.",
+    flavour: "Clay pans by the kiln, kelp ash in the brine. White crust by morning.",
+  },
+  {
+    out: "boat",
+    tier: 3,
+    inputs: { hull: 1, sail: 1 },
+    structure: true,
+    label: "Boat",
+    effect: "Launch it to end the run: 300 points, 40 for every tide left, and your salvage counts double on board.",
+    flavour: "Hull and sail. The flat is behind you if you want it to be.",
+  },
+  {
     out: "bellTower",
     tier: 3,
     inputs: { brick: 2, stone: 1 },
@@ -221,14 +265,18 @@ export const BLUEPRINTS: readonly Blueprint[] = [
 export const BUILT_LABELS: Record<Built, string> = {
   ...(Object.fromEntries(BLUEPRINTS.map((blueprint) => [blueprint.out, blueprint.label])) as Record<Built, string>),
   brick: "Brick",
+  salt: "Salt",
 };
 
 /** Score for each structure standing at the end. Building must beat hoarding. */
 export const STRUCTURE_VALUE = 50;
 /** Only this many of any one item count toward salvage, so spamming the shingle has a ceiling. */
 export const SALVAGE_CAP = 6;
-export const MATERIAL_VALUE: Record<"rope" | "brick", number> = { rope: 6, brick: 8 };
+export const MATERIAL_VALUE: Record<"rope" | "brick" | "hull" | "sail" | "salt", number> = { rope: 6, brick: 8, hull: 12, sail: 10, salt: 25 };
+/** Salt is the saltworks' whole point, so it is never capped. */
+export const UNCAPPED: readonly Item[] = ["salt"];
 export const FOOD_VALUE = 2;
 export const FOOD_CAP = 10;
 export const BEACON_BONUS = 500;
+export const BOAT_BONUS = 300;
 export const TIDE_REMAINING_BONUS = 40;
