@@ -11,6 +11,7 @@ const ENTRIES = [
   { slug: "afterlight", title: "Afterlight" },
   { slug: "ebb", title: "Ebb" },
   { slug: "cost-of-a-word", title: "The Cost of a Word" },
+  { slug: "low-tide", title: "Low Tide" },
   { slug: "coordinate-frame-visualiser", title: "Coordinate frame visualiser" },
   { slug: "gedcom-viewer", title: "GEDCOM family tree viewer" },
   { slug: "melbourne-morning", title: "Melbourne morning" },
