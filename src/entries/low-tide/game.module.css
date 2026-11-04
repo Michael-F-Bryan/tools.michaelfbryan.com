@@ -144,3 +144,10 @@
 .log p[data-kind="build"] { color: var(--accent); }
 .log p[data-kind="gain"] { color: var(--ink); }
 .log p[data-kind="info"] { color: var(--text-secondary); }
+.linkish { min-height: 44px; }
+.best { margin-left: auto; font-size: 13px; }
+.codex li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--rule-subtle); font-family: inherit; font-size: 13px; }
+.codex li:first-child { border-top: 0; }
+.codex li strong { font-weight: 600; }
+.codex li[data-hint] { color: var(--text-secondary); }
+.codex li[data-hint] strong { font-weight: 500; }
