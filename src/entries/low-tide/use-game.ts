@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import { advance, dispatch as apply, newRun, type Action, type State } from "./model";
-import { loadCodex, loadRun, saveCodex, saveRun } from "./storage";
+import { loadBest, loadCodex, loadRun, recordBest, saveCodex, saveRun, type Best } from "./storage";
 
 const TICK_MS = 250;
+
+export type Snapshot = Readonly<{ state: State; best: Best | null }>;
 
 /**
  * The one live game on this page, kept outside React as an external store:
@@ -13,23 +15,23 @@ const TICK_MS = 250;
  * saved straight back, and the server snapshot is null so the statically
  * rendered shell never shows a run the player does not have.
  */
-let current: State | null = null;
+let current: Snapshot | null = null;
 const listeners = new Set<() => void>();
 
-function initialise(): State {
+function initialise(): Snapshot {
   const seedParam = new URLSearchParams(window.location.search).get("seed");
   const seed = seedParam === null ? Number.NaN : Number.parseInt(seedParam, 10);
   const saved = loadRun();
-  if (saved && (Number.isNaN(seed) || saved.seed === seed)) return saved;
-  return newRun(Number.isNaN(seed) ? undefined : seed, loadCodex());
+  const state = saved && (Number.isNaN(seed) || saved.seed === seed) ? saved : newRun(Number.isNaN(seed) ? undefined : seed, loadCodex());
+  return { state, best: loadBest() };
 }
 
-function getSnapshot(): State {
+function getSnapshot(): Snapshot {
   if (current === null) current = initialise();
   return current;
 }
 
-function getServerSnapshot(): State | null {
+function getServerSnapshot(): Snapshot | null {
   return null;
 }
 
@@ -38,27 +40,34 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function update(next: State): void {
-  if (next === current) return;
-  current = next;
-  saveRun(next);
-  if (next.codex.length > 0) saveCodex(next.codex);
+function update(state: State): void {
+  const previous = getSnapshot();
+  if (state === previous.state) return;
+  saveRun(state);
+  if (state.codex.length > 0) saveCodex(state.codex);
+  let best = previous.best;
+  if (state.ended && !previous.state.ended) {
+    best = recordBest({ score: state.ended.score, beacon: state.ended.reason === "beacon", seed: state.seed });
+  }
+  current = { state, best };
   for (const listener of listeners) listener();
 }
 
 /**
  * Ticks game time from `Date.now()` while the tab is visible and the game is
  * unpaused, pauses on `visibilitychange`, and autosaves every change. `state`
- * is null only during server rendering and hydration.
+ * is null only during server rendering and hydration. `best` is the highest
+ * finished score on this browser, for the end screen.
  *
  * `?seed=N` in the URL starts a fresh run with that tide table when the saved
  * run has a different seed, which gives browser tests a known schedule.
  */
-export function useGame(): { state: State | null; dispatch: (action: Action) => void } {
-  const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+export function useGame(): { state: State | null; best: Best | null; dispatch: (action: Action) => void } {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const state = snapshot?.state ?? null;
 
   const dispatch = useCallback((action: Action) => {
-    update(apply(getSnapshot(), action));
+    update(apply(getSnapshot().state, action));
   }, []);
 
   const running = state !== null && !state.paused && state.ended === null;
@@ -72,7 +81,7 @@ export function useGame(): { state: State | null; dispatch: (action: Action) => 
       const now = Date.now();
       const dt = now - last;
       last = now;
-      if (dt > 0) update(advance(getSnapshot(), dt));
+      if (dt > 0) update(advance(getSnapshot().state, dt));
     }, TICK_MS);
     return () => window.clearInterval(id);
   }, [running]);
@@ -89,5 +98,5 @@ export function useGame(): { state: State | null; dispatch: (action: Action) => 
     };
   }, [dispatch]);
 
-  return { state, dispatch };
+  return { state, best: snapshot?.best ?? null, dispatch };
 }
