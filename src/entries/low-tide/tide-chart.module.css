@@ -1,0 +1,51 @@
+/* The run as a strip of tide bars. Sized to sit in a header on a 320px phone with twelve tides. */
+.chart {
+  --water: var(--accent);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tide {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 3px 0 2px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 1;
+}
+.tide[data-dark] { background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.tide[data-state="past"] { opacity: 0.45; }
+.tide[data-state="now"] { border-color: var(--rule); color: var(--ink); background: var(--surface); }
+.tide[data-state="now"] .number { font-weight: 700; }
+
+/* Four stacked steps: the water falls one step for each band it exposes. */
+.bars {
+  display: grid;
+  grid-template-rows: repeat(4, 4px);
+  gap: 1px;
+  width: 100%;
+  max-width: 14px;
+}
+.bars i {
+  display: block;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--rule-subtle) 70%, transparent);
+}
+/* The deepest band is drawn at the bottom, the shingle at the top, like the shore itself. */
+.bars i:nth-child(1) { grid-row: 4; }
+.bars i:nth-child(2) { grid-row: 3; }
+.bars i:nth-child(3) { grid-row: 2; }
+.bars i:nth-child(4) { grid-row: 1; }
+.bars i[data-on] { background: var(--water); }
+.tide[data-dark] .bars i[data-on] { background: color-mix(in srgb, var(--water) 70%, var(--ink)); }
+
+.number { color: inherit; }
