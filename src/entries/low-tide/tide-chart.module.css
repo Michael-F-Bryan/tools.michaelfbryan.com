@@ -49,3 +49,7 @@
 .tide[data-dark] .bars i[data-on] { background: color-mix(in srgb, var(--water) 70%, var(--ink)); }
 
 .number { color: inherit; }
+
+/* What was built on a tide: up to three dots under the number. */
+.marks { display: flex; gap: 2px; height: 4px; }
+.marks i { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--ink); }
