@@ -97,16 +97,32 @@ test("a hidden tab stops the tide; coming back does not charge for time away", a
   await expect(page.getByText("Tide 1 of 12", { exact: true })).toBeVisible();
 });
 
-test("the water comes back: an outer-band job that cannot finish is refused, and the tide turns", async ({ page }) => {
+test("a job that would flood first waits in the queue instead of sending the crew", async ({ page }) => {
   await open(page);
   // Seed 1 opens at depth 3: the reef turns at 50 s, so at 40 s nothing out there can finish in time.
   await page.clock.runFor(40_000);
   const reef = band(page, "The reef");
   await expect(reef).toHaveAttribute("data-flooding", "true");
-  await expect(reef.getByRole("button", { name: /would flood first/i }).first()).toBeDisabled();
+  const kelp = reef.getByRole("button", { name: /^Queue .* for kelp,.*Would flood first/i });
+  await kelp.click();
+  await expect(camp(page).getByRole("list", { name: "Crew" })).toContainText("then kelp");
+  await expect(reef.getByRole("list", { name: /Working on/ })).toHaveCount(0);
   await page.clock.runFor(45_000);
   await expect(page.getByText("Tide 2 of 12", { exact: true })).toBeVisible();
   await expect(log(page)).toContainText(/tide/i);
+});
+
+test("a late shingle job queues for the next tide and then completes", async ({ page }) => {
+  await open(page);
+  await page.clock.runFor(75_000);
+  await band(page, "The shingle").getByRole("button", { name: /^Queue .* for stone,.*tide turns first/i }).click();
+  await expect(camp(page).getByRole("list", { name: "Crew" })).toContainText("then stone");
+  await expect(band(page, "The shingle").getByRole("list", { name: /Working on/ })).toHaveCount(0);
+  await page.clock.runFor(6_000);
+  await expect(page.getByText("Tide 2 of 12", { exact: true })).toBeVisible();
+  await expect(band(page, "The shingle").getByRole("list", { name: /Working on/ })).toContainText("stone");
+  await page.clock.runFor(18_000);
+  await expect(salvage(page, "stone")).toContainText("×1");
 });
 
 test("narrow phones keep everything reachable without horizontal overflow or tiny targets", async ({ page }, info) => {

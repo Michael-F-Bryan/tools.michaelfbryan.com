@@ -151,3 +151,4 @@
 .codex li strong { font-weight: 600; }
 .codex li[data-hint] { color: var(--text-secondary); }
 .codex li[data-hint] strong { font-weight: 500; }
+.options button[data-later] { border-style: dashed; }
