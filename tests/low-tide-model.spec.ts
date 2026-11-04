@@ -3,27 +3,45 @@ import { expect, test } from "@playwright/test";
 import {
   advance,
   availableJobs,
-  canCombine,
+  BLUEPRINTS,
+  buildOptions,
+  canBuild,
   dispatch,
   floodTime,
   forecast,
   isDark,
   jobDuration,
   newRun,
-  recipeHints,
+  producers,
+  reach,
+  tideChart,
   tideTable,
   TIDE_MS,
   TIDES_PER_RUN,
-  totalFood,
   TURN_MS,
+  CREEP_MS,
+  waterline,
   type Band,
+  type Built,
   type Item,
   type Resource,
   type State,
 } from "../src/entries/low-tide/model";
-import { CODEX_KEY, loadBest, loadCodex, loadRun, recordBest, RUN_KEY, saveCodex, saveRun } from "../src/entries/low-tide/storage";
+import {
+  CODEX_KEY,
+  hasLegacyRun,
+  LEGACY_RUN_KEY,
+  loadBest,
+  loadCodex,
+  loadRun,
+  recordBest,
+  retireLegacyRun,
+  RUN_KEY,
+  saveCodex,
+  saveRun,
+} from "../src/entries/low-tide/storage";
 
-/** A seeded run whose tide table satisfies `where`, so tests do not depend on luck. */
+/** A seeded run whose tide chart satisfies `where`, so tests do not depend on luck. */
 function runWhere(where: (tides: number[]) => boolean, codex: string[] = []): State {
   for (let seed = 1; seed < 5000; seed++) {
     if (where(tideTable(seed))) return dispatch(newRun(seed, codex), { type: "resume" });
@@ -35,11 +53,15 @@ function give(state: State, items: Partial<Record<Item, number>>): State {
   return { ...state, inventory: { ...state.inventory, ...items } };
 }
 
+function withBuilt(state: State, built: Built[]): State {
+  return { ...state, built, unlocked: 3 };
+}
+
 const send = (state: State, crew: number, band: Band, resource: Resource) => dispatch(state, { type: "send", crew, band, resource });
-const combine = (state: State, a: Item, b: Item) => dispatch(state, { type: "combine", a, b });
+const build = (state: State, out: Built) => dispatch(state, { type: "build", out });
 const lastLog = (state: State) => state.log[state.log.length - 1]?.text ?? "";
 
-test("tide tables are seeded, start generously, never strand the crew, and always reach the wreck", () => {
+test("tide charts are seeded, plannable, start generously, never strand the crew, and always reach the wreck in daylight", () => {
   for (let seed = 1; seed <= 400; seed++) {
     const tides = tideTable(seed);
     expect(tides).toEqual(tideTable(seed));
@@ -50,23 +72,30 @@ test("tide tables are seeded, start generously, never strand the crew, and alway
     expect(tides.filter((depth) => depth === 4).length).toBeGreaterThanOrEqual(2);
     expect(tides.some((depth, i) => depth === 4 && i >= TIDES_PER_RUN / 2 && !isDark(i))).toBe(true);
     for (const depth of tides) expect(depth >= 1 && depth <= 4).toBe(true);
+    // A cycle, not dice: neighbouring tides differ by at most two bands.
+    for (let i = 1; i < tides.length; i++) expect(Math.abs(tides[i] - tides[i - 1])).toBeLessThanOrEqual(2);
   }
   expect(tideTable(1)).not.toEqual(tideTable(2));
 });
 
-test("a new run starts paused with two fed crew, rations, and a three-tide forecast", () => {
+test("a new run starts paused with two fed crew, rations, every blueprint visible, and the whole chart", () => {
   const state = newRun(7);
+  expect(state.version).toBe(2);
   expect(state.paused).toBe(true);
   expect(state.crew).toHaveLength(2);
-  expect(state.crew.every((member) => member.fed)).toBe(true);
-  expect(totalFood(state)).toBe(4);
-  expect(forecast(state)).toHaveLength(3);
-  expect(forecast(state)[0]).toMatchObject({ tide: 0, current: true, dark: false });
+  expect(state.food).toBe(6);
+  expect(state.unlocked).toBe(1);
+  expect(tideChart(state)).toHaveLength(TIDES_PER_RUN);
+  expect(tideChart(state)[0]).toMatchObject({ tide: 0, current: true, past: false });
+  expect(forecast(state, 3)).toHaveLength(3);
+  expect(buildOptions(state)).toHaveLength(BLUEPRINTS.length);
+  expect(buildOptions(state).filter((option) => !option.locked).map((option) => option.blueprint.tier)).toEqual([1, 1, 1, 1, 1]);
   expect(advance(state, 10_000).time).toBe(0);
-  expect(dispatch(dispatch(state, { type: "resume" }), { type: "pause" }).paused).toBe(true);
+  expect(newRun(1, [], "hello").notice).toBe("hello");
+  expect(dispatch(newRun(1, [], "hello"), { type: "dismissNotice" }).notice).toBeNull();
 });
 
-test("the shingle never floods; exposed bands flood from the outside in, the mudflat last", () => {
+test("the shingle never floods; exposed bands flood from the outside in; the waterline agrees with the flood times", () => {
   const state = runWhere((tides) => tides[0] === 3);
   expect(floodTime(state, 0)).toBeNull();
   expect(floodTime(state, 2)).toBe(TURN_MS);
@@ -76,9 +105,26 @@ test("the shingle never floods; exposed bands flood from the outside in, the mud
   expect([3, 2, 1].map((band) => floodTime(deep, band as Band))).toEqual([TURN_MS, 65_000, TIDE_MS]);
   const shallow = { ...state, tides: [2, ...state.tides.slice(1)] };
   expect(floodTime(shallow, 1)).toBe(TURN_MS);
-  const options = availableJobs(state, 0);
-  expect(options.find((option) => option.band === 3)?.blocked).toBe("Under water this tide.");
-  expect(options.find((option) => option.band === 2 && option.resource === "kelp")?.feasible).toBe(true);
+
+  // Band b is dry exactly while waterline > b, at every moment of the tide, for every depth.
+  for (const depth of [1, 2, 3, 4]) {
+    const run = { ...state, tides: [depth, ...state.tides.slice(1)] };
+    expect(waterline(run)).toBe(Math.max(1, depth));
+    for (let t = 0; t < TIDE_MS; t += 250) {
+      const at = { ...run, time: t };
+      const level = waterline(at);
+      for (const band of [1, 2, 3] as Band[]) {
+        const flood = floodTime(at, band);
+        const dry = flood !== undefined && (flood === null || t < flood);
+        expect(level > band, `depth ${depth} t ${t} band ${band}`).toBe(dry);
+      }
+    }
+    if (depth >= 2) {
+      expect(waterline({ ...run, time: TURN_MS - CREEP_MS })).toBe(depth);
+      expect(waterline({ ...run, time: TURN_MS - CREEP_MS / 2 })).toBeCloseTo(depth - 0.5);
+      expect(waterline({ ...run, time: TIDE_MS - 1 })).toBeCloseTo(1, 1);
+    }
+  }
 });
 
 test("a job finishes after its duration, yields, and frees the crew member", () => {
@@ -95,17 +141,27 @@ test("a job finishes after its duration, yields, and frees the crew member", () 
   expect(lastLog(state)).toContain("Wren brings back 1 driftwood");
 });
 
-test("a job that cannot finish before the water arrives is refused, and one caught by the tide is lost", () => {
-  let state = runWhere((tides) => tides[0] === 2);
-  // With only the mudflat bare it turns at 50 s. Advance until a 20 s clam job cannot finish.
+test("a job that cannot finish in time is held and starts by itself when the water allows; one caught by the tide is lost", () => {
+  let state = runWhere((tides) => tides[0] === 2 && tides[1] >= 2);
   state = advance(state, TURN_MS - 10_000);
   const option = availableJobs(state, 0).find((candidate) => candidate.resource === "clams")!;
   expect(option.feasible).toBe(false);
   expect(option.blocked).toBe("Would flood first.");
-  expect(send(state, 0, 1, "clams").jobs).toHaveLength(0);
+  expect(option.waits).toBe(true);
+  state = send(state, 0, 1, "clams");
+  expect(state.jobs).toHaveLength(0);
+  expect(state.crew[0].queued).toEqual({ band: 1, resource: "clams" });
+  expect(lastLog(state)).toContain("as soon as the water allows");
+  state = advance(state, TIDE_MS - (TURN_MS - 10_000));
+  expect(state.tide).toBe(1);
+  expect(state.jobs).toHaveLength(1);
+  expect(state.jobs[0].resource).toBe("clams");
 
-  // A job can still be lost if the rules change under it: here the raft band stays safe,
-  // so instead check the lose path by forcing a job whose band floods before it finishes.
+  // Shingle jobs are safe from the water but still cannot run past the turn of the tide.
+  let late = runWhere((tides) => tides[0] >= 2);
+  late = advance(late, TIDE_MS - 5_000);
+  expect(availableJobs(late, 0).find((candidate) => candidate.resource === "driftwood")?.blocked).toBe("The tide turns first.");
+
   let risky = runWhere((tides) => tides[0] === 3);
   risky = send(risky, 0, 2, "pearl");
   risky = { ...risky, jobs: risky.jobs.map((job) => ({ ...job, finishesAt: TURN_MS + 5_000 })) };
@@ -115,145 +171,140 @@ test("a job that cannot finish before the water arrives is refused, and one caug
   expect(lastLog(risky)).toContain("The water takes the reef");
 });
 
-test("advancing across a tide boundary feeds the crew, spoils old food, and moves the forecast", () => {
-  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2 && tides[2] >= 2);
+test("the turn of the tide: structures produce, then the crew eat, and hunger means half speed until food arrives", () => {
+  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2 && tides[2] >= 2 && tides[3] >= 2);
   state = advance(state, TIDE_MS);
   expect(state.tide).toBe(1);
-  expect(totalFood(state)).toBe(2);
+  expect(state.food).toBe(4);
+  state = advance(state, 2 * TIDE_MS);
+  expect(state.tide).toBe(3);
+  expect(state.food).toBe(0);
   expect(state.crew.every((member) => member.fed)).toBe(true);
   state = advance(state, TIDE_MS);
-  expect(state.tide).toBe(2);
-  expect(totalFood(state)).toBe(0);
-  state = advance(state, TIDE_MS);
-  expect(state.tide).toBe(3);
   expect(state.crew.every((member) => !member.fed)).toBe(true);
   expect(state.log.some((entry) => entry.text.includes("hungry"))).toBe(true);
-  // Hungry crew work at half speed rather than sitting out, so a run can always recover.
-  expect(jobDuration(state, 0, "driftwood")).toBeGreaterThanOrEqual(2 * 14_000);
+  expect(jobDuration(state, 0, "driftwood")).toBe(2 * 14_000);
   expect(availableJobs(state, 0).some((option) => option.feasible)).toBe(true);
+
+  // A fish trap feeds two mouths by itself; the kiln fires one brick per turn from clay and driftwood.
+  let camp = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2);
+  camp = give(withBuilt(camp, ["fishTrap", "kiln"]), { clay: 2, driftwood: 1 });
+  expect(producers(camp).map((producer) => producer.id)).toEqual(["fishTrap", "kiln"]);
+  expect(producers(camp)[1].ready).toBe(true);
+  camp = advance(camp, TIDE_MS);
+  expect(camp.food).toBe(6 + 2 - 2);
+  expect(camp.inventory).toEqual({ clay: 1, brick: 1 });
+  expect(producers(camp)[1].ready).toBe(false);
+  camp = advance(camp, TIDE_MS);
+  expect(camp.inventory).toEqual({ clay: 1, brick: 1 });
+  expect(camp.food).toBe(6);
 });
 
 test("hungry crew eat the moment food reaches camp, so hunger does not spiral", () => {
   let state = runWhere((tides) => tides[0] >= 3 && tides[1] >= 3);
-  state = { ...state, food: [], crew: state.crew.map((member) => ({ ...member, fed: false })) };
+  state = { ...state, food: 0, crew: state.crew.map((member) => ({ ...member, fed: false })) };
   expect(jobDuration(state, 0, "clams")).toBe(40_000);
   state = send(state, 0, 1, "clams");
   state = advance(state, 40_000);
-  expect(state.crew[0].fed).toBe(true);
-  expect(state.crew[1].fed).toBe(false);
-  expect(totalFood(state)).toBe(0);
-  expect(lastLog(state)).toContain("Wren eats straight away");
+  expect(state.crew.every((member) => member.fed)).toBe(true);
+  expect(state.food).toBe(1);
+  expect(lastLog(state)).toContain("Wren and Sol eat straight away");
   expect(jobDuration(state, 0, "clams")).toBe(20_000);
 });
 
-test("raw food spoils after two tides unless a smokehouse stands", () => {
-  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2);
-  state = { ...state, food: [{ amount: 10, tide: 0 }] };
-  state = advance(state, TIDE_MS); // end of tide 0: eat 2 → 8, lot is fresh
-  expect(totalFood(state)).toBe(8);
-  state = advance(state, TIDE_MS); // end of tide 1: eat 2 → 6, then the tide-0 lot spoils
-  expect(totalFood(state)).toBe(0);
-  expect(lastLog(dispatch(state, { type: "pause" })) === lastLog(state)).toBe(true);
-  expect(state.log.some((entry) => entry.text.includes("goes off"))).toBe(true);
+test("blueprints are visible with what is missing; building consumes inputs, unlocks the next tier, and stands once", () => {
+  let state = runWhere(() => true);
+  const waders = canBuild(state, "waders");
+  expect(waders).toEqual({ ok: false, missing: ["reed", "driftwood"], why: "Needs reeds, driftwood." });
+  expect(canBuild(state, "net").why).toBe("Build something from tier 1 first.");
+  expect(canBuild(give(state, { driftwood: 1 }), "sled")).toEqual({ ok: false, missing: ["driftwood"], why: "Needs driftwood." });
 
-  let smoked = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2);
-  smoked = { ...smoked, food: [{ amount: 10, tide: 0 }], built: ["smokehouse"] };
-  smoked = advance(smoked, 2 * TIDE_MS);
-  expect(totalFood(smoked)).toBe(6);
-});
+  state = give(state, { reed: 2, driftwood: 3, kelp: 1 });
+  expect(build(state, "net").built).toEqual([]);
+  state = build(state, "waders");
+  expect(state.built).toEqual(["waders"]);
+  expect(state.inventory).toEqual({ reed: 1, driftwood: 2, kelp: 1 });
+  expect(state.unlocked).toBe(2);
+  expect(state.codex).toEqual(["waders"]);
+  expect(lastLog(state)).toContain("Reed wrapped over driftwood soles");
 
-test("combining discovers recipes, consumes inputs, and failed combinations cost nothing but a line", () => {
-  let state = give(runWhere(() => true), { kelp: 1, reed: 2, driftwood: 1, stone: 1 });
-  expect(canCombine(state, "kelp", "stone")).toBeNull();
-  const before = state.inventory;
-  state = combine(state, "kelp", "stone");
-  expect(state.inventory).toEqual(before);
-  expect(state.codex).toEqual([]);
-
-  expect(canCombine(state, "reed", "kelp")?.out).toBe("rope");
-  state = combine(state, "reed", "kelp");
+  // A material does not unlock a tier; a second pair of waders is refused.
+  state = build(state, "rope");
   expect(state.inventory.rope).toBe(1);
-  expect(state.inventory.kelp).toBeUndefined();
-  expect(state.inventory.reed).toBe(1);
-  expect(state.codex).toEqual(["kelp+reed"]);
-  expect(lastLog(state)).toContain("Rope discovered");
+  expect(canBuild(give(state, { reed: 5, driftwood: 5 }), "waders").why).toBe("Already standing.");
+  state = build(state, "raft");
+  expect(state.built).toEqual(["waders", "raft"]);
+  expect(state.unlocked).toBe(3);
+  expect(state.inventory).toEqual({});
 
-  state = combine(state, "rope", "driftwood");
-  expect(state.built).toContain("net");
-  expect(state.inventory.rope).toBeUndefined();
-  expect(state.codex).toEqual(["driftwood+rope", "kelp+reed"]);
-
-  // One of each structure is enough; a second net is refused and costs nothing.
-  const again = give(state, { rope: 1, driftwood: 1 });
-  expect(canCombine(again, "rope", "driftwood")).toBeNull();
-  const refused = combine(again, "rope", "driftwood");
-  expect(refused.built).toEqual(["net"]);
-  expect(refused.inventory.rope).toBe(1);
-  expect(lastLog(refused)).toContain("You already have a net");
-
-  // Known recipes carry into the next run; the inventory does not.
+  // Known blueprints carry into the next run; the inventory does not.
   const next = dispatch(state, { type: "newRun", seed: 3 });
-  expect(next.codex).toEqual(["driftwood+rope", "kelp+reed"]);
+  expect(next.codex).toEqual(["raft", "rope", "waders"]);
   expect(next.inventory).toEqual({});
   expect(next.built).toEqual([]);
+  expect(next.unlocked).toBe(1);
 });
 
-test("structures change the rules: net, waders, lantern, raft, shelter, kiln", () => {
-  const base = runWhere((tides) => tides[0] === 3 && tides[3] === 3);
-  expect(jobDuration(base, 0, "fish")).toBe(24_000);
-  expect(jobDuration({ ...base, built: ["waders"] }, 0, "fish")).toBe(16_800);
-  expect(jobDuration({ ...base, built: ["waders"] }, 0, "stone")).toBe(18_000);
+test("reach lets the crew work past the waterline all tide, slower, and never floods them", () => {
+  const base = runWhere((tides) => tides[0] === 2);
+  expect(reach(base)).toBe(0);
+  expect(availableJobs(base, 0).find((option) => option.resource === "kelp")?.blocked).toBe("Under water this tide.");
 
-  let netted: State = { ...base, built: ["net"] };
-  netted = send(netted, 0, 2, "fish");
+  const waded = withBuilt(base, ["waders"]);
+  expect(reach(waded)).toBe(1);
+  expect(floodTime(waded, 2)).toBeNull();
+  expect(floodTime(waded, 3)).toBeUndefined();
+  const kelp = availableJobs(waded, 0).find((option) => option.resource === "kelp")!;
+  expect(kelp).toMatchObject({ feasible: true, beyond: 1, duration: 30_000 });
+
+  const rafted = withBuilt(base, ["waders", "raft"]);
+  expect(reach(rafted)).toBe(2);
+  const brass = availableJobs(rafted, 0).find((option) => option.resource === "brass")!;
+  expect(brass).toMatchObject({ feasible: true, beyond: 2, duration: 56_000 });
+  let out = send(rafted, 0, 3, "brass");
+  expect(lastLog(out)).toContain("on the raft");
+  out = advance(out, 56_000);
+  expect(out.inventory.brass).toBe(1);
+
+  // Bare ground inside the waterline still floods exactly as before.
+  expect(floodTime(rafted, 1)).toBe(TURN_MS);
+});
+
+test("structures change the rules: net, sled, winch, lantern, shelter", () => {
+  const base = (() => {
+    const run = runWhere((tides) => tides[0] === 3 && tides[3] >= 2);
+    return { ...run, tides: [4, ...run.tides.slice(1)] };
+  })();
+  expect(jobDuration(base, 0, "brass")).toBe(28_000);
+  expect(jobDuration(withBuilt(base, ["winch"]), 0, "brass")).toBe(16_800);
+  expect(jobDuration(withBuilt(base, ["winch"]), 0, "stone")).toBe(18_000);
+
+  let netted = send(withBuilt(base, ["net"]), 0, 2, "fish");
   netted = advance(netted, 24_000);
-  expect(totalFood(netted)).toBe(4 + 5);
+  expect(netted.food).toBe(6 + 8);
 
-  const night = advance({ ...base, built: ["smokehouse"], food: [{ amount: 20, tide: 0 }] }, 3 * TIDE_MS);
+  let sledded = send(withBuilt(base, ["sled"]), 0, 0, "stone");
+  sledded = advance(sledded, 18_000);
+  expect(sledded.inventory.stone).toBe(2);
+  let sledFood = send(withBuilt(base, ["sled"]), 0, 1, "clams");
+  sledFood = advance(sledFood, 20_000);
+  expect(sledFood.food).toBe(6 + 3);
+
+  const night = advance({ ...withBuilt(base, ["fishTrap"]), food: 20 }, 3 * TIDE_MS);
   expect(night.tide).toBe(3);
-  expect(night.crew.every((member) => member.fed)).toBe(true);
   expect(isDark(3)).toBe(true);
   expect(jobDuration(night, 0, "driftwood")).toBe(28_000);
   expect(jobDuration({ ...night, built: ["lantern"] }, 0, "driftwood")).toBe(14_000);
 
-  const rafted = { ...base, built: ["raft" as const] };
-  expect(floodTime(base, 3)).toBeUndefined();
-  expect(floodTime(rafted, 3)).toBeNull();
-  const brass = availableJobs(rafted, 0).find((option) => option.resource === "brass")!;
-  expect(brass.feasible).toBe(true);
-  expect(brass.duration).toBe(42_000);
-
-  let sheltered = give(base, { reed: 1, stone: 1 });
-  sheltered = combine(sheltered, "reed", "stone");
+  let sheltered = give({ ...base, unlocked: 2 }, { reed: 1, clay: 1 });
+  sheltered = build(sheltered, "shelter");
   expect(sheltered.crew).toHaveLength(3);
   expect(sheltered.crew[2].name).toBe("Ada");
-
-  let fired = give(base, { clay: 1, driftwood: 1 });
-  expect(canCombine(fired, "clay", "driftwood")).toBeNull();
-  fired = combine(fired, "clay", "driftwood");
-  expect(lastLog(fired)).toContain("You need a kiln first");
-  expect(fired.inventory.clay).toBe(1);
-  fired = combine({ ...fired, built: ["kiln"] }, "clay", "driftwood");
-  expect(fired.inventory.brick).toBe(1);
+  const full = { ...sheltered, crew: [...sheltered.crew, { id: 3, name: "Finn", fed: true, queued: null }] };
+  expect(canBuild(give(full, { reed: 1, clay: 1 }), "shelter").why).toContain("no one else");
 });
 
-test("recipe hints point at reachable goals, nearest first, without giving the pair away", () => {
-  let state = give(runWhere(() => true), { reed: 1 });
-  let hints = recipeHints(state);
-  // Brick needs a kiln, so it is not offered yet; everything else is.
-  expect(hints.map((hint) => hint.recipe.out)).not.toContain("brick");
-  expect(hints).toHaveLength(10);
-  expect(hints.slice(0, 3).map((hint) => hint.held)).toEqual(["reed", "reed", "reed"]);
-  expect(hints.slice(3).every((hint) => hint.held === null)).toBe(true);
-
-  state = give({ ...state, built: ["kiln"], codex: ["clay+stone"] }, { clay: 1 });
-  hints = recipeHints(state);
-  expect(hints.map((hint) => hint.recipe.out)).toContain("brick");
-  expect(hints.map((hint) => hint.recipe.out)).not.toContain("kiln");
-  expect(hints[0].held).toBeTruthy();
-});
-
-test("a queued job waits until it can finish before the flood, then starts by itself", () => {
+test("a queued job waits until it can finish, then starts by itself; queue behind a running job", () => {
   let state = runWhere((tides) => tides[0] === 2 && tides[1] === 4);
   state = dispatch(state, { type: "queue", crew: 0, band: 3, resource: "brass" });
   expect(state.jobs).toHaveLength(0);
@@ -266,7 +317,6 @@ test("a queued job waits until it can finish before the flood, then starts by it
   expect(state.jobs[0]).toMatchObject({ band: 3, resource: "brass", crew: 0 });
   expect(state.crew[0].queued).toBeNull();
 
-  // Queue behind a running job: it starts the moment the first one finishes.
   let busy = runWhere((tides) => tides[0] === 3);
   busy = send(busy, 1, 0, "driftwood");
   busy = dispatch(busy, { type: "queue", crew: 1, band: 0, resource: "stone" });
@@ -281,19 +331,20 @@ test("a queued job waits until it can finish before the flood, then starts by it
 test("ringing a finished beacon ends the run early with the bonus; otherwise the twelfth tide ends it", () => {
   let state = runWhere((tides) => tides[0] >= 2);
   expect(dispatch(state, { type: "ring" }).ended).toBeNull();
-  state = { ...state, built: ["bellTower", "lantern"] };
-  state = combine(state, "bellTower", "lantern");
+  state = withBuilt(state, ["bellTower", "lantern"]);
+  expect(canBuild(state, "beacon").ok).toBe(true);
+  state = build(state, "beacon");
   expect(state.built).toEqual(["beacon"]);
-  state = give(state, { pearl: 1, driftwood: 40 });
+  state = give({ ...state, food: 15 }, { pearl: 1, driftwood: 40 });
   state = dispatch(state, { type: "ring" });
-  // Only the first six of any one item count, so forty driftwood are worth six.
-  expect(state.ended).toMatchObject({ reason: "beacon", beacon: 500, tidesLeft: 11, tidesLeftBonus: 440, salvage: 66, structures: 50 });
-  expect(state.ended?.score).toBe(66 + 50 + 500 + 440);
+  // Only the first six of any one item count, so forty driftwood are worth six; food counts to ten.
+  expect(state.ended).toMatchObject({ reason: "beacon", beacon: 500, tidesLeft: 11, tidesLeftBonus: 440, salvage: 66, structures: 50, foodScore: 20 });
+  expect(state.ended?.score).toBe(66 + 50 + 20 + 500 + 440);
   expect(advance(state, 10_000)).toBe(state);
   expect(send(state, 0, 0, "driftwood")).toBe(state);
 
   let full = runWhere(() => true);
-  full = { ...full, built: ["smokehouse"], food: [{ amount: 100, tide: 0 }] };
+  full = { ...withBuilt(full, ["fishTrap"]), food: 100 };
   full = advance(full, TIDES_PER_RUN * TIDE_MS + 5);
   expect(full.ended?.reason).toBe("tides");
   expect(full.time).toBe(TIDES_PER_RUN * TIDE_MS);
@@ -301,27 +352,25 @@ test("ringing a finished beacon ends the run early with the bonus; otherwise the
 });
 
 test("advance is stable however finely time is sliced", () => {
-  const coarse = (() => {
+  const play = (slice: number) => {
     let state = runWhere((tides) => tides[0] === 3 && tides[1] >= 2);
+    state = give(withBuilt(state, ["kiln", "fishTrap"]), { clay: 1, driftwood: 1 });
     state = send(state, 0, 2, "fish");
     state = send(state, 1, 1, "clams");
-    return advance(state, 2 * TIDE_MS + 777);
-  })();
-  const fine = (() => {
-    let state = runWhere((tides) => tides[0] === 3 && tides[1] >= 2);
-    state = send(state, 0, 2, "fish");
-    state = send(state, 1, 1, "clams");
-    for (let t = 0; t < 2 * TIDE_MS + 777; t += 333) state = advance(state, Math.min(333, 2 * TIDE_MS + 777 - t));
+    const total = 2 * TIDE_MS + 777;
+    for (let t = 0; t < total; t += slice) state = advance(state, Math.min(slice, total - t));
     return state;
-  })();
+  };
+  const coarse = play(2 * TIDE_MS + 777);
+  const fine = play(333);
   expect(fine.time).toBe(coarse.time);
   expect(fine.inventory).toEqual(coarse.inventory);
-  expect(fine.food).toEqual(coarse.food);
+  expect(fine.food).toBe(coarse.food);
   expect(fine.tide).toBe(coarse.tide);
   expect(fine.log.map((entry) => entry.text)).toEqual(coarse.log.map((entry) => entry.text));
 });
 
-test("saves round-trip through localStorage, reload resumes paused, and the codex merges across runs", () => {
+test("saves round-trip, reload resumes paused, a first-pass save is retired not loaded, and the best run keeps counts", () => {
   const store = new Map<string, string>();
   const fakeStorage = {
     getItem: (key: string) => store.get(key) ?? null,
@@ -340,35 +389,26 @@ test("saves round-trip through localStorage, reload resumes paused, and the code
     expect({ ...loaded, paused: false }).toEqual(state);
     expect(JSON.parse(store.get(RUN_KEY)!)).toBeTruthy();
 
-    saveCodex(["kelp+reed"]);
-    saveCodex(["driftwood+rope", "kelp+reed"]);
-    expect(loadCodex()).toEqual(["driftwood+rope", "kelp+reed"]);
+    store.set(LEGACY_RUN_KEY, JSON.stringify({ version: 1, time: 5, tide: 0 }));
+    expect(hasLegacyRun()).toBe(true);
+    retireLegacyRun();
+    expect(hasLegacyRun()).toBe(false);
+
+    saveCodex(["waders"]);
+    store.set(CODEX_KEY, JSON.stringify(["kelp+reed", "waders", "net"]));
+    expect(loadCodex()).toEqual(["waders", "net"]);
 
     expect(loadBest()).toBeNull();
-    expect(recordBest({ score: 120, beacon: false, seed: 1 })).toEqual({ score: 120, beacon: false, seed: 1 });
-    expect(recordBest({ score: 90, beacon: true, seed: 2 })).toEqual({ score: 120, beacon: false, seed: 1 });
-    expect(recordBest({ score: 900, beacon: true, seed: 3 })).toEqual({ score: 900, beacon: true, seed: 3 });
-    expect(loadBest()).toEqual({ score: 900, beacon: true, seed: 3 });
+    expect(recordBest({ score: 120, beacon: false, seed: 1 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 0, runs: 1 });
+    expect(recordBest({ score: 90, beacon: true, seed: 2 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 1, runs: 2 });
+    expect(recordBest({ score: 900, beacon: true, seed: 3 })).toEqual({ score: 900, beacon: true, seed: 3, beacons: 2, runs: 3 });
+    expect(loadBest()).toEqual({ score: 900, beacon: true, seed: 3, beacons: 2, runs: 3 });
 
     store.set(RUN_KEY, "{not json");
     expect(loadRun()).toBeNull();
-    store.set(CODEX_KEY, "[1, \"a+b\"]");
-    expect(loadCodex()).toEqual(["a+b"]);
+    store.set(RUN_KEY, JSON.stringify({ version: 1 }));
+    expect(loadRun()).toBeNull();
   } finally {
     delete (globalThis as unknown as { window?: unknown }).window;
   }
-});
-
-test("a job that cannot finish before the tide turns is refused even on the shingle, but can be queued for the next tide", () => {
-  let state = runWhere((tides) => tides[0] >= 2);
-  state = advance(state, TIDE_MS - 5_000);
-  const stone = availableJobs(state, 0).find((candidate) => candidate.resource === "stone")!;
-  expect(stone.feasible).toBe(false);
-  expect(stone.blocked).toBe("The tide turns first.");
-  expect(send(state, 0, 0, "stone").jobs).toHaveLength(0);
-  state = dispatch(state, { type: "queue", crew: 0, band: 0, resource: "stone" });
-  expect(state.jobs).toHaveLength(0);
-  state = advance(state, 5_000);
-  expect(state.tide).toBe(1);
-  expect(state.jobs.map((job) => job.resource)).toEqual(["stone"]);
 });
