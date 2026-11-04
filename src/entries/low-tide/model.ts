@@ -17,6 +17,7 @@ import {
   RECIPES,
   RESOURCES,
   RESOURCES_BY_BAND,
+  SALVAGE_CAP,
   SPOIL_AFTER_TIDES,
   STARTING_CREW,
   STARTING_FOOD,
@@ -344,8 +345,9 @@ export function totalFood(state: State): number {
 export function salvageValue(state: State): number {
   let value = 0;
   for (const [item, count] of Object.entries(state.inventory) as [Item, number][]) {
-    if (item in RESOURCES) value += RESOURCES[item as Resource].value * count;
-    else if (item in MATERIAL_VALUE) value += MATERIAL_VALUE[item as keyof typeof MATERIAL_VALUE] * count;
+    const counted = Math.min(count, SALVAGE_CAP);
+    if (item in RESOURCES) value += RESOURCES[item as Resource].value * counted;
+    else if (item in MATERIAL_VALUE) value += MATERIAL_VALUE[item as keyof typeof MATERIAL_VALUE] * counted;
   }
   return value;
 }
