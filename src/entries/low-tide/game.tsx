@@ -109,11 +109,6 @@ function Camp({ state, best, dispatch }: Props) {
     setTray([]);
   }
 
-  function send(band: Band, resource: Resource) {
-    if (!actor) return;
-    dispatch({ type: queuing ? "queue" : "send", crew: actor.id, band, resource });
-  }
-
   if (state.ended) {
     const end = state.ended;
     return (
@@ -211,20 +206,23 @@ function Camp({ state, best, dispatch }: Props) {
                   <div className={styles.options}>
                     {here.map(option => {
                       const tight = option.feasible && typeof option.floodsAt === "number" && state.time + option.duration > option.floodsAt - 8_000;
-                      const disabled = !queuing && !option.feasible;
-                      const alreadyQueued = queuing && actor.queued?.band === band && actor.queued.resource === option.resource;
+                      // Busy crew, or a job the water or the turn would beat, can still be lined up: it starts the moment it can finish.
+                      const later = queuing || !option.feasible;
+                      const alreadyQueued = later && actor.queued?.band === band && actor.queued.resource === option.resource;
+                      const why = option.blocked.replace(/\.$/, "").toLowerCase();
                       return (
                         <button
                           key={option.resource}
                           type="button"
-                          disabled={disabled || alreadyQueued}
+                          disabled={alreadyQueued}
                           data-tight={tight || undefined}
-                          aria-label={`${queuing ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${disabled ? `. ${option.blocked}` : ""}`}
-                          onClick={() => send(band, option.resource)}
+                          data-later={later || undefined}
+                          aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
+                          onClick={() => dispatch({ type: later ? "queue" : "send", crew: actor.id, band, resource: option.resource })}
                         >
                           <span>{itemName(option.resource)}{option.yield > 1 ? ` ×${option.yield}` : ""}</span>
                           <span className={styles.duration}>
-                            {seconds(option.duration)}{disabled ? ` · ${option.blocked.replace(/\.$/, "").toLowerCase()}` : alreadyQueued ? " · queued" : queuing ? ` · queue ${actor.name}` : tight ? " · tight" : ""}
+                            {seconds(option.duration)}{alreadyQueued ? " · queued" : queuing ? ` · queue ${actor.name}` : later ? ` · ${why} · queue` : tight ? " · tight" : ""}
                           </span>
                         </button>
                       );

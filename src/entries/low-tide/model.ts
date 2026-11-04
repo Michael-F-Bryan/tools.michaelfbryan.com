@@ -320,6 +320,7 @@ export function availableJobs(state: State, crewId: number): JobOption[] {
       else if (!exposed && floodsAt === undefined) blocked = "Under water this tide.";
       else if (!exposed) blocked = "Flooded.";
       else if (typeof floodsAt === "number" && state.time + duration > floodsAt) blocked = "Would flood first.";
+      else if (state.time + duration > (state.tide + 1) * TIDE_MS) blocked = "The tide turns first.";
       options.push({ band, resource, duration, yield: jobYield(state, resource), exposed, floodsAt, feasible: blocked === "", blocked });
     }
   }

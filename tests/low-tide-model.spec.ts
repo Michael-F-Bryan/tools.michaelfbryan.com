@@ -358,3 +358,17 @@ test("saves round-trip through localStorage, reload resumes paused, and the code
     delete (globalThis as unknown as { window?: unknown }).window;
   }
 });
+
+test("a job that cannot finish before the tide turns is refused even on the shingle, but can be queued for the next tide", () => {
+  let state = runWhere((tides) => tides[0] >= 2);
+  state = advance(state, TIDE_MS - 5_000);
+  const stone = availableJobs(state, 0).find((candidate) => candidate.resource === "stone")!;
+  expect(stone.feasible).toBe(false);
+  expect(stone.blocked).toBe("The tide turns first.");
+  expect(send(state, 0, 0, "stone").jobs).toHaveLength(0);
+  state = dispatch(state, { type: "queue", crew: 0, band: 0, resource: "stone" });
+  expect(state.jobs).toHaveLength(0);
+  state = advance(state, 5_000);
+  expect(state.tide).toBe(1);
+  expect(state.jobs.map((job) => job.resource)).toEqual(["stone"]);
+});
