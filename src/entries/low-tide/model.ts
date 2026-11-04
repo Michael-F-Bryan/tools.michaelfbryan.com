@@ -153,7 +153,8 @@ export function tideTable(seed: number): number[] {
       tides.push(depth);
     }
     const wreckTides = tides.map((depth, i) => (depth === 4 ? i : -1)).filter((i) => i >= 0);
-    if (wreckTides.length >= 2 && wreckTides.some((i) => i >= TIDES_PER_RUN / 2)) return tides;
+    // A dark wreck tide is no use for the lantern, so the late one must be in daylight.
+    if (wreckTides.length >= 2 && wreckTides.some((i) => i >= TIDES_PER_RUN / 2 && !isDark(i))) return tides;
   }
   // Statistically unreachable; keep the type honest.
   return Array.from({ length: TIDES_PER_RUN }, (_, i) => (i % 4) + 1);
@@ -332,6 +333,7 @@ export function canCombine(state: State, a: Item, b: Item): Recipe | null {
   if (recipe.requires && !hasBuilt(state, recipe.requires)) return null;
   if (!hasInputs(state, recipe)) return null;
   if (recipe.out === "shelter" && state.crew.length >= MAX_CREW) return null;
+  if (recipe.structure && recipe.out !== "shelter" && hasBuilt(state, recipe.out)) return null;
   return recipe;
 }
 
@@ -430,7 +432,26 @@ function completeJob(s: State, job: Job): State {
   } else {
     s = { ...s, inventory: addItem(s.inventory, job.resource, amount) };
   }
-  return log(s, `${member?.name ?? "Someone"} brings back ${amount} ${info.label.toLowerCase()} from the ${BAND_NAMES[job.band].toLowerCase()}.`, "gain");
+  s = log(s, `${member?.name ?? "Someone"} brings back ${amount} ${info.label.toLowerCase()} from the ${BAND_NAMES[job.band].toLowerCase()}.`, "gain");
+  return info.food ? feedHungry(s) : s;
+}
+
+/** Anyone who went to sleep hungry eats as soon as food reaches camp, so hunger slows a run without spiralling. */
+function feedHungry(s: State): State {
+  const hungry = s.crew.filter((member) => !member.fed);
+  if (hungry.length === 0 || totalFood(s) === 0) return s;
+  const lots = s.food.map((lot) => ({ ...lot })).sort((a, b) => a.tide - b.tide);
+  const fedNow: string[] = [];
+  const crew = s.crew.map((member) => {
+    if (member.fed) return member;
+    const lot = lots.find((candidate) => candidate.amount > 0);
+    if (!lot) return member;
+    lot.amount -= 1;
+    fedNow.push(member.name);
+    return { ...member, fed: true };
+  });
+  s = { ...s, crew, food: lots.filter((lot) => lot.amount > 0) };
+  return log(s, `${fedNow.join(" and ")} ${fedNow.length > 1 ? "eat" : "eats"} straight away. Full speed again.`, "gain");
 }
 
 function loseJob(s: State, job: Job): State {
@@ -593,6 +614,9 @@ function combine(state: State, a: Item, b: Item): State {
   }
   if (recipe.out === "shelter" && state.crew.length >= MAX_CREW) {
     return log(state, "There's no one else out here to shelter.", "info");
+  }
+  if (recipe.structure && recipe.out !== "shelter" && hasBuilt(state, recipe.out)) {
+    return log(state, `You already have a ${recipe.label.toLowerCase()}. One is enough.`, "info");
   }
   let s = removeItem(state, a);
   s = removeItem(s, b);
