@@ -8,6 +8,8 @@ type Props = {
   current: number;
   /** Things that happened on each tide (0-based index → short labels), drawn as dots under the bar. */
   marks?: Readonly<Record<number, readonly string[]>>;
+  /** Which tides are dark; defaults to the engine's rule. */
+  dark?: (tide: number) => boolean;
   /** Accessible name of the chart. */
   label?: string;
 };
@@ -22,11 +24,11 @@ function reaches(depth: number): string {
  * now, which are behind you, and optionally what you built when. Pure render;
  * the game owns the state.
  */
-export function TideChart({ tides, current, marks, label = "Tide chart" }: Props) {
+export function TideChart({ tides, current, marks, dark: isDarkTide = isDark, label = "Tide chart" }: Props) {
   return (
     <ol className={styles.chart} aria-label={label}>
       {tides.map((depth, index) => {
-        const dark = isDark(index);
+        const dark = isDarkTide(index);
         const state = index < current ? "past" : index === current ? "now" : "ahead";
         const events = marks?.[index] ?? [];
         return (
