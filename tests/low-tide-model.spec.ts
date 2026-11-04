@@ -48,7 +48,7 @@ test("tide tables are seeded, start generously, never strand the crew, and alway
     expect(tides[0]).toBeLessThanOrEqual(3);
     for (let i = 1; i < tides.length; i++) expect(tides[i - 1] === 1 && tides[i] === 1).toBe(false);
     expect(tides.filter((depth) => depth === 4).length).toBeGreaterThanOrEqual(2);
-    expect(tides.slice(TIDES_PER_RUN / 2)).toContain(4);
+    expect(tides.some((depth, i) => depth === 4 && i >= TIDES_PER_RUN / 2 && !isDark(i))).toBe(true);
     for (const depth of tides) expect(depth >= 1 && depth <= 4).toBe(true);
   }
   expect(tideTable(1)).not.toEqual(tideTable(2));
@@ -133,6 +133,19 @@ test("advancing across a tide boundary feeds the crew, spoils old food, and move
   expect(availableJobs(state, 0).some((option) => option.feasible)).toBe(true);
 });
 
+test("hungry crew eat the moment food reaches camp, so hunger does not spiral", () => {
+  let state = runWhere((tides) => tides[0] >= 3 && tides[1] >= 3);
+  state = { ...state, food: [], crew: state.crew.map((member) => ({ ...member, fed: false })) };
+  expect(jobDuration(state, 0, "clams")).toBe(40_000);
+  state = send(state, 0, 1, "clams");
+  state = advance(state, 40_000);
+  expect(state.crew[0].fed).toBe(true);
+  expect(state.crew[1].fed).toBe(false);
+  expect(totalFood(state)).toBe(0);
+  expect(lastLog(state)).toContain("Wren eats straight away");
+  expect(jobDuration(state, 0, "clams")).toBe(20_000);
+});
+
 test("raw food spoils after two tides unless a smokehouse stands", () => {
   let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2);
   state = { ...state, food: [{ amount: 10, tide: 0 }] };
@@ -169,6 +182,14 @@ test("combining discovers recipes, consumes inputs, and failed combinations cost
   expect(state.built).toContain("net");
   expect(state.inventory.rope).toBeUndefined();
   expect(state.codex).toEqual(["driftwood+rope", "kelp+reed"]);
+
+  // One of each structure is enough; a second net is refused and costs nothing.
+  const again = give(state, { rope: 1, driftwood: 1 });
+  expect(canCombine(again, "rope", "driftwood")).toBeNull();
+  const refused = combine(again, "rope", "driftwood");
+  expect(refused.built).toEqual(["net"]);
+  expect(refused.inventory.rope).toBe(1);
+  expect(lastLog(refused)).toContain("You already have a net");
 
   // Known recipes carry into the next run; the inventory does not.
   const next = dispatch(state, { type: "newRun", seed: 3 });
