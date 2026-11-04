@@ -3,30 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  availableJobs, canCombine, depthOf, floodTime, forecast, isDark, recipeHints, recipeKey, tideElapsed, totalFood,
-  BAND_NAMES, BANDS, BUILT_LABELS, RECIPES, RESOURCES, TIDE_MS,
-  type Band, type Built, type Crew, type Item, type Resource, type State,
+  availableJobs, buildOptions, depthOf, floodTime, isDark, itemLabel, producers, tideElapsed,
+  BAND_NAMES, BANDS, TIDE_MS,
+  type Band, type BuildOption, type Crew, type Item, type State,
 } from "./model";
+import { Scene, describeBand, type Figure } from "./scene";
+import { TideChart } from "./tide-chart";
 import { useGame } from "./use-game";
 import styles from "./game.module.css";
 
-const BLURB: Record<Band, string> = {
-  3: "Brass, iron and oil, when the water lets you near it.",
-  2: "Kelp, fish and the odd pearl.",
-  1: "Clay, reeds and clams.",
-  0: "Driftwood and stone, always dry.",
-};
-
-function bandName(band: Band) {
-  return `The ${BAND_NAMES[band].toLowerCase()}`;
-}
-
 function itemName(item: Item) {
-  return (item in RESOURCES ? RESOURCES[item as Resource].label : BUILT_LABELS[item as Built]).toLowerCase();
-}
-
-function recipeFor(key: string) {
-  return RECIPES.find(recipe => recipeKey(recipe.inputs[0], recipe.inputs[1]) === key) ?? null;
+  return itemLabel(item).toLowerCase();
 }
 
 function clock(ms: number) {
@@ -36,6 +23,10 @@ function clock(ms: number) {
 
 function seconds(ms: number) {
   return `${Math.round(ms / 1000)}s`;
+}
+
+function holdings(state: State, item: Item) {
+  return (state.inventory[item] ?? 0) + state.built.filter(built => built === item).length;
 }
 
 export function Game() {
@@ -53,26 +44,13 @@ export function Game() {
 type Props = { state: State } & Omit<ReturnType<typeof useGame>, "state">;
 
 function Camp({ state, best, dispatch }: Props) {
-  const [picked, setTray] = useState<Item[]>([]);
-  const [showCodex, setShowCodex] = useState(false);
-  const logRef = useRef<HTMLDivElement>(null);
+  const [picked, setPicked] = useState<Band | null>(null);
+  const [showLog, setShowLog] = useState(false);
   const endingRef = useRef<HTMLHeadingElement>(null);
-
-  useEffect(() => {
-    const scroller = logRef.current;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
-  }, [state.log]);
 
   useEffect(() => {
     if (state.ended) endingRef.current?.focus({ preventScroll: true });
   }, [state.ended]);
-
-  // Items can vanish from under the tray (combined, or a structure consumed), so the tray is derived from what is still held.
-  const seen: Partial<Record<Item, number>> = {};
-  const tray = picked.filter(item => {
-    seen[item] = (seen[item] ?? 0) + 1;
-    return holdings(state, item) >= seen[item]!;
-  });
 
   const elapsed = tideElapsed(state);
   const depth = depthOf(state);
@@ -82,32 +60,30 @@ function Camp({ state, best, dispatch }: Props) {
   const actor = idle.find(member => member.fed) ?? idle[0] ?? soonestBack(state);
   const queuing = !idle.length;
   const options = actor ? availableJobs(state, actor.id) : [];
+  const workable = (band: Band) => {
+    const flood = floodTime(state, band);
+    return flood !== undefined && (flood === null || state.time < flood);
+  };
+  const deepest = [...BANDS].reverse().find(workable) ?? 0;
+  const selected: Band = picked !== null && workable(picked) ? picked : deepest;
+  const food = state.food;
   const hungry = state.crew.filter(member => !member.fed);
-  const food = totalFood(state);
-  const spoiling = state.built.includes("smokehouse") ? 0 : state.food.filter(lot => state.tide - lot.tide >= 1).reduce((sum, lot) => sum + lot.amount, 0);
-  const inventory = (Object.keys(state.inventory) as Item[]).filter(item => (state.inventory[item] ?? 0) > 0).sort();
-  const combinable = [...inventory, ...[...new Set(state.built)].filter(built => RECIPES.some(recipe => recipe.inputs.includes(built)))];
-  const trayKey = tray.length === 2 ? recipeKey(tray[0], tray[1]) : null;
-  const known = trayKey !== null && state.codex.includes(trayKey);
-  const recipe = tray.length === 2 ? canCombine(state, tray[0], tray[1]) : null;
-  const knownRecipe = trayKey ? recipeFor(trayKey) : null;
-  const inTray = (item: Item) => tray.filter(entry => entry === item).length;
-  const hints = recipeHints(state);
+  const stock = (Object.keys(state.inventory) as Item[]).filter(item => (state.inventory[item] ?? 0) > 0).sort();
+  const plans = buildOptions(state);
+  const buildable = plans.filter(plan => plan.ok).length;
+  const making = producers(state);
 
-  function toggleTray(item: Item) {
-    const count = inTray(item);
-    if (tray.length < 2 && count < holdings(state, item)) setTray([...tray, item]);
-    else {
-      const index = tray.lastIndexOf(item);
-      setTray(index >= 0 ? tray.filter((_, i) => i !== index) : tray);
-    }
-  }
-
-  function combine() {
-    if (tray.length !== 2) return;
-    dispatch({ type: "combine", a: tray[0], b: tray[1] });
-    setTray([]);
-  }
+  const figures: Figure[] = state.crew.map(member => {
+    const job = state.jobs.find(j => j.crew === member.id);
+    return {
+      id: member.id,
+      name: member.name,
+      band: job ? job.band : member.queued ? member.queued.band : 0,
+      progress: job ? Math.min(1, Math.max(0, (state.time - job.startedAt) / (job.finishesAt - job.startedAt))) : null,
+      queued: !job && member.queued !== null,
+      hungry: !member.fed,
+    };
+  });
 
   if (state.ended) {
     const end = state.ended;
@@ -130,114 +106,109 @@ function Camp({ state, best, dispatch }: Props) {
           </dl>
           <p className={styles.muted}>
             {state.built.length ? `Built: ${state.built.map(itemName).join(", ")}. ` : "Nothing built. "}
-            {end.discovered} of {RECIPES.length} recipes in the codex{hungry.length ? `. ${hungry.length} went to bed hungry` : ""}.
+            {hungry.length ? `${hungry.length} went to bed hungry.` : ""}
           </p>
-          <button type="button" className={styles.primary} onClick={() => { dispatch({ type: "newRun" }); setTray([]); }}>Work the flat again</button>
-          <p className={styles.footnote}>The codex remembers every recipe you have found, so the next run can race for the beacon from the first tide. Nothing leaves your browser.</p>
+          <button type="button" className={styles.primary} onClick={() => dispatch({ type: "newRun" })}>Work the flat again</button>
+          <p className={styles.footnote}>Nothing leaves your browser.</p>
         </section>
       </div>
     );
   }
 
+  const working = state.jobs.filter(job => job.band === selected);
+  const here = options.filter(option => option.band === selected);
+
   return (
     <div className={styles.game} data-paused={state.paused || undefined}>
-      <header className={styles.tide} data-night={dark || undefined}>
-        <div className={styles.tideRow}>
-          <p className={styles.tideLabel}>
-            <span className={styles.tideNumber}>Tide {state.tide + 1} <span className={styles.of}>of {state.tides.length}</span></span>
-            <span className={styles.phase}>{phase(state, elapsed, depth, dark)}</span>
-          </p>
-          <button type="button" className={styles.pause} aria-pressed={state.paused} onClick={() => dispatch({ type: state.paused ? "resume" : "pause" })}>
-            {state.paused ? (state.time === 0 ? "Start" : "Resume") : "Pause"}
-          </button>
-        </div>
-        <div className={styles.progress} aria-hidden="true"><span style={{ width: `${(elapsed / TIDE_MS) * 100}%` }} /></div>
-        <ol className={styles.forecast} aria-label="Tide forecast">
-          {forecast(state, 4).map((info, i) => (
-            <li key={info.tide} aria-current={info.current ? "step" : undefined} data-night={info.dark || undefined}>
-              <span className={styles.bars} aria-hidden="true">{[1, 2, 3, 4].map(level => <i key={level} data-on={level <= info.depth || undefined} />)}</span>
-              <span className={styles.forecastText} aria-hidden="true">{i === 0 ? "now" : i === 1 ? "next" : `+${i}`}{info.dark ? " · dark" : ""}</span>
-              <span className="sr-only">{`Tide ${info.tide + 1}: water out to ${bandName((info.depth - 1) as Band).toLowerCase()}${info.dark ? ", in the dark" : ""}`}</span>
-            </li>
-          ))}
-        </ol>
-        {state.paused ? (
-          <p className={styles.pausedNote} role="status">
-            {state.time === 0
-              ? "Two of you, twelve tides, and a flat the sea only half gives back. Send people out while the water is low and combine what they carry home. The prize is a beacon: a lantern on a tower, lit before the twelfth tide. Reeds and driftwood are a start."
-              : "Paused. The water waits for you."}
-          </p>
-        ) : null}
+      <header className={styles.top} data-night={dark || undefined}>
+        <TideChart tides={state.tides} current={state.tide} />
       </header>
 
-      <div className={styles.columns}>
-        <section className={styles.flat} aria-label="The flat">
-          {[...BANDS].reverse().map(band => {
-            const floodsAt = floodTime(state, band);
-            const workable = floodsAt !== undefined && (floodsAt === null || state.time < floodsAt);
-            const floodIn = typeof floodsAt === "number" ? floodsAt - state.time : null;
-            const working = state.jobs.filter(job => job.band === band);
-            const here = options.filter(option => option.band === band);
-            return (
-              <article key={band} className={styles.band} data-exposed={workable || undefined} data-flooding={floodIn !== null && floodIn > 0 && floodIn < 15_000 || undefined} aria-labelledby={`low-tide-band-${band}`}>
-                <div className={styles.bandHead}>
-                  <h2 id={`low-tide-band-${band}`}>{bandName(band)}</h2>
-                  <p className={styles.bandState}>
-                    {floodsAt === undefined ? "under water" : !workable ? "flooded" : floodIn !== null ? `floods in ${clock(floodIn)}` : band >= depth ? "reached by raft" : "dry all tide"}
-                  </p>
-                </div>
-                {workable ? <p className={styles.blurb}>{BLURB[band]}</p> : null}
-                {working.length ? (
-                  <ul className={styles.working} aria-label={`Working on ${bandName(band).toLowerCase()}`}>
-                    {working.map(job => {
-                      const done = Math.min(1, Math.max(0, (state.time - job.startedAt) / (job.finishesAt - job.startedAt)));
-                      const member = state.crew.find(c => c.id === job.crew);
-                      return (
-                        <li key={job.id}>
-                          <span className={styles.jobText}>{member?.name} · {itemName(job.resource)} · back in {clock(job.finishesAt - state.time)}</span>
-                          <span className={styles.jobBar} aria-hidden="true"><span style={{ width: `${done * 100}%` }} /></span>
-                          <button type="button" className={styles.recall} onClick={() => dispatch({ type: "recall", job: job.id })}>Recall {member?.name}</button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-                {workable && actor ? (
-                  <div className={styles.options}>
-                    {here.map(option => {
-                      const tight = option.feasible && typeof option.floodsAt === "number" && state.time + option.duration > option.floodsAt - 8_000;
-                      // Busy crew, or a job the water or the turn would beat, can still be lined up: it starts the moment it can finish.
-                      const later = queuing || !option.feasible;
-                      const alreadyQueued = later && actor.queued?.band === band && actor.queued.resource === option.resource;
-                      const why = option.blocked.replace(/\.$/, "").toLowerCase();
-                      return (
-                        <button
-                          key={option.resource}
-                          type="button"
-                          disabled={alreadyQueued}
-                          data-tight={tight || undefined}
-                          data-later={later || undefined}
-                          aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
-                          onClick={() => dispatch({ type: later ? "queue" : "send", crew: actor.id, band, resource: option.resource })}
-                        >
-                          <span>{itemName(option.resource)}{option.yield > 1 ? ` ×${option.yield}` : ""}</span>
-                          <span className={styles.duration}>
-                            {seconds(option.duration)}{alreadyQueued ? " · queued" : queuing ? ` · queue ${actor.name}` : later ? ` · ${why} · queue` : tight ? " · tight" : ""}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </article>
-            );
-          })}
-        </section>
+      <div className={styles.stage}>
+        <div className={styles.sceneWrap}>
+          <div className={styles.topRow}>
+            <p className={styles.tideLabel}>
+              <span className={styles.tideNumber}>Tide {state.tide + 1} <span className={styles.of}>of {state.tides.length}</span></span>
+              <span className={styles.phase}>{phase(state, elapsed, depth, dark)}</span>
+            </p>
+            <button type="button" className={styles.pause} aria-pressed={state.paused} onClick={() => dispatch({ type: state.paused ? "resume" : "pause" })}>
+              {state.paused ? (state.time === 0 ? "Start" : "Resume") : "Pause"}
+            </button>
+          </div>
+          <div className={styles.progress} aria-hidden="true"><span style={{ width: `${(elapsed / TIDE_MS) * 100}%` }} /></div>
+          <div className={styles.sceneBox}>
+          <Scene state={state} figures={figures} selected={selected} onSelect={setPicked} />
+          {state.paused ? (
+            <div className={styles.veil} role="status">
+              {state.time === 0 ? (
+                <>
+                  <p><strong>Two of you, twelve tides.</strong> The sea gives the flat back a little at a time: send people out while a band is dry, and build from what they carry home. A beacon on the shingle, lit before the last tide, is the prize.</p>
+                  <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
+                </>
+              ) : (
+                <p><strong>Paused.</strong> The water waits for you.</p>
+              )}
+            </div>
+          ) : null}
+          </div>
+        </div>
 
-        <section className={styles.camp} aria-label="The camp">
-          <div className={styles.section}>
-            <h2 className={styles.label}>Crew <span>{idle.length ? `${idle.length} free` : `all out · taps queue for ${actor?.name ?? "nobody"}`}</span></h2>
-            <ul className={styles.chips} aria-label="Crew">
+        <div className={styles.panel}>
+          {state.notice ? (
+            <p className={styles.notice} role="status">
+              {state.notice}{" "}
+              <button type="button" className={styles.linkish} onClick={() => dispatch({ type: "dismissNotice" })}>Dismiss</button>
+            </p>
+          ) : null}
+          <section className={styles.section} aria-label={`${BAND_NAMES[selected]} jobs`}>
+            <h2 className={styles.label}>
+              {BAND_NAMES[selected]} <span>{describeBand(state, selected)}</span>
+            </h2>
+            {working.length ? (
+              <ul className={styles.working} aria-label={`Working on the ${BAND_NAMES[selected].toLowerCase()}`}>
+                {working.map(job => {
+                  const member = state.crew.find(c => c.id === job.crew);
+                  return (
+                    <li key={job.id}>
+                      <span>{member?.name} · {itemName(job.resource)} · back in {clock(job.finishesAt - state.time)}</span>
+                      <button type="button" className={styles.recall} onClick={() => dispatch({ type: "recall", job: job.id })}>Recall {member?.name}</button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {actor ? (
+              <div className={styles.options}>
+                {here.map(option => {
+                  const tight = option.feasible && typeof option.floodsAt === "number" && state.time + option.duration > option.floodsAt - 8_000;
+                  // Busy crew, or a job the water or the turn would beat, can still be lined up: it starts the moment it can finish.
+                  const later = queuing || !option.feasible;
+                  const alreadyQueued = later && actor.queued?.band === selected && actor.queued.resource === option.resource;
+                  const why = option.blocked.replace(/\.$/, "").toLowerCase();
+                  return (
+                    <button
+                      key={option.resource}
+                      type="button"
+                      disabled={alreadyQueued}
+                      data-tight={tight || undefined}
+                      data-later={later || undefined}
+                      aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
+                      onClick={() => dispatch({ type: later ? "queue" : "send", crew: actor.id, band: selected, resource: option.resource })}
+                    >
+                      <span className={styles.optionName}>{itemName(option.resource)}{option.yield > 1 ? ` ×${option.yield}` : ""}</span>
+                      <span className={styles.duration}>
+                        {seconds(option.duration)}{alreadyQueued ? " · queued" : queuing ? ` · queue ${actor.name}` : later ? ` · ${why} · queue` : tight ? " · tight" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <p className={styles.hint}>Tap another band in the picture to send people there.</p>
+          </section>
+
+          <section className={styles.section} aria-label="Crew">
+            <ul className={styles.crew} aria-label="Crew">
               {state.crew.map(member => {
                 const job = state.jobs.find(j => j.crew === member.id);
                 return (
@@ -251,85 +222,96 @@ function Camp({ state, best, dispatch }: Props) {
                   </li>
                 );
               })}
+              <li className={styles.food} data-low={food < state.crew.length || undefined}>
+                <span>Food {food} · {state.crew.length} {state.crew.length === 1 ? "eats" : "eat"} at the turn</span>
+              </li>
             </ul>
-            <p className={styles.muted} data-low={food < state.crew.length || undefined}>
-              Food {food} for {state.crew.length} {state.crew.length === 1 ? "mouth" : "mouths"} when the tide turns{spoiling ? ` · ${spoiling} goes off after this tide` : ""}.
-            </p>
-          </div>
+            {making.length ? (
+              <ul className={styles.producers} aria-label="At the turn">
+                {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
+              </ul>
+            ) : null}
+          </section>
 
-          <div className={styles.section}>
-            <h2 className={styles.label}>Camp <span>tap two things to combine them</span></h2>
-            {combinable.length ? (
-              <ul className={styles.chips} aria-label="Salvage">
-                {combinable.map(item => (
-                  <li key={item}>
-                    <button type="button" aria-pressed={inTray(item) > 0} onClick={() => toggleTray(item)}>
-                      {itemName(item)} <span className={styles.count}>{(state.inventory[item] ?? 0) > 0 ? `×${state.inventory[item]}` : "built"}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={styles.muted}>Nothing on the tarp yet. Send someone out.</p>
-            )}
-            <div className={styles.tray} data-ready={tray.length === 2 || undefined}>
-              <span className={styles.slot}>{tray[0] ? itemName(tray[0]) : "…"}</span>
-              <span className={styles.plus} aria-hidden="true">+</span>
-              <span className={styles.slot}>{tray[1] ? itemName(tray[1]) : "…"}</span>
-              <span className={styles.plus} aria-hidden="true">→</span>
-              <span className={styles.slot} data-result={recipe ? "yes" : tray.length === 2 ? "no" : undefined}>
-                {tray.length < 2 ? "?" : !known ? "untried" : knownRecipe ? knownRecipe.label.toLowerCase() : "nothing"}
-              </span>
-              <button type="button" className={styles.primary} disabled={tray.length !== 2 || (known && !recipe)} onClick={combine}>
-                {known ? "Make it" : "Try it"}
-              </button>
-            </div>
-            {known && knownRecipe && !recipe ? (
-              <p className={styles.muted}>{knownRecipe.requires && !state.built.includes(knownRecipe.requires) ? `Needs a ${itemName(knownRecipe.requires)} first.` : knownRecipe.out === "shelter" ? "There is no one else out here to shelter." : "You can't make that right now."}</p>
-            ) : null}
-            {state.built.length ? (
-              <ul className={styles.built} aria-label="Built">
-                {state.built.map((item, index) => <li key={`${item}-${index}`}><strong>{itemName(item)}</strong> <span>{RECIPES.find(r => r.out === item)?.effect}</span></li>)}
-              </ul>
-            ) : null}
+          <section className={styles.section} aria-labelledby="low-tide-workbench">
+            <h2 id="low-tide-workbench" className={styles.label}>Workbench <span>{buildable ? `${buildable} ready to build` : "gather what the plans need"}</span></h2>
+            {([1, 2, 3] as const).map(tier => {
+              const rows = plans.filter(plan => plan.blueprint.tier === tier);
+              const locked = rows.every(plan => plan.locked);
+              const list = (
+                <ul className={styles.plans} aria-label={`Tier ${tier} blueprints`}>
+                  {rows.map(plan => <PlanRow key={plan.blueprint.out} plan={plan} state={state} onBuild={() => dispatch({ type: "build", out: plan.blueprint.out })} />)}
+                </ul>
+              );
+              if (!locked) return <div key={tier}>{list}</div>;
+              return (
+                <details key={tier} className={styles.tierGroup}>
+                  <summary>Tier {tier} · {rows.map(plan => plan.blueprint.label.toLowerCase()).join(", ")} · build something from tier {tier - 1} first</summary>
+                  {list}
+                </details>
+              );
+            })}
             {state.built.includes("beacon") ? (
               <button type="button" className={styles.primary} onClick={() => dispatch({ type: "ring" })}>Ring the beacon</button>
-            ) : (
-              <p className={styles.muted}>Goal: a beacon, which is a lantern on a bell tower. Everything else buys time or reach.</p>
-            )}
-            <button type="button" className={styles.linkish} aria-expanded={showCodex} onClick={() => setShowCodex(open => !open)}>
-              Codex · {state.codex.length} of {RECIPES.length} recipes{hints.some(hint => hint.held) ? ` · ${hints.filter(hint => hint.held).length} within reach` : ""}
-            </button>
-            {showCodex ? (
-              <ul className={styles.codex} aria-label="Codex">
-                {state.codex.map(key => {
-                  const found = recipeFor(key);
-                  return <li key={key}><span>{key.split("+").map(part => itemName(part as Item)).join(" + ")} → <strong>{found ? found.label.toLowerCase() : "?"}</strong></span>{found ? <span className={styles.muted}>{found.effect}</span> : null}</li>;
-                })}
-                {hints.map(({ recipe, held }) => (
-                  <li key={recipe.out} data-hint>
-                    <span>{held ? `${itemName(held)} + ?` : "? + ?"} → <strong>{recipe.label.toLowerCase()}</strong></span>
-                    <span className={styles.muted}>{recipe.effect}</span>
-                  </li>
-                ))}
-              </ul>
             ) : null}
-          </div>
+          </section>
 
-          <div ref={logRef} className={styles.log} role="log" aria-label="The tides so far">
-            {state.log.map((entry, index) => (
-              <p key={`${entry.time}-${index}`} data-kind={entry.kind}><span className={styles.stamp}>T{Math.min(state.tides.length, Math.floor(entry.time / TIDE_MS) + 1)}</span>{entry.text}</p>
-            ))}
-          </div>
-          <p className={styles.footnote}>Game time runs only while this page is open and unpaused. Nothing you do here leaves your browser.</p>
-        </section>
+          <section className={styles.section} aria-label="Stock">
+            <h2 className={styles.label}>On the tarp</h2>
+            {stock.length ? (
+              <ul className={styles.stock} aria-label="Salvage">
+                {stock.map(item => <li key={item}>{itemName(item)} <span className={styles.count}>×{state.inventory[item]}</span></li>)}
+              </ul>
+            ) : (
+              <p className={styles.muted}>Nothing yet. Send someone out.</p>
+            )}
+          </section>
+
+          <section className={styles.section} aria-label="Log">
+            <div className={styles.log} role="log" aria-label="The tides so far">
+              {(showLog ? state.log : state.log.slice(-3)).map((entry, index) => (
+                <p key={`${entry.time}-${index}`} data-kind={entry.kind}><span className={styles.stamp}>T{Math.min(state.tides.length, Math.floor(entry.time / TIDE_MS) + 1)}</span>{entry.text}</p>
+              ))}
+            </div>
+            {state.log.length > 3 ? (
+              <button type="button" className={styles.linkish} aria-expanded={showLog} onClick={() => setShowLog(open => !open)}>{showLog ? "Fewer lines" : "Whole log"}</button>
+            ) : null}
+            <p className={styles.footnote}>Game time runs only while this page is open and unpaused. Nothing you do here leaves your browser.</p>
+          </section>
+        </div>
       </div>
     </div>
   );
 }
 
-function holdings(state: State, item: Item) {
-  return (state.inventory[item] ?? 0) + state.built.filter(built => built === item).length;
+function PlanRow({ plan, state, onBuild }: { plan: BuildOption; state: State; onBuild: () => void }) {
+  const inputs = (Object.entries(plan.blueprint.inputs) as [Item, number][]).map(([item, need]) => ({ item, need, have: holdings(state, item) }));
+  const why = plan.standing || plan.locked || plan.ok || plan.missing.length ? null : plan.why.replace(/\.$/, "").toLowerCase();
+  return (
+    <li data-ok={plan.ok || undefined} data-standing={plan.standing || undefined} data-locked={plan.locked || undefined}>
+      <div className={styles.planText}>
+        <strong>{plan.blueprint.label}</strong>
+        {plan.standing ? null : <span className={styles.effect}>{plan.blueprint.effect}</span>}
+        {plan.standing ? null : (
+          <span className={styles.needs}>
+            {inputs.map(input => (
+              <span key={input.item} className={styles.need} data-have={input.have >= input.need || undefined}>
+                {itemName(input.item)}{input.need > 1 ? ` ×${input.need}` : ""} <span className={styles.count}>{Math.min(input.have, input.need)}/{input.need}</span>
+              </span>
+            ))}
+            {why ? <span className={styles.why}>{why}</span> : null}
+          </span>
+        )}
+      </div>
+      {plan.standing ? (
+        <span className={styles.standing}>built</span>
+      ) : (
+        <button type="button" className={styles.build} disabled={!plan.ok} aria-label={`Build ${plan.blueprint.label.toLowerCase()}${plan.ok ? "" : `. ${plan.why}`}`} onClick={onBuild}>
+          Build
+        </button>
+      )}
+    </li>
+  );
 }
 
 function soonestBack(state: State): Crew | undefined {
@@ -340,7 +322,7 @@ function soonestBack(state: State): Crew | undefined {
 }
 
 function phase(state: State, elapsed: number, depth: number, dark: boolean): string {
-  const where = depth > 1 ? `out to ${bandName((depth - 1) as Band).toLowerCase()}` : "barely off the shingle";
+  const where = depth > 1 ? `out to the ${BAND_NAMES[(depth - 1) as Band].toLowerCase()}` : "barely off the shingle";
   const left = TIDE_MS - elapsed;
   const turn = floodTime(state, (depth - 1) as Band);
   if (typeof turn === "number" && state.time >= turn) return `Rising · turns in ${clock(left)}`;

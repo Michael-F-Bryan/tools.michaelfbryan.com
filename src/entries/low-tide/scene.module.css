@@ -1,0 +1,82 @@
+/* The flat, drawn with site tokens plus a few local earth and water hues mixed into the theme's paper so dark mode keeps working. */
+.scene {
+  --sea: color-mix(in srgb, #2d6cdf 62%, var(--paper));
+  --sea-deep: color-mix(in srgb, #1f4fb0 70%, var(--paper));
+  --foam: color-mix(in srgb, #ffffff 70%, var(--sea));
+  --shingle: color-mix(in srgb, #b7a98a 60%, var(--paper));
+  --pebble: color-mix(in srgb, var(--ink) 26%, var(--shingle));
+  --mud: color-mix(in srgb, #8a7657 58%, var(--paper));
+  --mud-mark: color-mix(in srgb, var(--ink) 28%, var(--mud));
+  --reef: color-mix(in srgb, #5f8572 58%, var(--paper));
+  --reef-mark: color-mix(in srgb, var(--ink) 30%, var(--reef));
+  --wreck-bed: color-mix(in srgb, #5a5d72 60%, var(--paper));
+  --timber: color-mix(in srgb, #3a2c22 75%, var(--ink));
+  --lip: color-mix(in srgb, var(--ink) 35%, transparent);
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  max-height: 46svh;
+  overflow: hidden;
+  background: var(--sea-deep);
+  user-select: none;
+}
+.svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.wreckBed { fill: var(--wreck-bed); }
+.reefBed { fill: var(--reef); }
+.mudBed { fill: var(--mud); }
+.shingleBed { fill: var(--shingle); }
+.pebble { fill: var(--pebble); opacity: .7; }
+.mudMark { stroke: var(--mud-mark); stroke-width: 1.2; stroke-linecap: round; opacity: .55; }
+.reefMark { stroke: var(--reef-mark); stroke-width: 1.2; fill: none; opacity: .5; }
+.lip { fill: none; stroke: var(--lip); stroke-width: 1.5; }
+.wreck path { stroke: var(--timber); stroke-width: 3.5; stroke-linecap: round; fill: none; }
+.reefHeads ellipse { fill: var(--reef-mark); opacity: .35; }
+
+.wet { fill: var(--sea); opacity: .35; }
+.water { transition: transform .3s linear; will-change: transform; }
+.sea { fill: var(--sea); opacity: .82; }
+.waves { opacity: .9; animation: drift 6s linear infinite; }
+.wave { stroke: var(--foam); stroke-width: 1.4; fill: none; opacity: .55; }
+.foam { stroke: var(--foam); stroke-width: 2.2; fill: none; opacity: .9; }
+.edgeLine { fill: var(--foam); opacity: .5; }
+.lowMark { stroke: var(--foam); stroke-width: 1; stroke-dasharray: 3 5; opacity: .45; }
+.scene[data-rising] .foam { animation: lap 1.6s ease-in-out infinite; }
+@keyframes drift { from { transform: translateX(0); } to { transform: translateX(-120px); } }
+@keyframes lap { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+
+.camp .hut { fill: color-mix(in srgb, #8d6b4a 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.5; }
+.camp .door { fill: var(--timber); }
+.camp .kiln { fill: color-mix(in srgb, #9a4f3a 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.2; }
+.camp .netLines { stroke: var(--timber); stroke-width: 1.4; fill: none; }
+.camp .raft { fill: color-mix(in srgb, #a0784f 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.2; }
+.camp .tower { fill: color-mix(in srgb, #b05a3c 65%, var(--paper)); stroke: var(--timber); stroke-width: 1.5; }
+.camp .towerLines { stroke: var(--timber); stroke-width: 1; }
+.camp .flame { fill: #ffb547; }
+.camp .flameGlow { fill: #ffb547; opacity: .28; }
+
+.person .head, .person .body { fill: var(--ink); }
+.person .name { fill: var(--ink); font-family: var(--font-sans, sans-serif); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+.person .ringTrack { fill: color-mix(in srgb, var(--paper) 55%, transparent); stroke: color-mix(in srgb, var(--ink) 25%, transparent); stroke-width: 3; }
+.person .ring { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset .3s linear; }
+.person[data-queued] .head, .person[data-queued] .body { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 2 2; }
+.person[data-hungry] .head, .person[data-hungry] .body { fill: var(--error); }
+
+.nightShade { fill: #0b1230; opacity: .5; }
+.moon { fill: #f4ecd2; }
+.moonBite { fill: #0b1230; opacity: .5; }
+.lanternGlow { fill: #ffb547; opacity: .3; }
+.clock { fill: var(--paper); font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: color-mix(in srgb, var(--ink) 70%, transparent); stroke-width: 3px; }
+.clock[data-soon] { fill: #ffd2c9; }
+
+.targets { position: absolute; inset: 0; display: grid; grid-template-rows: repeat(4, 1fr); }
+.target { position: relative; margin: 0; padding: 0 10px; border: 0; background: transparent; color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.target:hover { background: color-mix(in srgb, var(--paper) 10%, transparent); }
+.target[aria-pressed="true"] { box-shadow: inset 0 0 0 3px var(--paper); }
+.target:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.targetName { position: absolute; left: 10px; top: 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--paper); text-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 70%, transparent); opacity: .85; }
+
+@media (prefers-reduced-motion: reduce) {
+  .water, .person .ring { transition: none; }
+  .waves, .scene[data-rising] .foam { animation: none; }
+}
