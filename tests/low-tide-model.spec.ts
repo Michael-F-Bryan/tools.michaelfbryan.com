@@ -351,6 +351,41 @@ test("ringing a finished beacon ends the run early with the bonus; otherwise the
   expect(full.ended?.structures).toBe(50);
 });
 
+test("three ends: a boat launches with salvage counted double, a saltworks compounds every turn, and builtAt tells the story", () => {
+  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2 && tides[2] >= 2);
+  expect(dispatch(state, { type: "launch" }).ended).toBeNull();
+
+  // Saltworks needs a kiln standing (not consumed) and then pays out at every turn, uncapped.
+  state = give({ ...state, unlocked: 2 }, { clay: 3, kelp: 2, stone: 1, driftwood: 3, rope: 2, reed: 3 });
+  expect(canBuild(state, "saltworks").why).toBe("Needs a kiln standing.");
+  state = build(state, "kiln");
+  expect(state.builtAt).toEqual({ kiln: 0 });
+  state = build(state, "saltworks");
+  expect(state.built).toEqual(["kiln", "saltworks"]);
+  expect(state.inventory.clay).toBeUndefined();
+  expect(state.inventory.driftwood).toBe(3);
+  state = { ...state, food: 20 };
+  state = advance(state, 2 * TIDE_MS);
+  expect(state.inventory.salt).toBe(2);
+  expect(state.tide).toBe(2);
+
+  // Hull + sail make a boat; launching ends the run with the boat bonus and double salvage.
+  state = build(state, "hull");
+  state = build(state, "sail");
+  expect(state.inventory).toMatchObject({ hull: 1, sail: 1 });
+  state = build(state, "boat");
+  expect(state.built).toContain("boat");
+  expect(state.builtAt.boat).toBe(2);
+  const salvageAlone = { ...state, inventory: { salt: 2, pearl: 1 } };
+  const ended = dispatch(salvageAlone, { type: "launch" });
+  expect(ended.ended).toMatchObject({ reason: "boat", beacon: 300, tidesLeft: 9, tidesLeftBonus: 360, salvage: 2 * (2 * 25 + 60), structures: 150, foodScore: 20 });
+  expect(lastLog(ended)).toContain("The sail fills");
+
+  // Salt is never capped; ordinary salvage still is.
+  const salty = { ...state, inventory: { salt: 10, driftwood: 10 } };
+  expect(dispatch(salty, { type: "launch" }).ended?.salvage).toBe(2 * (250 + 6));
+});
+
 test("advance is stable however finely time is sliced", () => {
   const play = (slice: number) => {
     let state = runWhere((tides) => tides[0] === 3 && tides[1] >= 2);
@@ -399,10 +434,10 @@ test("saves round-trip, reload resumes paused, a first-pass save is retired not 
     expect(loadCodex()).toEqual(["waders", "net"]);
 
     expect(loadBest()).toBeNull();
-    expect(recordBest({ score: 120, beacon: false, seed: 1 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 0, runs: 1 });
-    expect(recordBest({ score: 90, beacon: true, seed: 2 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 1, runs: 2 });
-    expect(recordBest({ score: 900, beacon: true, seed: 3 })).toEqual({ score: 900, beacon: true, seed: 3, beacons: 2, runs: 3 });
-    expect(loadBest()).toEqual({ score: 900, beacon: true, seed: 3, beacons: 2, runs: 3 });
+    expect(recordBest({ score: 120, beacon: false, seed: 1 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 0, boats: 0, runs: 1 });
+    expect(recordBest({ score: 90, beacon: true, seed: 2 })).toEqual({ score: 120, beacon: false, seed: 1, beacons: 1, boats: 0, runs: 2 });
+    expect(recordBest({ score: 900, beacon: false, boat: true, seed: 3 })).toEqual({ score: 900, beacon: false, seed: 3, beacons: 1, boats: 1, runs: 3 });
+    expect(loadBest()).toEqual({ score: 900, beacon: false, seed: 3, beacons: 1, boats: 1, runs: 3 });
 
     store.set(RUN_KEY, "{not json");
     expect(loadRun()).toBeNull();

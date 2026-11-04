@@ -64,10 +64,10 @@ export function retireLegacyRun(): void {
   storage()?.removeItem(LEGACY_RUN_KEY);
 }
 
-export type Best = Readonly<{ score: number; beacon: boolean; seed: number; beacons: number; runs: number }>;
+export type Best = Readonly<{ score: number; beacon: boolean; seed: number; beacons: number; boats: number; runs: number }>;
 
-/** Records a finished run: keeps the higher score and counts runs and beacons. Returns what is now stored. */
-export function recordBest(candidate: { score: number; beacon: boolean; seed: number }): Best {
+/** Records a finished run: keeps the higher score and counts runs, beacons and boats. Returns what is now stored. */
+export function recordBest(candidate: { score: number; beacon: boolean; boat?: boolean; seed: number }): Best {
   const existing = loadBest();
   const top = existing && existing.score >= candidate.score ? existing : candidate;
   const best: Best = {
@@ -75,6 +75,7 @@ export function recordBest(candidate: { score: number; beacon: boolean; seed: nu
     beacon: top.beacon,
     seed: top.seed,
     beacons: (existing?.beacons ?? 0) + (candidate.beacon ? 1 : 0),
+    boats: (existing?.boats ?? 0) + (candidate.boat ? 1 : 0),
     runs: (existing?.runs ?? 0) + 1,
   };
   try {
@@ -99,6 +100,7 @@ export function loadBest(): Best | null {
       beacon: record.beacon,
       seed: record.seed,
       beacons: typeof record.beacons === "number" ? record.beacons : record.beacon ? 1 : 0,
+      boats: typeof record.boats === "number" ? record.boats : 0,
       runs: typeof record.runs === "number" ? record.runs : 1,
     };
   } catch {

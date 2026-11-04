@@ -11,6 +11,7 @@ import {
   BANDS,
   BEACON_BONUS,
   BLUEPRINTS,
+  BOAT_BONUS,
   BUILT_LABELS,
   CREEP_MS,
   FISH_TRAP_FOOD,
@@ -28,6 +29,7 @@ import {
   TIDE_REMAINING_BONUS,
   TIDES_PER_RUN,
   TURN_MS,
+  UNCAPPED,
   type Band,
   type Blueprint,
   type Built,
@@ -67,7 +69,7 @@ export type Crew = Readonly<{
 export type LogEntry = Readonly<{ time: number; text: string; kind: "info" | "gain" | "loss" | "build" }>;
 
 export type Ending = Readonly<{
-  reason: "tides" | "beacon";
+  reason: "tides" | "beacon" | "boat";
   score: number;
   salvage: number;
   structures: number;
@@ -94,6 +96,8 @@ export type State = Readonly<{
   inventory: Readonly<Partial<Record<Item, number>>>;
   food: number;
   built: readonly Built[];
+  /** Tide index on which each thing was first built this run, for the chart and the run's story. */
+  builtAt: Readonly<Partial<Record<Built, number>>>;
   /** Highest blueprint tier that may be built. */
   unlocked: Tier;
   /** Blueprints built at least once, this run or earlier (persisted; a small record of what you have made). */
@@ -111,6 +115,7 @@ export type Action =
   | { type: "recall"; job: number }
   | { type: "build"; out: Built }
   | { type: "ring" }
+  | { type: "launch" }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "dismissNotice" }
@@ -181,6 +186,7 @@ export function newRun(seed: number = Math.floor(Math.random() * 1_000_000), cod
     inventory: {},
     food: STARTING_FOOD,
     built: [],
+    builtAt: {},
     unlocked: 1,
     codex: [...new Set(codex)].sort(),
     log: [],
@@ -406,6 +412,7 @@ export function canBuild(state: State, out: Built): BuildCheck {
   else if (out === "shelter" && state.crew.length >= MAX_CREW) why = "There's no one else out here to shelter.";
   else if (blueprint.structure && out !== "shelter" && hasBuilt(state, out)) why = "Already standing.";
   else if (blueprint.tier > state.unlocked) why = `Build something from tier ${blueprint.tier - 1} first.`;
+  else if (blueprint.requires && !hasBuilt(state, blueprint.requires)) why = `Needs a ${BUILT_LABELS[blueprint.requires].toLowerCase()} standing.`;
   else if (missing.length > 0) why = `Needs ${describeItems(missing)}.`;
   return { ok: why === "", missing, why };
 }
@@ -443,7 +450,7 @@ export function producers(state: State): Producer[] {
 export function salvageValue(state: State): number {
   let value = 0;
   for (const [item, count] of Object.entries(state.inventory) as [Item, number][]) {
-    const counted = Math.min(count, SALVAGE_CAP);
+    const counted = UNCAPPED.includes(item) ? count : Math.min(count, SALVAGE_CAP);
     if (item in RESOURCES) value += RESOURCES[item as Resource].value * counted;
     else if (item in MATERIAL_VALUE) value += MATERIAL_VALUE[item as keyof typeof MATERIAL_VALUE] * counted;
   }
@@ -562,6 +569,9 @@ function produce(s: State): State {
     inventory = addItem(inventory, "brick", 1);
     s = log({ ...s, inventory }, "The kiln fires a brick overnight.", "gain");
   }
+  if (hasBuilt(s, "saltworks")) {
+    s = log({ ...s, inventory: addItem(s.inventory, "salt", 1) }, "The saltworks leaves a crust of salt.", "gain");
+  }
   return s;
 }
 
@@ -612,11 +622,12 @@ function beginJob(s: State, crewId: number, option: JobOption): State {
 }
 
 function finish(s: State, reason: Ending["reason"]): State {
-  const salvage = salvageValue(s);
+  // Salvage counts double when it leaves on the boat.
+  const salvage = salvageValue(s) * (reason === "boat" ? 2 : 1);
   const structures = s.built.length * STRUCTURE_VALUE;
   const foodScore = Math.min(s.food, FOOD_CAP) * FOOD_VALUE;
-  const beacon = reason === "beacon" ? BEACON_BONUS : 0;
-  const tidesLeft = reason === "beacon" ? s.tides.length - 1 - s.tide : 0;
+  const beacon = reason === "beacon" ? BEACON_BONUS : reason === "boat" ? BOAT_BONUS : 0;
+  const tidesLeft = reason === "tides" ? 0 : s.tides.length - 1 - s.tide;
   const tidesLeftBonus = tidesLeft * TIDE_REMAINING_BONUS;
   const ending: Ending = {
     reason,
@@ -630,7 +641,12 @@ function finish(s: State, reason: Ending["reason"]): State {
     score: salvage + structures + foodScore + beacon + tidesLeftBonus,
   };
   s = { ...s, jobs: [], crew: s.crew.map((member) => ({ ...member, queued: null })), ended: ending };
-  return log(s, reason === "beacon" ? "The bell rings out over the water. A ship turns toward the light." : "The last tide comes in. You count what the sea let you keep.", "build");
+  const line = {
+    beacon: "The bell rings out over the water. A ship turns toward the light.",
+    boat: "The sail fills. The flat slides away behind you, salvage and all.",
+    tides: "The last tide comes in. You count what the sea let you keep.",
+  }[reason];
+  return log(s, line, "build");
 }
 
 // ---------------------------------------------------------------------------
@@ -689,6 +705,9 @@ export function dispatch(state: State, action: Action): State {
     case "ring":
       if (!hasBuilt(state, "beacon")) return log(state, "There is no beacon to ring.", "info");
       return finish(state, "beacon");
+    case "launch":
+      if (!hasBuilt(state, "boat")) return log(state, "There is no boat to launch.", "info");
+      return finish(state, "boat");
     default:
       return state;
   }
@@ -712,6 +731,7 @@ function build(state: State, out: Built): State {
     s = { ...s, unlocked: Math.min(3, blueprint.tier + 1) as Tier };
   }
   if (!s.codex.includes(out)) s = { ...s, codex: [...s.codex, out].sort() };
+  if (s.builtAt[out] === undefined) s = { ...s, builtAt: { ...s.builtAt, [out]: s.tide } };
   if (out === "shelter") {
     const id = s.crew.length;
     s = { ...s, crew: [...s.crew, { id, name: CREW_NAMES[id] ?? `Crew ${id + 1}`, fed: true, queued: null }] };
