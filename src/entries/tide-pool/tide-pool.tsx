@@ -31,6 +31,8 @@ const CAPTION_SECONDS = 20;
 const PICK_RADIUS = 14;
 const TOUCH_PICK_PIXELS = 20;
 const DRAG_THRESHOLD = 6;
+/** On narrow viewports the camera re-centres on the population after this long without a user pan. */
+const AUTO_CENTRE_IDLE_MS = 6000;
 const FOLLOW_ZOOM = 2;
 const CHIP_LIMIT = 12;
 const TAKEOVER_SHARE = 0.6;
@@ -268,6 +270,7 @@ export function TidePool() {
   const sizeRef = useRef({ width: POOL_WIDTH, height: POOL_HEIGHT, dpr: 1, cover: false });
   const cameraRef = useRef<Camera>({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2, zoom: 1 });
   const panRef = useRef({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2 });
+  const lastPanRef = useRef(-Infinity);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const uiRef = useRef<UiState>({ selectedId: null, hoverId: null, following: false });
@@ -469,6 +472,19 @@ export function TidePool() {
       const ui = uiRef.current;
       const target = ui.following && ui.selectedId !== null ? world.getOrganism(ui.selectedId) : undefined;
       const camera = cameraRef.current;
+      // Narrow (cover-fit) viewports show only part of the pool: ease the pan toward the population's centroid
+      // unless the user panned recently, so the action stays on screen.
+      if (!target && sizeRef.current.cover && world.organisms.length > 0 && performance.now() - lastPanRef.current > AUTO_CENTRE_IDLE_MS) {
+        let sx = 0;
+        let sy = 0;
+        for (const o of world.organisms) {
+          sx += o.position.x;
+          sy += o.position.y;
+        }
+        const j = reducedRef.current ? 1 : 1 - Math.exp(-elapsed * 0.8);
+        const view = clampCamera({ cx: sx / world.organisms.length, cy: sy / world.organisms.length, zoom: camera.zoom }, sizeRef.current.width, sizeRef.current.height, true);
+        panRef.current = { cx: panRef.current.cx + (view.cx - panRef.current.cx) * j, cy: panRef.current.cy + (view.cy - panRef.current.cy) * j };
+      }
       const goalX = target ? target.position.x : panRef.current.cx;
       const goalY = target ? target.position.y : panRef.current.cy;
       const goalZoom = target ? FOLLOW_ZOOM : 1;
@@ -558,6 +574,7 @@ export function TidePool() {
         const scale = layoutRef.current.scale;
         const view = clampCamera({ cx: drag.cx - dx / scale, cy: drag.cy - dy / scale, zoom: camera.zoom }, size.width, size.height, size.cover);
         panRef.current = { cx: view.cx, cy: view.cy };
+        lastPanRef.current = performance.now();
         camera.cx = view.cx;
         camera.cy = view.cy;
       }
