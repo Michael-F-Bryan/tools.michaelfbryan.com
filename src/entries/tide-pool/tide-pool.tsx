@@ -133,17 +133,30 @@ function nearFood(organism: Organism, world: WorldLike): boolean {
  * eating or near food wins, so a first Follow has a fair chance of showing a meal.
  * Falls back to the most meals.
  */
+/** Slowest mean trail speed (u/s) a Follow/Inspect pick may have when any moving organism exists. */
+const PICK_MIN_SPEED = 3;
+
+/** True when the body has a fin, or a non-root trunk part that oscillates (sensors never drive motion): something that can actually swim. */
+function canSwim(organism: Organism): boolean {
+  const parts = organism.genome.parts;
+  for (let i = 1; i < parts.length; i++) if (parts[i].kind === "fin" || (parts[i].kind !== "sensor" && parts[i].amplitude > 0.05)) return true;
+  return false;
+}
+
 function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefined {
-  const movers: { organism: Organism; score: number }[] = [];
+  const movers: { organism: Organism; score: number; qualifies: boolean }[] = [];
   let fallback: Organism | undefined;
   for (const organism of world.organisms) {
     if (lineage !== undefined && organism.lineage !== lineage) continue;
     if (!fallback || organism.meals > fallback.meals || (organism.meals === fallback.meals && organism.energy > fallback.energy)) fallback = organism;
     if (organism.age <= MIN_INSPECT_AGE) continue;
-    movers.push({ organism, score: (organism.meals / organism.age) * 60 * Math.min(1, meanTrailSpeed(organism) / TRAVEL_SPEED) });
+    const speed = meanTrailSpeed(organism);
+    movers.push({ organism, score: (organism.meals / organism.age) * 60 * Math.min(1, speed / TRAVEL_SPEED), qualifies: speed >= PICK_MIN_SPEED && canSwim(organism) });
   }
   movers.sort((a, b) => b.score - a.score || b.organism.energy - a.organism.energy);
-  const top = movers.slice(0, TOP_MOVERS);
+  // Only animals that visibly swim are worth watching; relax that only when nobody does.
+  const pool = movers.some((m) => m.qualifies) ? movers.filter((m) => m.qualifies) : movers;
+  const top = pool.slice(0, TOP_MOVERS);
   const eating = top.find((m) => (m.organism.handlingProgress ?? 0) > 0) ?? top.find((m) => nearFood(m.organism, world));
   return (eating ?? top[0])?.organism ?? fallback;
 }
@@ -311,6 +324,8 @@ export function TidePool() {
   const cameraRef = useRef<Camera>({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2, zoom: 1 });
   const panRef = useRef({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2 });
   const lastPanRef = useRef(-Infinity);
+  /** Eased height (CSS px) of the Inspector sheet that covers the canvas bottom while following on a phone. */
+  const insetRef = useRef(0);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const uiRef = useRef<UiState>({ selectedId: null, hoverId: null, following: false });
@@ -529,16 +544,38 @@ export function TidePool() {
         const view = clampCamera({ cx: sx / world.organisms.length, cy: sy / world.organisms.length, zoom: camera.zoom }, sizeRef.current.width, sizeRef.current.height, true);
         panRef.current = { cx: panRef.current.cx + (view.cx - panRef.current.cx) * j, cy: panRef.current.cy + (view.cy - panRef.current.cy) * j };
       }
-      const goalX = target ? target.position.x : panRef.current.cx;
-      const goalY = target ? target.position.y : panRef.current.cy;
-      const goalZoom = target ? FOLLOW_ZOOM : 1;
+      const size = sizeRef.current;
+      // A followed subject is centred in the VISIBLE canvas: while following, the pool-bounds clamp is lifted
+      // (the overscan shows the page surface) and, on phones, the Inspector sheet's height is excluded.
+      let goalInset = 0;
+      if (ui.following && size.width <= 720) {
+        const sheet = surface!.querySelector<HTMLElement>('[aria-label="Inspector"]');
+        if (sheet) goalInset = Math.max(0, Math.min(size.height * 0.6, surface!.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top));
+      }
+      const lost = ui.following && !target; // the followed animal just died: hold still until the UI catches up
+      const resting = clampCamera({ cx: panRef.current.cx, cy: panRef.current.cy, zoom: 1 }, size.width, size.height, size.cover);
+      const goalX = target ? target.position.x : lost ? camera.cx : resting.cx;
+      const goalY = target ? target.position.y : lost ? camera.cy : resting.cy;
+      const goalZoom = target ? FOLLOW_ZOOM : lost ? camera.zoom : 1;
       const k = reducedRef.current ? 1 : 1 - Math.exp(-elapsed * 5);
       camera.cx += (goalX - camera.cx) * k;
       camera.cy += (goalY - camera.cy) * k;
       camera.zoom += (goalZoom - camera.zoom) * k;
-      const size = sizeRef.current;
-      clampCamera(camera, size.width, size.height, size.cover);
-      layoutRef.current = computeLayout(size.width, size.height, size.dpr, size.cover, camera);
+      insetRef.current += (goalInset - insetRef.current) * k;
+      // Stay unclamped while following, and until the glide back inside the pool has finished.
+      const bounded = clampCamera({ ...camera }, size.width, size.height, size.cover);
+      const free = ui.following || insetRef.current > 0.5 || Math.hypot(bounded.cx - camera.cx, bounded.cy - camera.cy) > 0.5;
+      if (!free) clampCamera(camera, size.width, size.height, size.cover);
+      layoutRef.current = computeLayout(size.width, size.height, size.dpr, size.cover, camera, free, insetRef.current);
+      if (target) {
+        const layout = layoutRef.current;
+        const dx = layout.originX + target.position.x * layout.scale - size.width / 2;
+        const dy = layout.originY + target.position.y * layout.scale - (size.height - goalInset) / 2;
+        const text = `${Math.round(dx)},${Math.round(dy)}`;
+        if (canvas!.dataset.followOffset !== text) canvas!.dataset.followOffset = text;
+      } else if (canvas!.dataset.followOffset !== undefined) {
+        delete canvas!.dataset.followOffset;
+      }
       renderer.draw(ctx!, world, layoutRef.current, ui, now);
     }
 

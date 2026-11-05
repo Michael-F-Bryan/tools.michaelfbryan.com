@@ -234,6 +234,44 @@ test("the Inspector animates the anatomy and Follow zooms the camera onto the or
   await expect(follow).toHaveCount(0);
 });
 
+test("Follow keeps the subject centred in the visible canvas, clear of the Inspector, at the default speed", async ({ page }) => {
+  await page.goto("/tide-pool");
+  await expect.poll(async () => Number(await stat(page, "population").textContent())).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  const inspector = page.getByRole("region", { name: "Inspector" });
+  await expect(inspector).toBeVisible();
+  const follow = inspector.getByRole("button", { name: "Follow", exact: true });
+  await follow.click();
+  await expect(follow).toHaveAttribute("aria-pressed", "true");
+  const canvas = canvasOf(page);
+  const offset = async () => {
+    const raw = await canvas.getAttribute("data-follow-offset");
+    if (!raw) return null;
+    const [dx, dy] = raw.split(",").map(Number);
+    return { dx, dy };
+  };
+  await expect
+    .poll(async () => {
+      const o = await offset();
+      return o ? Math.hypot(o.dx, o.dy) : Infinity;
+    }, { timeout: 4000 })
+    .toBeLessThan(40);
+  // Once settled, the subject stays centred while it swims (the organism may die; then Follow ends and the attribute goes).
+  for (let i = 0; i < 5; i++) {
+    await page.waitForTimeout(1000);
+    const o = await offset();
+    if (!o) break;
+    expect(Math.hypot(o.dx, o.dy)).toBeLessThan(40);
+    const box = (await canvas.boundingBox())!;
+    const sheet = (await inspector.boundingBox())!;
+    const inset = Math.max(0, box.y + box.height - sheet.y);
+    const narrow = box.width <= 720;
+    const subject = { x: box.x + box.width / 2 + o.dx, y: box.y + (box.height - (narrow ? inset : 0)) / 2 + o.dy };
+    const inside = subject.x >= sheet.x && subject.x <= sheet.x + sheet.width && subject.y >= sheet.y && subject.y <= sheet.y + sheet.height;
+    expect(inside).toBe(false);
+  }
+});
+
 test("dragging pans a cropped pool without dropping food", async ({ page }, info) => {
   test.skip(info.project.name !== "mobile-chromium", "Only narrow viewports crop the pool.");
   await page.goto("/tide-pool");

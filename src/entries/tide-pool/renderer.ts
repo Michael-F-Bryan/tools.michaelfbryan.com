@@ -235,8 +235,13 @@ export function clampCamera(camera: Camera, width: number, height: number, cover
 
 const CENTRED: Camera = { cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2, zoom: 1 };
 
-export function computeLayout(width: number, height: number, dpr: number, cover = false, camera: Camera = CENTRED): Layout {
-  const view = clampCamera({ ...camera }, width, height, cover);
+/**
+ * `free` skips the pool-bounds clamp so a followed subject can sit at the middle of the visible area even
+ * beside the pool's edge (the overscan shows the page surface); `insetBottom` is the height of a sheet
+ * covering the bottom of the canvas, so that middle is the middle of the uncovered band.
+ */
+export function computeLayout(width: number, height: number, dpr: number, cover = false, camera: Camera = CENTRED, free = false, insetBottom = 0): Layout {
+  const view = free ? camera : clampCamera({ ...camera }, width, height, cover);
   const scale = baseScale(width, height, cover) * view.zoom;
   return {
     width,
@@ -244,7 +249,7 @@ export function computeLayout(width: number, height: number, dpr: number, cover 
     dpr,
     scale,
     originX: width / 2 - view.cx * scale,
-    originY: height / 2 - view.cy * scale,
+    originY: (height - insetBottom) / 2 - view.cy * scale,
   };
 }
 
@@ -258,8 +263,11 @@ function strokeBoost(scale: number): number {
   return Math.min(1.6, Math.max(1, 0.9 / scale));
 }
 
-/** Real milliseconds the meal flash lasts. */
-const MEAL_FLASH_MS = 500;
+/** Real milliseconds the meal bloom lasts (it is timed by the wall clock, so 4× or 16× do not shorten it). */
+const MEAL_FLASH_MS = 1000;
+/** The bloom grows to this multiple of the mouth radius, but never less than this many screen pixels across its radius. */
+const MEAL_BLOOM_RADII = 2.5;
+const MEAL_BLOOM_MIN_PX = 14;
 
 type MealFlash = { organism: Organism; at: number; fx: number; fy: number; hasFood: boolean };
 
@@ -292,6 +300,7 @@ export class PoolRenderer {
   private point: Vec2 = { x: 0, y: 0 };
   private living: readonly Organism[] = [];
   private boost = 1;
+  private scale = 1;
   private trailWorld: WorldView | null = null;
   private trailOwner = -1;
   private trail: Vec2[] = [];
@@ -383,6 +392,7 @@ export class PoolRenderer {
     const palette = this.palette;
     const { dpr, scale } = layout;
     this.boost = strokeBoost(scale);
+    this.scale = scale;
     this.frameNow = now;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -514,11 +524,15 @@ export class PoolRenderer {
       const mouth = flash.organism.poses[0]?.base;
       if (!mouth) continue;
       const e = 1 - (1 - t) * (1 - t);
+      const mouthR = this.mouthRadius(flash.organism);
+      const peak = Math.max(mouthR * MEAL_BLOOM_RADII, MEAL_BLOOM_MIN_PX / this.scale);
+      const from = mouthR + 3.4 * boost;
       ctx.strokeStyle = accent;
-      ctx.globalAlpha = 1 - t;
-      ctx.lineWidth = (0.8 + 2.2 * (1 - t)) * boost;
+      // Hold at full strength for the first third, then fade: bloom = meal eaten (the arc means food is held).
+      ctx.globalAlpha = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
+      ctx.lineWidth = 2 / this.scale;
       ctx.beginPath();
-      ctx.arc(mouth.x, mouth.y, this.mouthRadius(flash.organism) + (3.4 + 9 * e) * boost, 0, Math.PI * 2);
+      ctx.arc(mouth.x, mouth.y, from + (Math.max(peak, from) - from) * e, 0, Math.PI * 2);
       ctx.stroke();
       if (flash.hasFood) {
         ctx.globalAlpha = 1 - t * 0.6;
