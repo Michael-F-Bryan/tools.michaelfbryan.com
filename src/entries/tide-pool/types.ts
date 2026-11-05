@@ -282,3 +282,13 @@ export type WorldLike = WorldView & WorldControls;
 export const SEED_POPULATION = 36;
 export const MAX_POPULATION = 160;
 export const MAX_FOOD = 320;
+
+/** A drifting feeding ground: food spawns around it in proportion to its stock, and grazing depletes it. */
+export interface FoodPatch {
+  position: Vec2;
+  radius: number;
+  /** Remaining food stock in [0.03, 1]; 1 is untouched, near 0 is exhausted. */
+  stock: number;
+  /** Meals taken inside its radius so far. */
+  grazed: number;
+}

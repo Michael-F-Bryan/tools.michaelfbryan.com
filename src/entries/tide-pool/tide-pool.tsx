@@ -545,6 +545,7 @@ export function TidePool() {
     if (!world || !point) return;
     const hit = world.organismAt(point, pickRadius());
     if (hit) select(hit.id);
+    else if (uiRef.current.selectedId !== null) closeInspector();
     else world.dropFood(point);
     refresh("readouts");
   }
@@ -622,8 +623,25 @@ export function TidePool() {
 
   function closeInspector() {
     select(null);
-    inspectButtonRef.current?.focus();
+    inspectButtonRef.current?.focus({ preventScroll: true });
   }
+
+  // Escape closes the inspector from anywhere in the page, except while typing in a text field.
+  const closeRef = useRef(closeInspector);
+  useEffect(() => {
+    closeRef.current = closeInspector;
+  });
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented || uiRef.current.selectedId === null) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.isContentEditable || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
+      if (target instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(target.type)) return;
+      closeRef.current();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const selectedLineage = inspected?.lineage;
   const energyShare = inspected && inspected.capacity > 0 ? Math.max(0, Math.min(1, inspected.energy / inspected.capacity)) : 0;
@@ -705,7 +723,7 @@ export function TidePool() {
             </div>
           ) : null}
           {inspected ? (
-            <section className={styles.inspector} role="region" aria-label="Inspector" onKeyDown={(event) => event.key === "Escape" && closeInspector()}>
+            <section className={styles.inspector} role="region" aria-label="Inspector">
               <header>
                 <span className={styles.swatch} style={{ background: organismColour(inspected.lineage, inspected.genomeHue, dark) }} aria-hidden="true" />
                 <h2>
@@ -715,7 +733,7 @@ export function TidePool() {
                 <button type="button" className={styles.button} aria-pressed={following} disabled={inspected.cause !== "alive"} onClick={() => setFollow(!following)}>
                   Follow
                 </button>
-                <button type="button" className={styles.button} onClick={closeInspector}>
+                <button type="button" className={`${styles.button} ${styles.close}`} onClick={closeInspector}>
                   Close
                 </button>
               </header>

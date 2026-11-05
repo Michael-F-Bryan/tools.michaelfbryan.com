@@ -41,7 +41,7 @@ export type UiState = {
   following?: boolean;
 };
 
-type Patch = { position: Vec2; radius: number };
+type Patch = { position: Vec2; radius: number; /** Food stock in [0,1]; absent means full. */ stock?: number };
 
 function parseHex(value: string): [number, number, number] | null {
   const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
@@ -432,16 +432,31 @@ export class PoolRenderer {
   private drawPatches(ctx: CanvasRenderingContext2D, world: WorldView) {
     const patches = (world as { patches?: readonly Patch[] }).patches;
     if (!patches?.length) return;
-    ctx.strokeStyle = this.palette.dark ? "rgba(190,255,210,0.14)" : "rgba(20,90,60,0.14)";
+    const rgb = this.palette.dark ? "190,255,210" : "20,90,60";
     ctx.lineWidth = 1.2;
-    ctx.beginPath();
     for (const patch of patches) {
-      ctx.moveTo(patch.position.x + patch.radius, patch.position.y);
-      ctx.arc(patch.position.x, patch.position.y, patch.radius, 0, Math.PI * 2);
-      ctx.moveTo(patch.position.x + patch.radius * 0.55, patch.position.y);
-      ctx.arc(patch.position.x, patch.position.y, patch.radius * 0.55, 0, Math.PI * 2);
+      const stock = Math.min(1, Math.max(0, patch.stock ?? 1));
+      const { x, y } = patch.position;
+      // Full stock: soft inner glow and clear ring. Depleted: faint dashed ring, no glow.
+      if (stock > 0.25) {
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, patch.radius);
+        glow.addColorStop(0, `rgba(${rgb},${(0.1 * stock).toFixed(3)})`);
+        glow.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, patch.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.setLineDash(stock > 0.5 ? [] : [3, 6 - 3 * stock]);
+      ctx.strokeStyle = `rgba(${rgb},${(0.05 + 0.2 * stock).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, patch.radius, 0, Math.PI * 2);
+      // The inner ring shrinks with stock, so a grazed-down patch reads as a hollow shell.
+      ctx.moveTo(x + patch.radius * 0.55 * stock, y);
+      ctx.arc(x, y, patch.radius * 0.55 * stock, 0, Math.PI * 2);
+      ctx.stroke();
     }
-    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   private drawFood(ctx: CanvasRenderingContext2D, world: WorldView) {
