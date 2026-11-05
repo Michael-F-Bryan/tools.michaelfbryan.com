@@ -62,6 +62,9 @@ test("the clock advances, Pause stops it and 16× runs faster than 1×", async (
 
   const slow = page.getByRole("button", { name: "1×", exact: true });
   const fast = page.getByRole("button", { name: "16×", exact: true });
+  // The pool opens at 4×; 1× is the slow view.
+  await expect(page.getByRole("button", { name: "4×", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await slow.click();
   await expect(slow).toHaveAttribute("aria-pressed", "true");
   const start = await seconds(page);
   await page.waitForTimeout(2000);
@@ -195,6 +198,12 @@ test("the history chart reports speed, lineages and population", async ({ page }
   await page.goto("/tide-pool");
   await expect(page.getByRole("img", { name: /History of mean speed, living lineages and population/ })).toBeVisible();
   for (const label of [/^speed \d/, /^lineages \d/, /^pop \d/]) await expect(page.getByText(label)).toBeVisible();
+  const marks = page.locator("[data-marks]");
+  if ((page.viewportSize()?.width ?? 0) > 720) {
+    for (const label of ["born", "starved", "aged"]) await expect(marks.getByText(label, { exact: true })).toBeVisible();
+  } else {
+    await expect(marks).toBeHidden();
+  }
 });
 
 test("the Inspector animates the anatomy and Follow zooms the camera onto the organism", async ({ page }) => {
@@ -255,6 +264,7 @@ test("an empty pool says so, disables Inspect and offers a new pool", async ({ p
   await page.getByRole("button", { name: "16×", exact: true }).click();
   const notice = page.getByRole("status").filter({ hasText: "The pool is empty." });
   await expect(notice).toBeVisible({ timeout: 80_000 });
+  await expect(notice.getByText(/^Last \d+ died of (starvation|old age)$/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Inspect", exact: true })).toBeDisabled();
   await notice.getByRole("button", { name: "New pool", exact: true }).click();
   await expect(notice).toHaveCount(0);

@@ -13,15 +13,18 @@ export const MUTATION = {
   addPart: 0.05,
   removePart: 0.04,
   changeKind: 0.03,
-  duplicateMirrored: 0.04,
+  /** Copy a side-attached subtree to the other side (bilateral pairs, whole mirrored limbs). */
+  duplicateMirrored: 0.07,
+  /** Fan out N copies of a side part around one anchor with a travelling phase lag (radial / metachronal). */
+  repeatRadial: 0.03,
   /** Hue drift in degrees (uniform ±) per ordinary / per topology-changing mutation. */
   hueDrift: 4,
   hueJump: 25,
 };
 
-export const MAX_PARTS = 10;
+export const MAX_PARTS = 14;
 export const MAX_SENSORS = 4;
-/** Mass contributed by each sensor on top of the segment area. */
+/** Mass contributed by each sensor on top of the segment area. body.ts imports this so energy mass == physics mass. */
 export const SENSOR_MASS = 2;
 
 type Range = { min: number; max: number };
@@ -133,6 +136,7 @@ function pickKind(rng: Rng): PartKind {
   return r < 0.35 ? "trunk" : r < 0.8 ? "fin" : "sensor";
 }
 
+/** Founders keep the original wild oscillator so the seeded population can still swim (inept but viable-ish). */
 function randomOscillator(rng: Rng) {
   return {
     frequency: rng.range(0.5, 3),
@@ -140,6 +144,31 @@ function randomOscillator(rng: Rng) {
     phase: rng.range(0, TAU),
     skew: rng.range(0.3, 0.7),
     feather: rng.range(0, 0.6),
+  };
+}
+
+const isMover = (p: PartGene) => p.kind !== "sensor" && p.parent !== -1;
+
+/**
+ * Near-neutral, coherent oscillator for a freshly added part: it inherits the rhythm of its
+ * parent (or a sibling, or the body's mean) so an addition starts as a small, in-step
+ * wobble rather than random thrash, and selection can then tune it. Fins are born with an
+ * asymmetric stroke (skew away from 0.5, some feather) because a symmetric unfeathered
+ * stroke gives no thrust. Later perturbation mutations remain free to explore.
+ */
+function coherentOscillator(rng: Rng, kind: PartKind, parent: number, parts: readonly PartGene[]) {
+  const par = parts[parent];
+  const siblings = parts.filter(p => p.parent === parent && isMover(p));
+  const kin = par && isMover(par) ? par : siblings.length > 0 ? rng.pick(siblings) : undefined;
+  const movers = parts.filter(isMover);
+  const meanFreq = movers.length > 0 ? movers.reduce((a, p) => a + p.frequency, 0) / movers.length : rng.range(0.8, 2);
+  const fin = kind === "fin";
+  return {
+    frequency: clamp((kin ? kin.frequency : meanFreq) * (1 + rng.range(-0.1, 0.1)), 0.3, 4),
+    amplitude: kind === "sensor" ? 0 : rng.range(0, 0.3),
+    phase: wrapPhase((kin ? kin.phase : 0) + rng.gaussian() * 0.4),
+    skew: fin ? (rng.chance(0.5) ? rng.range(0.25, 0.45) : rng.range(0.55, 0.75)) : rng.range(0.4, 0.6),
+    feather: fin ? rng.range(0.3, 0.7) : rng.range(0, 0.3),
   };
 }
 
@@ -159,9 +188,9 @@ function randomAttachment(rng: Rng, kind: PartKind): Pick<PartGene, "anchor" | "
   return { anchor, side, angle };
 }
 
-function newPart(rng: Rng, id: number, kind: PartKind, parent: number, sensors: number): PartGene {
+function newPart(rng: Rng, id: number, kind: PartKind, parent: number, sensors: number, parts: readonly PartGene[], founder = false): PartGene {
   const size = SIZE[kind];
-  const osc = randomOscillator(rng);
+  const osc = founder ? randomOscillator(rng) : coherentOscillator(rng, kind, parent, parts);
   if (kind === "sensor") osc.amplitude = 0;
   const length = kind === "sensor" ? rng.range(4, 14) : kind === "fin" ? rng.range(8, 28) : rng.range(8, 24);
   const width = kind === "sensor" ? rng.range(1, 2) : kind === "fin" ? rng.range(2, 8) : rng.range(3, 9);
@@ -214,13 +243,27 @@ export function randomGenome(rng: Rng): Genome {
     if (kind === "sensor" && sensors >= MAX_SENSORS) kind = "fin";
     if (kind === "sensor") sensors++;
     const parent = rng.pick(parentCandidates(parts));
-    parts.push(newPart(rng, i + 1, kind, parent, 0));
+    parts.push(newPart(rng, i + 1, kind, parent, 0, parts, true));
+  }
+  // ~30% of founders carry a mirrored pair (made by the same subtree operator mutation uses).
+  const paired = rng.chance(0.3);
+  if (paired && !parts.some((p, i) => i > 0 && p.side !== 0)) {
+    let at = parts.findIndex((p, i) => i > 0 && p.kind !== "sensor");
+    if (at < 0) {
+      parts.push(newPart(rng, parts.length, "fin", 0, 0, parts, true));
+      at = parts.length - 1;
+    }
+    Object.assign(parts[at], { side: rng.chance(0.5) ? 1 : -1, anchor: rng.range(0.3, 0.9), angle: rng.range(0.5, 1.4) });
   }
   const genome: Genome = { parts, hue: rng.range(0, 360), reproduceAt: rng.range(0.6, 0.95) };
   for (const p of parts) {
     const moving = p.kind !== "sensor" && p.parent !== -1;
     p.ampWeights = moving ? randomWeights(rng, sensors) : zeros(2 * sensors + 1);
     p.freqWeights = moving ? randomWeights(rng, sensors) : zeros(2 * sensors + 1);
+  }
+  if (paired) {
+    const before = sensorIds(parts);
+    if (duplicateMirrored(genome, rng)) realign(parts, before, rng);
   }
   return genome;
 }
@@ -317,7 +360,7 @@ function addPart(g: Genome, rng: Rng): boolean {
   if (kind === "sensor" && sensorCount(g) >= MAX_SENSORS) kind = "fin";
   const id = Math.max(...g.parts.map(p => p.id)) + 1;
   const parent = rng.pick(parentCandidates(g.parts));
-  g.parts.push(newPart(rng, id, kind, parent, sensorCount(g)));
+  g.parts.push(newPart(rng, id, kind, parent, sensorCount(g), g.parts));
   return true;
 }
 
@@ -358,19 +401,79 @@ function changeKind(g: Genome, rng: Rng): boolean {
   return true;
 }
 
-/** Copy a side-attached part onto the other side of its parent: bilateral symmetry. */
-function duplicateMirrored(g: Genome, rng: Rng): boolean {
-  if (g.parts.length >= MAX_PARTS) return false;
+/** Indices of `root` and all its descendants, ascending (parents always precede children). */
+function subtreeOf(parts: readonly PartGene[], root: number): number[] {
+  const out = [root];
+  for (let i = root + 1; i < parts.length; i++) if (out.includes(parts[i].parent)) out.push(i);
+  return out;
+}
+
+/**
+ * Sims-style reflection: copy a side-attached part together with its whole subtree onto the
+ * other side of the same parent. Every copied part is mirrored (side flipped; inline parts,
+ * which have no side sign, get their angle negated), so the copy is a true reflection.
+ * Phases are either equal (synchronous rowing) or all shifted by pi (alternating), 50/50.
+ * Respects MAX_PARTS and MAX_SENSORS. Returns false if nothing fitted.
+ */
+export function duplicateMirrored(g: Genome, rng: Rng): boolean {
+  const sensors = sensorCount(g);
+  const fits: number[][] = [];
+  g.parts.forEach((p, i) => {
+    if (i === 0 || p.side === 0) return;
+    const sub = subtreeOf(g.parts, i);
+    const sensorsIn = sub.filter(k => g.parts[k].kind === "sensor").length;
+    if (g.parts.length + sub.length <= MAX_PARTS && sensors + sensorsIn <= MAX_SENSORS) fits.push(sub);
+  });
+  if (fits.length === 0) return false;
+  const sub = rng.pick(fits);
+  const shift = rng.chance(0.5) ? 0 : Math.PI;
+  const moved = new Map<number, number>();
+  let nextId = Math.max(...g.parts.map(p => p.id)) + 1;
+  for (const old of sub) {
+    const src = g.parts[old];
+    const copy = clonePart(src);
+    copy.id = nextId++;
+    if (old !== sub[0]) copy.parent = moved.get(src.parent) as number;
+    if (src.side === 0) copy.angle = wrapAngle(-src.angle);
+    else copy.side = src.side === 1 ? -1 : 1;
+    copy.phase = wrapPhase(src.phase + shift);
+    moved.set(old, g.parts.length);
+    g.parts.push(copy);
+  }
+  return true;
+}
+
+/**
+ * Radial repeat: a side-attached trunk/fin gains N = 2-4 siblings at the same anchor. The
+ * N + 1 members are spread evenly over the available arc on that side (or alternate across
+ * both sides, 50/50) and their phases lag by 2 pi / (N + 1), so the ring beats as a travelling
+ * (metachronal) wave. Returns false when there is no room or no side part.
+ */
+export function repeatRadial(g: Genome, rng: Rng): boolean {
+  const room = MAX_PARTS - g.parts.length;
+  if (room < 2) return false;
   const candidates: number[] = [];
   g.parts.forEach((p, i) => {
-    if (i > 0 && p.side !== 0 && (p.kind !== "sensor" || sensorCount(g) < MAX_SENSORS)) candidates.push(i);
+    if (i > 0 && p.kind !== "sensor" && p.side !== 0) candidates.push(i);
   });
   if (candidates.length === 0) return false;
-  const source = g.parts[rng.pick(candidates)];
-  const copy = clonePart(source);
-  copy.id = Math.max(...g.parts.map(p => p.id)) + 1;
-  copy.side = source.side === 1 ? -1 : 1;
-  g.parts.push(copy);
+  const src = g.parts[rng.pick(candidates)];
+  const copies = Math.min(2 + rng.int(3), room);
+  const members = copies + 1;
+  const both = rng.chance(0.5);
+  const slots = both ? Math.ceil(members / 2) : members;
+  const side = src.side;
+  const phase0 = src.phase;
+  let nextId = Math.max(...g.parts.map(p => p.id)) + 1;
+  for (let j = 0; j < members; j++) {
+    const part = j === 0 ? src : clonePart(src);
+    if (j > 0) part.id = nextId++;
+    const slot = both ? Math.floor(j / 2) : j;
+    part.side = both && j % 2 === 1 ? (side === 1 ? -1 : 1) : side;
+    part.angle = 0.25 + (slots > 1 ? slot / (slots - 1) : 0.5) * 1.25;
+    part.phase = wrapPhase(phase0 + (TAU * j) / members);
+    if (j > 0) g.parts.push(part);
+  }
   return true;
 }
 
@@ -380,6 +483,7 @@ function structuralOp(g: Genome, rng: Rng): boolean {
   if (rng.chance(MUTATION.removePart)) changed = removeLeaf(g, rng) || changed;
   if (rng.chance(MUTATION.changeKind)) changed = changeKind(g, rng) || changed;
   if (rng.chance(MUTATION.duplicateMirrored)) changed = duplicateMirrored(g, rng) || changed;
+  if (rng.chance(MUTATION.repeatRadial)) changed = repeatRadial(g, rng) || changed;
   return changed;
 }
 
