@@ -251,6 +251,80 @@ test("topology-changing births branch the lineage; others inherit it", () => {
   expect(world.lineages().reduce((n, l) => n + l.count, 0)).toBe(world.organisms.length);
 });
 
+test("handling time: food is eaten only after the mouth stays on that particle long enough", () => {
+  const saved = TUNING.handlingTime;
+  TUNING.handlingTime = 0.3;
+  try {
+    let on = true;
+    let target: { x: number; y: number } = { x: 0, y: 0 };
+    // Holds the mouth on the particle while `on`, otherwise parks it far away.
+    const stub: StepOrganism = (org, _water, dt) => {
+      org.age += dt;
+      org.velocity.x = 0;
+      org.velocity.y = 0;
+      org.position.x = on ? target.x : 60;
+      org.position.y = on ? target.y : 60;
+      return { work: 0 };
+    };
+    const fresh = (): World => {
+      const world = new World(3, { foodRate: 0, currentStrength: 0 }, stub);
+      world.organisms.splice(1);
+      world.organisms[0].energy = world.organisms[0].capacity * 0.4;
+      world.food.length = 0;
+      world.food.push({ id: 900001, position: { x: 600, y: 400 }, energy: 30, age: 0 });
+      target = world.food[0].position;
+      return world;
+    };
+    const timeToMeal = (world: World, maxSeconds: number): number | null => {
+      for (let i = 1; i <= Math.round(maxSeconds / DT); i++) {
+        world.step();
+        if (world.organisms[0].meals > 0) return i * DT;
+      }
+      return null;
+    };
+
+    // Dwelling: eaten no sooner than 0.3 s after first contact, and soon after.
+    const world = fresh();
+    on = true;
+    const t = timeToMeal(world, 2);
+    expect(t).not.toBeNull();
+    expect(t!).toBeGreaterThanOrEqual(0.3);
+    expect(t!).toBeLessThan(0.3 + 4 * DT);
+
+    // Leaving after 0.1 s breaks contact: handling starts over on return.
+    const again = fresh();
+    on = true;
+    for (let i = 0; i < Math.round(0.1 / DT); i++) again.step();
+    expect(again.organisms[0].meals).toBe(0);
+    expect(again.organisms[0].handlingProgress).toBeGreaterThan(0);
+    on = false;
+    again.step();
+    expect(again.organisms[0].handlingProgress).toBe(0);
+    on = true;
+    const t2 = timeToMeal(again, 2);
+    expect(t2).not.toBeNull();
+    expect(t2!).toBeGreaterThanOrEqual(0.3);
+
+    // A brief sweep past food (never 0.3 s of contact) feeds nothing.
+    const sweep = fresh();
+    for (let i = 0; i < 20; i++) {
+      on = true;
+      for (let k = 0; k < 10; k++) sweep.step();
+      on = false;
+      sweep.step();
+    }
+    expect(sweep.organisms[0].meals).toBe(0);
+
+    // Instant ingestion when disabled.
+    TUNING.handlingTime = 0;
+    const instant = fresh();
+    on = true;
+    expect(timeToMeal(instant, 1)).toBeLessThanOrEqual(2 * DT);
+  } finally {
+    TUNING.handlingTime = saved;
+  }
+});
+
 function assertBounded(world: World): void {
   expect(world.organisms.length).toBeLessThanOrEqual(MAX_POPULATION);
   expect(world.food.length).toBeLessThanOrEqual(MAX_FOOD);

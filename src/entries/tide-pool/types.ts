@@ -132,6 +132,13 @@ export type Organism = {
   offspring: number;
   /** Recent root positions for drawing a trail (renderer reads, engine appends; capped). */
   trail: Vec2[];
+  /**
+   * Handling (engine-owned, optional): id of the food particle being ingested, seconds it has
+   * stayed within reach, and that as a 0..1 fraction of `TUNING.handlingTime` (0 when idle).
+   */
+  handlingFood?: number;
+  handlingElapsed?: number;
+  handlingProgress?: number;
 };
 
 // ---------------------------------------------------------------------------
