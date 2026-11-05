@@ -132,6 +132,26 @@ export const TUNING = {
   // --- Mouth ---------------------------------------------------------------
   /** Mouth radius = root width / 2 + this. */
   mouthPadding: 4,
+  /**
+   * Handling time (s): a particle is eaten only after the mouth has stayed within reach of THAT
+   * particle for this long (cumulative, reset when contact breaks). 0 = instant ingestion.
+   *
+   * Why 0.6 (measured, 20 simulated minutes per run, one run per seed; mouthOverCom = mouth
+   * path / centre-of-mass path among evolved bodies, ablationLoss = share of meals lost when
+   * every sensor weight is zeroed in a head-to-head garden):
+   *   seed:          11     23     100    101    102    103
+   *   mouthOverCom   1.87   2.50   2.57   2.49   5.28   2.95   at 0
+   *                  2.20   1.54   1.70   1.99   2.41   2.93   at 0.6
+   *   ablationLoss  -0.41  -0.02  -0.31  +0.28  +0.06  +0.25   at 0
+   *                 +0.22  +0.68  -0.20  -0.10  +0.49  +0.40   at 0.6
+   * With instant ingestion a mouth swept through food feeds as well as one steered to it, so
+   * sensing was worth nothing on average; with a dwell it has to arrive and stay, and sensing
+   * starts to pay (mean ablation loss -0.03 -> +0.25, better on 5 of 6 seeds; mouthOverCom
+   * mean 2.94 -> 2.13, better on 5 of 6). No run went extinct (end population 65-145).
+   * Known cost: on seed 100 the evolved population no longer out-forages the seed genomes
+   * head-to-head (gain 0.8). 0.2 and 0.35 were weaker on both counts.
+   */
+  handlingTime: 0.6,
 
   // --- Water ---------------------------------------------------------------
   /** Large-scale swirl speed as a fraction of env.currentStrength (zero when strength is 0). */
@@ -659,11 +679,18 @@ export class World implements WorldLike {
   }
 
   private eat(org: Organism): void {
-    if (org.energy >= org.capacity) return;
+    if (org.energy >= org.capacity) {
+      this.resetHandling(org);
+      return;
+    }
     const reach = org.genome.parts[0].width / 2 + TUNING.mouthPadding;
     const r2 = reach * reach;
     const cx = Math.floor(org.position.x / FOOD_HASH_CELL);
     const cy = Math.floor(org.position.y / FOOD_HASH_CELL);
+    const handling = TUNING.handlingTime > 0;
+    let targetIndex = -1;
+    let nearest = -1;
+    let nearestD2 = Infinity;
     for (let y = Math.max(0, cy - 1); y <= Math.min(this.hashRows - 1, cy + 1); y++) {
       for (let x = Math.max(0, cx - 1); x <= Math.min(this.hashCols - 1, cx + 1); x++) {
         for (let i = this.hashHead[y * this.hashCols + x]; i >= 0; i = this.hashNext[i]) {
@@ -671,17 +698,54 @@ export class World implements WorldLike {
           const f = this.food[i];
           const dx = f.position.x - org.position.x;
           const dy = f.position.y - org.position.y;
-          if (dx * dx + dy * dy > r2) continue;
-          this.eaten[i] = 1;
-          org.energy = Math.min(org.capacity, org.energy + f.energy);
-          org.meals++;
-          this.mealBuckets[this.windowBucket()]++;
-          const record = this.lineageRecords.get(org.lineage);
-          if (record) record.totalMeals++;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > r2) continue;
+          if (handling) {
+            if (f.id === org.handlingFood) targetIndex = i;
+            if (d2 < nearestD2) {
+              nearestD2 = d2;
+              nearest = i;
+            }
+            continue;
+          }
+          this.consume(org, i);
           if (org.energy >= org.capacity) return;
         }
       }
     }
+    if (!handling) return;
+    if (targetIndex >= 0) {
+      org.handlingElapsed = (org.handlingElapsed ?? 0) + DT;
+      org.handlingProgress = Math.min(1, org.handlingElapsed / TUNING.handlingTime);
+      if (org.handlingElapsed >= TUNING.handlingTime - 1e-9) {
+        this.consume(org, targetIndex);
+        this.resetHandling(org);
+      }
+    } else if (nearest >= 0) {
+      // Contact on a new particle (or the old one slipped away): start over.
+      org.handlingFood = this.food[nearest].id;
+      org.handlingElapsed = 0;
+      org.handlingProgress = 0;
+    } else {
+      this.resetHandling(org);
+    }
+  }
+
+  private resetHandling(org: Organism): void {
+    if (org.handlingFood === undefined && !org.handlingProgress) return;
+    org.handlingFood = undefined;
+    org.handlingElapsed = 0;
+    org.handlingProgress = 0;
+  }
+
+  private consume(org: Organism, i: number): void {
+    const f = this.food[i];
+    this.eaten[i] = 1;
+    org.energy = Math.min(org.capacity, org.energy + f.energy);
+    org.meals++;
+    this.mealBuckets[this.windowBucket()]++;
+    const record = this.lineageRecords.get(org.lineage);
+    if (record) record.totalMeals++;
   }
 
   private canReproduce(org: Organism): boolean {
