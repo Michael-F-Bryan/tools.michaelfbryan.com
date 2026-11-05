@@ -113,25 +113,39 @@ function meanTrailSpeed(organism: Organism): number {
   return distance / ((trail.length - 1) * 0.1);
 }
 
+/** An animal this close to some food (world units) is likely to be seen eating soon. */
+const NEAR_FOOD = 60;
+/** How many of the best movers are considered when preferring one that is at, or near, a meal. */
+const TOP_MOVERS = 5;
+
+function nearFood(organism: Organism, world: WorldLike): boolean {
+  if ((organism.handlingProgress ?? 0) > 0) return true;
+  const { x, y } = organism.position;
+  for (const f of world.food) {
+    if (Math.abs(f.position.x - x) < NEAR_FOOD && Math.abs(f.position.y - y) < NEAR_FOOD && Math.hypot(f.position.x - x, f.position.y - y) < NEAR_FOOD) return true;
+  }
+  return false;
+}
+
 /**
  * The most successful mover among organisms old enough for the rate to mean something:
- * meals per minute, scaled down for animals that barely travel. Falls back to the most meals.
+ * meals per minute, scaled down for animals that barely travel. Among the top few, one that is
+ * eating or near food wins, so a first Follow has a fair chance of showing a meal.
+ * Falls back to the most meals.
  */
 function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefined {
-  let veteran: Organism | undefined;
-  let veteranScore = -1;
+  const movers: { organism: Organism; score: number }[] = [];
   let fallback: Organism | undefined;
   for (const organism of world.organisms) {
     if (lineage !== undefined && organism.lineage !== lineage) continue;
     if (!fallback || organism.meals > fallback.meals || (organism.meals === fallback.meals && organism.energy > fallback.energy)) fallback = organism;
     if (organism.age <= MIN_INSPECT_AGE) continue;
-    const score = (organism.meals / organism.age) * 60 * Math.min(1, meanTrailSpeed(organism) / TRAVEL_SPEED);
-    if (!veteran || score > veteranScore || (score === veteranScore && organism.energy > veteran.energy)) {
-      veteran = organism;
-      veteranScore = score;
-    }
+    movers.push({ organism, score: (organism.meals / organism.age) * 60 * Math.min(1, meanTrailSpeed(organism) / TRAVEL_SPEED) });
   }
-  return veteran ?? fallback;
+  movers.sort((a, b) => b.score - a.score || b.organism.energy - a.organism.energy);
+  const top = movers.slice(0, TOP_MOVERS);
+  const eating = top.find((m) => (m.organism.handlingProgress ?? 0) > 0) ?? top.find((m) => nearFood(m.organism, world));
+  return (eating ?? top[0])?.organism ?? fallback;
 }
 
 /** "Last 12 died of starvation" from the deaths in the last two minutes of world time. */
