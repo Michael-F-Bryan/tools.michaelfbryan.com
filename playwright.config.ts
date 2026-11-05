@@ -9,6 +9,12 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
+  // On a GitHub `pull_request` run Playwright's git-commit-info plugin fetches
+  // the PR base with `--depth=1` to attach a diff to report metadata. That
+  // runs before the `webServer` starts, and turns CI's full checkout shallow,
+  // so `next dev` then (correctly) refuses to generate entry history. Nothing
+  // here uses the diff; commit metadata only reads git and stays enabled.
+  captureGitInfo: { diff: false },
   use: {
     baseURL,
     trace: "on-first-retry",

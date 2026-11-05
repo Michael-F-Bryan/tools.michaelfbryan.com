@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -143,6 +143,77 @@ test("fails clearly instead of publishing wrong dates for a shallow clone", asyn
 
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(shallow, { recursive: true, force: true });
+});
+
+test("the repository's Playwright config leaves a full pull-request checkout complete for the dev server", async () => {
+  test.setTimeout(60_000);
+  // Reproduces GitHub Actions on `pull_request`: Playwright's git-commit-info
+  // plugin runs during setup, before the `webServer` starts `next dev`, and by
+  // default fetches the PR base with `--depth=1`. That turns a `fetch-depth: 0`
+  // checkout into a shallow one, so the generator's guard (correctly) rejects
+  // it. Run the real config in a real full clone and check what it leaves behind.
+  const upstream = makeTempRepo();
+  writeEntryFile(upstream, "alpha", "definition.ts", "export const definition = {};\n");
+  const base = commitAll(upstream, "feat: add alpha", { date: "2024-01-01T10:00:00+00:00" });
+  writeEntryFile(upstream, "alpha", "content.tsx", "export default function Alpha() { return null; }\n");
+  const head = commitAll(upstream, "feat: improve alpha", { date: "2024-01-02T10:00:00+00:00" });
+
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "entry-history-pr-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "entry-history-pr-event-"));
+  try {
+    execFileSync("git", ["clone", "-q", `file://${upstream}`, work], { stdio: ["ignore", "pipe", "ignore"] });
+    expect(run(work, ["rev-parse", "--is-shallow-repository"]).trim()).toBe("false");
+
+    const repoRoot = process.cwd();
+    // Reuse the repository's own config, minus the app server and browser
+    // projects, so only its Playwright-level settings are under test.
+    fs.writeFileSync(
+      path.join(work, "playwright.config.ts"),
+      `import base from ${JSON.stringify(path.join(repoRoot, "playwright.config"))};\n` +
+        `export default { ...base, testDir: ".", reporter: "line", projects: [{ name: "probe" }], webServer: undefined };\n`,
+    );
+    fs.writeFileSync(
+      path.join(work, "probe.spec.ts"),
+      `import { test } from "@playwright/test";\ntest("probe", () => {});\n`,
+    );
+    fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(work, "node_modules"), "dir");
+
+    const eventPath = path.join(scratch, "event.json");
+    fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { title: "probe", number: 1, base: { sha: base } } }));
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+      // Do not inherit this worker's own Playwright runtime state.
+      if (/^(?:PW|PWTEST|PLAYWRIGHT|TEST_)/.test(key) || key === "NODE_OPTIONS") delete env[key];
+    }
+    Object.assign(env, {
+      CI: "true",
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_SERVER_URL: "https://github.example",
+      GITHUB_REPOSITORY: "example/entries",
+      GITHUB_SHA: head,
+      GITHUB_RUN_ID: "1",
+      DEBUG_GIT_COMMIT_INFO: "1",
+    });
+
+    const result = spawnSync(process.execPath, [path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js"), "test"], {
+      cwd: work,
+      env,
+      encoding: "utf8",
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(result.status, output).toBe(0);
+    // Not vacuous: Playwright's CI git capture really ran for this pull request.
+    expect(output).toContain("GitCommitInfo: ci info");
+
+    expect(run(work, ["rev-parse", "--is-shallow-repository"]).trim()).toBe("false");
+    expect(fs.existsSync(path.join(work, ".git", "shallow"))).toBe(false);
+    await expect(generateEntryHistory({ repoRoot: work })).resolves.toMatchObject({ alpha: { status: "available" } });
+  } finally {
+    fs.rmSync(upstream, { recursive: true, force: true });
+    fs.rmSync(work, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("a deployment build completes shallow history from its pinned commit without an origin remote", async () => {

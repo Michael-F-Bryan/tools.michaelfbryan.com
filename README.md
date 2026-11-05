@@ -41,7 +41,10 @@ are displayed in UTC to keep static pages and client rendering consistent.
 
 This requires real, non-shallow git history: a shallow clone fails the build
 with a clear error rather than publishing wrong dates, so CI checks out with
-`fetch-depth: 0`. Vercel production builds explicitly fetch missing ancestry
+`fetch-depth: 0`. Nothing later in the job may re-shallow that checkout: on
+pull requests Playwright would otherwise fetch the PR base with `--depth=1` for
+report metadata before the dev server starts, so `playwright.config.ts` turns
+off `captureGitInfo.diff` (covered by `tests/entry-history-generator.spec.ts`). Vercel production builds explicitly fetch missing ancestry
 from the public repository, pinned to `VERCEL_GIT_COMMIT_SHA`, before generating
 history. This leaves HEAD unchanged and fails the build if the fetch fails.
 Local development never fetches automatically. An entry with no qualifying commits yet (e.g. added but not
