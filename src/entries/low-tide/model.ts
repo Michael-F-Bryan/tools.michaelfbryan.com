@@ -736,7 +736,7 @@ function build(state: State, out: Built): State {
     const id = s.crew.length;
     s = { ...s, crew: [...s.crew, { id, name: CREW_NAMES[id] ?? `Crew ${id + 1}`, fed: true, queued: null }] };
   }
-  s = log(s, blueprint.flavour, "build");
+  s = log(s, `${blueprint.label}: ${blueprint.flavour}`, "build");
   return startQueued(s);
 }
 

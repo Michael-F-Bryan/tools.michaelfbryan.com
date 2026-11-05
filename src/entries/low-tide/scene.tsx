@@ -1,6 +1,6 @@
 "use client";
 
-import { depthOf, floodOffset, floodTime, hasBuilt, isDark, reach, tideElapsed, waterline, BANDS, BAND_NAMES, CREEP_MS, TURN_MS, type Band, type State } from "./model";
+import { beyondWaterline, depthOf, floodOffset, floodTime, hasBuilt, isDark, reach, tideElapsed, waterline, BANDS, BAND_NAMES, CREEP_MS, TURN_MS, type Band, type State } from "./model";
 import styles from "./scene.module.css";
 
 /** The flat seen from the shore: the wreck at the top (sea), the shingle at the bottom. */
@@ -49,7 +49,7 @@ export function Scene({ state, figures, selected, onSelect }: {
 
   return (
     <div className={styles.scene} data-dark={dark || undefined} data-rising={rising || undefined} data-waterline={waterline(state).toFixed(2)}>
-      <svg viewBox={`0 0 ${SCENE_W} ${SCENE_H}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true" className={styles.svg}>
+      <svg viewBox={`0 0 ${SCENE_W} ${SCENE_H}`} preserveAspectRatio="xMidYMax slice" aria-hidden="true" className={styles.svg}>
         <defs>
           <pattern id="lt-pebbles" width="14" height="10" patternUnits="userSpaceOnUse">
             <ellipse cx="4" cy="3" rx="3" ry="2" className={styles.pebble} />
@@ -112,6 +112,16 @@ export function Scene({ state, figures, selected, onSelect }: {
           <rect x="0" y="0" width={SCENE_W} height={SCENE_H} fill="url(#lt-waves)" className={styles.waves} />
           <path d={waveAt(SCENE_H - 1)} className={styles.foam} />
         </g>
+
+        {/* Bands under water but within reach (waders, raft): outlined, so wading is a visible option. */}
+        {BANDS.filter(band => band >= depth && beyondWaterline(state, band) <= reach(state)).map(band => (
+          <g key={band}>
+            <rect x="3" y={bandTop(band) + 3} width={SCENE_W - 6} height={BAND_H - 6} className={styles.reachable} />
+            <text x={SCENE_W / 2} y={bandTop(band) + BAND_H / 2 + 4} textAnchor="middle" className={styles.reachLabel}>
+              {beyondWaterline(state, band) === 1 ? "WADE · 1.5× TIME" : "RAFT · 2× TIME"}
+            </text>
+          </g>
+        ))}
 
         {/* The low-water mark for this tide, so you can see how far out it will go / has gone. */}
         <line x1="0" x2={SCENE_W} y1={(4 - depth) * BAND_H} y2={(4 - depth) * BAND_H} className={styles.lowMark} />
@@ -210,7 +220,10 @@ function Person({ figure, index }: { figure: Figure; index: number }) {
 export function describeBand(state: State, band: Band): string {
   const flood = floodTime(state, band);
   if (flood === undefined) return "under water this tide";
-  if (flood === null) return band === 0 ? "dry all tide" : band >= depthOf(state) ? "reached by raft" : "dry all tide";
+  if (flood === null) {
+    if (band === 0 || band < depthOf(state)) return "dry all tide";
+    return beyondWaterline(state, band) === 1 ? "under water · wade, 1.5× time" : "under water · by raft, 2× time";
+  }
   const left = flood - state.time;
   if (left <= 0) return "flooded";
   const s = Math.ceil(left / 1000);
