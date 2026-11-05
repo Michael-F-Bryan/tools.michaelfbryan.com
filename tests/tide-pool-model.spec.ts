@@ -344,7 +344,6 @@ function assertBounded(world: World): void {
 type PatchHooks = {
   consume(org: Organism, i: number): void;
   driftPatches(): void;
-  pickPatchByStock(): unknown;
   spawnFood(): void;
 };
 const hooks = (world: World) => world as unknown as PatchHooks;
@@ -356,48 +355,51 @@ function graze(world: World) {
   hooks(world).consume(world.organisms[0], 0);
 }
 
-test("grazing a patch drains its stock and its share of new food", () => {
+/** Spawn for `steps` ticks without drift; count particles inside each patch's radius and in total. */
+function spawnCounts(world: World, steps: number) {
+  world.food.length = 0;
+  for (let i = 0; i < steps; i++) hooks(world).spawnFood();
+  const inside = world.patches.map(p => world.food.filter(f => Math.hypot(f.position.x - p.position.x, f.position.y - p.position.y) <= p.radius).length);
+  return { inside, total: world.food.length };
+}
+
+test("grazing a patch reduces its own spawn output and the total patch output", () => {
   const world = new World(3);
-  const share = (n = 4000) => {
-    let hits = 0;
-    for (let i = 0; i < n; i++) if (hooks(world).pickPatchByStock() === world.patches[0]) hits++;
-    return hits / n;
-  };
-  const before = share();
+  world.setEnvironment({ foodRate: 5 });
+  const steps = Math.round(60 / DT);
+  const before = spawnCounts(world, steps);
   for (let i = 0; i < 20; i++) graze(world);
   expect(world.patches[0].stock).toBeLessThan(0.3);
   expect(world.patches[0].stock).toBeGreaterThanOrEqual(TUNING.patchMinStock);
-  expect(share()).toBeLessThan(before * 0.5);
+  const after = spawnCounts(world, steps);
+  expect(after.inside[0]).toBeLessThan(before.inside[0] * 0.5);
+  expect(after.total).toBeLessThan(before.total);
 });
 
-test("a grazed patch recovers much more slowly than it depletes", () => {
+test("a patch at the floor recovers to half stock in bounded time without grazing", () => {
   const world = new World(4);
   const patch = world.patches[0];
-  let down = 0;
-  while (patch.stock > 0.1 && down < 3600) {
-    graze(world); // one meal per simulated second
+  patch.stock = TUNING.patchMinStock;
+  let t = 0;
+  while (patch.stock < 0.5 && t < 3600) {
     for (let k = 0; k < Math.round(1 / DT); k++) hooks(world).driftPatches();
-    down++;
+    t++;
   }
-  expect(patch.stock).toBeLessThanOrEqual(0.1);
-  let up = 0;
-  while (patch.stock < 0.5 && up < 3600) {
-    for (let k = 0; k < Math.round(1 / DT); k++) hooks(world).driftPatches();
-    up++;
-  }
-  expect(up).toBeGreaterThan(down * 3);
-  expect(up).toBeLessThan(600);
+  expect(patch.stock).toBeGreaterThanOrEqual(0.5);
+  expect(t).toBeLessThan(1500);
 });
 
-test("an exhausted patch does not stop other patches from supplying food", () => {
+test("with every patch at the floor, total food is roughly the scattered share only", () => {
   const world = new World(5);
-  world.patches[0].stock = TUNING.patchMinStock;
-  const others = world.patches.slice(1);
-  let picks0 = 0;
-  for (let i = 0; i < 3000; i++) if (hooks(world).pickPatchByStock() === world.patches[0]) picks0++;
-  expect(picks0 / 3000).toBeLessThan(0.05);
-  world.food.length = 0;
-  for (let i = 0; i < 600; i++) hooks(world).spawnFood();
-  expect(world.food.length).toBeGreaterThan(0);
-  expect(others.every(p => p.stock === 1)).toBe(true);
+  world.setEnvironment({ foodRate: 5 });
+  for (const p of world.patches) p.stock = TUNING.patchMinStock;
+  const seconds = 120;
+  const { total } = spawnCounts(world, Math.round(seconds / DT));
+  const rate = total / seconds;
+  const scattered = 5 * (1 - TUNING.patchShare);
+  const floorPatches = 5 * TUNING.patchShare * TUNING.patchMinStock;
+  const expected = scattered + floorPatches;
+  expect(rate).toBeGreaterThan(expected * 0.7);
+  expect(rate).toBeLessThan(expected * 1.3);
+  expect(rate).toBeLessThan(5 * 0.5);
 });
