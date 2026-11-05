@@ -7,6 +7,20 @@ import styles from "./scene.module.css";
 export const SCENE_W = 360;
 export const SCENE_H = 240;
 const BAND_H = SCENE_H / 4;
+/** The sky occupies the top of the picture; the open sea beyond the wreck runs to the horizon line below it. */
+const SKY_H = 12;
+const HORIZON_H = 22;
+const MOON_X = 190;
+/** Terraces from the sea to the shore, with their dry textures. */
+const TERRACES: readonly { band: Band; bed: string; pattern: string; patternOpacity: number }[] = [
+  { band: 3, bed: styles.wreckBed, pattern: "lt-mud", patternOpacity: 0.5 },
+  { band: 2, bed: styles.reefBed, pattern: "lt-reef", patternOpacity: 1 },
+  { band: 1, bed: styles.mudBed, pattern: "lt-mud", patternOpacity: 1 },
+  { band: 0, bed: styles.shingleBed, pattern: "lt-pebbles", patternOpacity: 1 },
+];
+const STARS: readonly (readonly [number, number])[] = [[18, 4], [52, 7], [96, 3], [140, 8], [188, 4], [236, 7], [270, 3], [352, 9]];
+/** Glint rows under the moon: y and width, widening toward the viewer. */
+const GLINT: readonly (readonly [number, number])[] = [[13, 6], [18, 8], [25, 10], [34, 13], [46, 16], [60, 20], [78, 24], [100, 28], [126, 32], [156, 36]];
 const WAVE = "M0 0 C 10 -4 20 4 30 0 S 50 -4 60 0 S 80 4 90 0 S 110 -4 120 0";
 /** A wave line the full width of the scene at a given y. */
 function waveAt(y: number) {
@@ -64,21 +78,69 @@ export function Scene({ state, figures, selected, onSelect }: {
           <pattern id="lt-waves" width="120" height="24" patternUnits="userSpaceOnUse">
             <path d={WAVE} transform="translate(0 12)" className={styles.wave} />
           </pattern>
+          {/* Each terrace is darker toward the sea; the lip shadow is a short, stronger version of the same fade. */}
+          <linearGradient id="lt-bed-shade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className={styles.shadeStop} stopOpacity=".34" />
+            <stop offset="1" className={styles.shadeStop} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="lt-lip-shade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className={styles.shadeStop} stopOpacity=".5" />
+            <stop offset="1" className={styles.shadeStop} stopOpacity="0" />
+          </linearGradient>
+          {/* Water: pale and thin at the edge, deeper and darker further out, so the terraces beneath show through where it is shallow. */}
+          <linearGradient id="lt-depth" gradientUnits="userSpaceOnUse" x1="0" y1={SCENE_H} x2="0" y2={SCENE_H - 110}>
+            <stop offset="0" className={styles.depthShallow} stopOpacity=".4" />
+            <stop offset=".28" className={styles.depthMid} stopOpacity=".7" />
+            <stop offset="1" className={styles.depthDeep} stopOpacity=".9" />
+          </linearGradient>
+          <linearGradient id="lt-wet" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className={styles.wetStop} stopOpacity=".42" />
+            <stop offset="1" className={styles.wetStop} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="lt-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className={styles.skyTop} />
+            <stop offset="1" className={styles.skyBottom} />
+          </linearGradient>
+          <radialGradient id="lt-moon-halo">
+            <stop offset="0" stopColor="#f4ecd2" stopOpacity=".5" />
+            <stop offset="1" stopColor="#f4ecd2" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="lt-lantern" cx="50%" cy="50%" r="50%">
+            <stop offset="0" stopColor="#ffd98a" stopOpacity=".9" />
+            <stop offset=".4" stopColor="#ffb547" stopOpacity=".42" />
+            <stop offset="1" stopColor="#ffb547" stopOpacity="0" />
+          </radialGradient>
+          <clipPath id="lt-sea-clip">
+            <rect x="0" y={SKY_H} width={SCENE_W} height={SCENE_H - SKY_H} />
+          </clipPath>
         </defs>
 
-        {/* Ground: four terraces. */}
-        <rect x="0" y={bandTop(3)} width={SCENE_W} height={BAND_H} className={styles.wreckBed} />
-        <rect x="0" y={bandTop(3)} width={SCENE_W} height={BAND_H} fill="url(#lt-mud)" opacity=".5" />
-        <rect x="0" y={bandTop(2)} width={SCENE_W} height={BAND_H} className={styles.reefBed} />
-        <rect x="0" y={bandTop(2)} width={SCENE_W} height={BAND_H} fill="url(#lt-reef)" />
-        <rect x="0" y={bandTop(1)} width={SCENE_W} height={BAND_H} className={styles.mudBed} />
-        <rect x="0" y={bandTop(1)} width={SCENE_W} height={BAND_H} fill="url(#lt-mud)" />
-        <rect x="0" y={bandTop(0)} width={SCENE_W} height={BAND_H} className={styles.shingleBed} />
-        <rect x="0" y={bandTop(0)} width={SCENE_W} height={BAND_H} fill="url(#lt-pebbles)" />
-        {/* Terrace lips. */}
-        {[1, 2, 3].map(band => (
-          <path key={band} d={`M0 ${bandTop(band as Band) + BAND_H} C 60 ${bandTop(band as Band) + BAND_H - 5} 120 ${bandTop(band as Band) + BAND_H + 4} 180 ${bandTop(band as Band) + BAND_H} S 300 ${bandTop(band as Band) + BAND_H - 4} 360 ${bandTop(band as Band) + BAND_H}`} className={styles.lip} />
+        {/* Ground: four terraces, each a little darker than the one nearer shore. */}
+        {TERRACES.map(({ band, bed, pattern, patternOpacity }) => (
+          <g key={band}>
+            <rect x="0" y={bandTop(band)} width={SCENE_W} height={BAND_H} className={bed} />
+            <rect x="0" y={bandTop(band)} width={SCENE_W} height={BAND_H} fill={`url(#${pattern})`} opacity={patternOpacity} />
+            {band > 0 ? <rect x="0" y={bandTop(band)} width={SCENE_W} height={BAND_H} fill="url(#lt-bed-shade)" opacity={0.45 + band * 0.18} /> : null}
+          </g>
         ))}
+
+        {/* Open sea and sky beyond the wreck: the horizon never leaves the picture, even at the lowest ebb. */}
+        <rect x="0" y="0" width={SCENE_W} height={SKY_H} fill="url(#lt-sky)" />
+        <rect x="0" y={SKY_H} width={SCENE_W} height={HORIZON_H - SKY_H} className={styles.farSea} />
+        <path d={waveAt(HORIZON_H)} className={styles.farFoam} />
+        {dark ? <g className={styles.stars}>{STARS.map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".7" />)}</g> : null}
+
+        {/* Terrace lips: a dark line along each step down toward the sea, with a short shadow under it. */}
+        {[1, 2, 3].map(band => {
+          const y = bandTop(band as Band) + BAND_H;
+          const curve = `M0 ${y} C 60 ${y - 5} 120 ${y + 4} 180 ${y} S 300 ${y - 4} 360 ${y}`;
+          return (
+            <g key={band}>
+              <path d={`${curve} L 360 ${y + 10} L 0 ${y + 10} Z`} fill="url(#lt-lip-shade)" />
+              <path d={curve} className={styles.lip} />
+            </g>
+          );
+        })}
 
         {/* The wreck: ribs and a keel, always there, under water or not. */}
         <g className={styles.wreck}>
@@ -97,7 +159,10 @@ export function Scene({ state, figures, selected, onSelect }: {
         </g>
 
         {/* Camp on the shingle: hut, then everything built grows beside it. */}
-        <Camp state={state} />
+        <Camp state={state} lit={dark} />
+
+        {/* Night on the land: cooler and darker, but light enough that the terraces keep their textures. */}
+        {dark ? <rect x="0" y={HORIZON_H} width={SCENE_W} height={SCENE_H - HORIZON_H} className={styles.nightShade} /> : null}
 
         {/* Flooded bands dim before the water sweeps over them, as the rules say. */}
         {BANDS.filter(band => band > 0).map(band => {
@@ -106,16 +171,34 @@ export function Scene({ state, figures, selected, onSelect }: {
           return flooded || flood === undefined ? <rect key={band} x="0" y={bandTop(band)} width={SCENE_W} height={BAND_H} className={styles.wet} /> : null;
         })}
 
-        {/* The water. Its edge is animated by CSS between ticks. */}
-        <g className={styles.water} style={{ transform: `translateY(${edge - SCENE_H}px)` }}>
-          <rect x="0" y="0" width={SCENE_W} height={SCENE_H} className={styles.sea} />
-          <rect x="0" y="0" width={SCENE_W} height={SCENE_H} fill="url(#lt-waves)" className={styles.waves} />
-          <path d={waveAt(SCENE_H - 1)} className={styles.foam} />
+        {/* The water. Its edge is animated by CSS between ticks; the sheet stops at the horizon. */}
+        <g clipPath="url(#lt-sea-clip)">
+          <g className={styles.water} style={{ transform: `translateY(${edge - SCENE_H}px)` }}>
+            {/* Wet sand just beyond the edge, so the margin of the sea is visible as it moves. */}
+            <rect x="0" y={SCENE_H} width={SCENE_W} height="14" fill="url(#lt-wet)" />
+            <rect x="0" y="0" width={SCENE_W} height={SCENE_H} fill="url(#lt-depth)" />
+            <rect x="0" y="0" width={SCENE_W} height={SCENE_H} fill="url(#lt-waves)" className={styles.waves} />
+            <path d={waveAt(SCENE_H - 1)} className={styles.foam} />
+          </g>
         </g>
+
+        {/* Moon, and its glint on whatever water lies below it. */}
+        {dark ? (
+          <g className={styles.night}>
+            <circle cx={MOON_X} cy="7" r="14" fill="url(#lt-moon-halo)" />
+            <circle cx={MOON_X} cy="7" r="5" className={styles.moon} />
+            <g className={styles.glint}>
+              {GLINT.map(([y, w], i) => (
+                <rect key={y} x={MOON_X - w * 0.65} y={y} width={w * 1.3} height="2" rx="1" style={{ opacity: Math.max(0, Math.min(1, (Math.max(edge, HORIZON_H) - y) / 10)) * (0.85 - i * 0.07) }} />
+              ))}
+            </g>
+          </g>
+        ) : null}
 
         {/* Bands under water but within reach (waders, raft): outlined, so wading is a visible option. */}
         {BANDS.filter(band => band >= depth && beyondWaterline(state, band) <= reach(state)).map(band => (
           <g key={band}>
+            <rect x="3" y={bandTop(band) + 3} width={SCENE_W - 6} height={BAND_H - 6} className={styles.reachableUnder} />
             <rect x="3" y={bandTop(band) + 3} width={SCENE_W - 6} height={BAND_H - 6} className={styles.reachable} />
             <text x={SCENE_W / 2} y={bandTop(band) + BAND_H / 2 + 4} textAnchor="middle" className={styles.reachLabel}>
               {beyondWaterline(state, band) === 1 ? "WADE · 1.5× TIME" : "RAFT · 2× TIME"}
@@ -124,20 +207,14 @@ export function Scene({ state, figures, selected, onSelect }: {
         ))}
 
         {/* The low-water mark for this tide, so you can see how far out it will go / has gone. */}
+        <line x1="0" x2={SCENE_W} y1={(4 - depth) * BAND_H} y2={(4 - depth) * BAND_H} className={styles.lowMarkUnder} />
         <line x1="0" x2={SCENE_W} y1={(4 - depth) * BAND_H} y2={(4 - depth) * BAND_H} className={styles.lowMark} />
+
+        {/* A lantern warms the camp on dark tides. */}
+        {dark && hasBuilt(state, "lantern") ? <circle cx="40" cy="206" r="100" fill="url(#lt-lantern)" className={styles.lanternGlow} /> : null}
 
         {/* Crew. */}
         {figures.map(figure => <Person key={figure.id} figure={figure} index={figure.id} />)}
-
-        {/* Night. */}
-        {dark ? (
-          <g className={styles.night}>
-            <rect x="0" y="0" width={SCENE_W} height={SCENE_H} className={styles.nightShade} />
-            <circle cx="320" cy="26" r="11" className={styles.moon} />
-            <circle cx="314" cy="22" r="10" className={styles.moonBite} />
-            {hasBuilt(state, "lantern") ? <circle cx="52" cy="206" r="34" className={styles.lanternGlow} /> : null}
-          </g>
-        ) : null}
 
         {/* Flood clocks drawn on the bands themselves. */}
         {BANDS.filter(band => band > 0 && band < depth).map(band => {
@@ -172,13 +249,13 @@ export function Scene({ state, figures, selected, onSelect }: {
   );
 }
 
-function Camp({ state }: { state: State }) {
+function Camp({ state, lit }: { state: State; lit: boolean }) {
   const built = (name: Parameters<typeof hasBuilt>[1]) => hasBuilt(state, name);
   return (
     <g className={styles.camp}>
       {/* Hut. */}
       <path d="M24 226 L24 208 L40 196 L56 208 L56 226 Z" className={styles.hut} />
-      <rect x="36" y="214" width="8" height="12" className={styles.door} />
+      <rect x="36" y="214" width="8" height="12" className={styles.door} data-lit={lit && built("lantern") || undefined} />
       {built("shelter") ? <path d="M62 226 L62 212 L74 203 L86 212 L86 226 Z" className={styles.hut} /> : null}
       {built("kiln") ? <><path d="M96 226 L98 206 L112 206 L114 226 Z" className={styles.kiln} /><rect x="103" y="198" width="4" height="8" className={styles.kiln} /></> : null}
       {built("fishTrap") ? <path d="M120 226 L120 212 L128 212 L128 226 M124 212 L124 204 M118 206 Q124 200 130 206" className={styles.netLines} /> : null}
@@ -186,6 +263,7 @@ function Camp({ state }: { state: State }) {
       {built("winch") ? <><rect x="210" y="212" width="14" height="10" className={styles.kiln} /><circle cx="217" cy="209" r="4" className={styles.netLines} /></> : null}
       {built("net") ? <path d="M146 226 L146 206 M146 206 L170 206 M170 206 L170 226 M150 210 L166 222 M166 210 L150 222" className={styles.netLines} /> : null}
       {built("raft") ? <rect x="178" y="214" width="26" height="8" className={styles.raft} /> : null}
+      {built("lantern") ? <><path d="M14 226 L14 204" className={styles.netLines} /><circle cx="14" cy="201" r="3.4" className={styles.lamp} />{lit ? <circle cx="14" cy="201" r="8" fill="#ffcf6e" opacity=".45" /> : null}</> : null}
       {built("bellTower") || built("beacon") ? (
         <g>
           <path d="M318 226 L320 182 L340 182 L342 226 Z" className={styles.tower} />

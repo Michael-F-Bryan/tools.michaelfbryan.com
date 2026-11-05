@@ -1,7 +1,9 @@
-/* The flat, drawn with site tokens plus a few local earth and water hues mixed into the theme's paper so dark mode keeps working. */
+/* The flat, drawn with site tokens plus a few local earth and water hues mixed into the theme's paper so dark mode keeps working.
+   Dark tides override the hues below with fixed cool ones: night is the same in either theme. */
 .scene {
-  --sea: color-mix(in srgb, #2d6cdf 62%, var(--paper));
-  --sea-deep: color-mix(in srgb, #1f4fb0 70%, var(--paper));
+  --sea: color-mix(in srgb, #2d6cdf 80%, var(--paper));
+  --sea-shallow: color-mix(in srgb, #6fc8e0 72%, var(--paper));
+  --sea-deep: color-mix(in srgb, #173f94 88%, var(--paper));
   --foam: color-mix(in srgb, #ffffff 70%, var(--sea));
   --shingle: color-mix(in srgb, #b7a98a 60%, var(--paper));
   --pebble: color-mix(in srgb, var(--ink) 26%, var(--shingle));
@@ -11,7 +13,17 @@
   --reef-mark: color-mix(in srgb, var(--ink) 30%, var(--reef));
   --wreck-bed: color-mix(in srgb, #5a5d72 60%, var(--paper));
   --timber: color-mix(in srgb, #3a2c22 75%, var(--ink));
-  --lip: color-mix(in srgb, var(--ink) 35%, transparent);
+  --lip: color-mix(in srgb, var(--ink) 55%, transparent);
+  --shade: #1b1410;
+  --wet-sand: #2a2118;
+  --sky-top: color-mix(in srgb, #7fb0ec 60%, var(--paper));
+  --sky-bottom: color-mix(in srgb, #dbeaf7 60%, var(--paper));
+  --label: var(--ink);
+  --halo: color-mix(in srgb, var(--paper) 88%, transparent);
+  --figure: var(--ink);
+  --figure-halo: transparent;
+  --reach-ink: #ffffff;
+  --reach-halo: #0b1c44;
   position: relative;
   width: 100%;
   aspect-ratio: 3 / 2;
@@ -19,6 +31,29 @@
   overflow: hidden;
   background: var(--sea-deep);
   user-select: none;
+}
+.scene[data-dark] {
+  --sea: #1a3d8c;
+  --sea-shallow: #3a78c4;
+  --sea-deep: #07123a;
+  --foam: #b9d2ff;
+  --shingle: #7d7d92;
+  --pebble: #b4b6cc;
+  --mud: #5f5248;
+  --mud-mark: #94806c;
+  --reef: #3f6a58;
+  --reef-mark: #78b49a;
+  --wreck-bed: #3b3f5c;
+  --timber: #14100e;
+  --lip: #05081a;
+  --shade: #040818;
+  --wet-sand: #050b24;
+  --sky-top: #050b24;
+  --sky-bottom: #1d2c62;
+  --label: #f1f4ff;
+  --halo: rgba(5, 9, 30, .88);
+  --figure: #f6efd6;
+  --figure-halo: #05081a;
 }
 .svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
@@ -29,24 +64,39 @@
 .pebble { fill: var(--pebble); opacity: .7; }
 .mudMark { stroke: var(--mud-mark); stroke-width: 1.2; stroke-linecap: round; opacity: .55; }
 .reefMark { stroke: var(--reef-mark); stroke-width: 1.2; fill: none; opacity: .5; }
-.lip { fill: none; stroke: var(--lip); stroke-width: 1.5; }
+.scene[data-dark] .mudMark, .scene[data-dark] .reefMark { opacity: .75; }
+.scene[data-dark] .pebble { opacity: .85; }
+.shadeStop { stop-color: var(--shade); }
+.lip { fill: none; stroke: var(--lip); stroke-width: 1.8; }
 .wreck path { stroke: var(--timber); stroke-width: 3.5; stroke-linecap: round; fill: none; }
 .reefHeads ellipse { fill: var(--reef-mark); opacity: .35; }
 
-.wet { fill: var(--sea); opacity: .35; }
+.skyTop { stop-color: var(--sky-top); }
+.skyBottom { stop-color: var(--sky-bottom); }
+.farSea { fill: var(--sea-deep); }
+.farFoam { fill: none; stroke: var(--foam); stroke-width: 1.4; opacity: .55; }
+.stars circle { fill: #f4f1e0; opacity: .8; }
+
+.wet { fill: var(--sea); opacity: .16; }
 .water { transition: transform .3s linear; will-change: transform; }
-.sea { fill: var(--sea); opacity: .82; }
+.depthShallow { stop-color: var(--sea-shallow); }
+.depthMid { stop-color: var(--sea); }
+.depthDeep { stop-color: var(--sea-deep); }
+.wetStop { stop-color: var(--wet-sand); }
 .waves { opacity: .9; animation: drift 6s linear infinite; }
-.wave { stroke: var(--foam); stroke-width: 1.4; fill: none; opacity: .55; }
-.foam { stroke: var(--foam); stroke-width: 2.2; fill: none; opacity: .9; }
+.wave { stroke: var(--foam); stroke-width: 1.4; fill: none; opacity: .5; }
+.scene[data-dark] .wave { opacity: .32; }
+.foam { stroke: var(--foam); stroke-width: 2.4; fill: none; opacity: .95; }
 .edgeLine { fill: var(--foam); opacity: .5; }
-.lowMark { stroke: var(--foam); stroke-width: 1; stroke-dasharray: 3 5; opacity: .45; }
+.lowMarkUnder { stroke: var(--reach-halo); stroke-width: 3; opacity: .35; }
+.lowMark { stroke: #ffffff; stroke-width: 1.4; stroke-dasharray: 4 5; opacity: .9; }
 .scene[data-rising] .foam { animation: lap 1.6s ease-in-out infinite; }
 @keyframes drift { from { transform: translateX(0); } to { transform: translateX(-120px); } }
 @keyframes lap { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 
 .camp .hut { fill: color-mix(in srgb, #8d6b4a 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.5; }
 .camp .door { fill: var(--timber); }
+.camp .door[data-lit] { fill: #ffd98a; }
 .camp .kiln { fill: color-mix(in srgb, #9a4f3a 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.2; }
 .camp .netLines { stroke: var(--timber); stroke-width: 1.4; fill: none; }
 .camp .raft { fill: color-mix(in srgb, #a0784f 70%, var(--paper)); stroke: var(--timber); stroke-width: 1.2; }
@@ -54,35 +104,50 @@
 .camp .towerLines { stroke: var(--timber); stroke-width: 1; }
 .camp .flame { fill: #ffb547; }
 .camp .flameGlow { fill: #ffb547; opacity: .28; }
+.camp .lamp { fill: #ffcf6e; stroke: var(--timber); stroke-width: 1; }
+.scene[data-dark] .camp .hut { fill: #8a6a52; }
+.scene[data-dark] .camp .kiln { fill: #8a4a3a; }
+.scene[data-dark] .camp .raft { fill: #8a6c4c; }
+.scene[data-dark] .camp .tower { fill: #9a5440; }
+.scene[data-dark] .camp .netLines, .scene[data-dark] .camp .towerLines { stroke: #c9b79f; }
 
-.person .head, .person .body { fill: var(--ink); }
-.person .name { fill: var(--ink); font-family: var(--font-sans, sans-serif); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+.person .head, .person .body { fill: var(--figure); stroke: var(--figure-halo); stroke-width: .8; paint-order: stroke; }
+.person .name { fill: var(--label); font-family: var(--font-sans, sans-serif); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--halo); stroke-width: 3px; stroke-linejoin: round; }
 .person .ringTrack { fill: color-mix(in srgb, var(--paper) 55%, transparent); stroke: color-mix(in srgb, var(--ink) 25%, transparent); stroke-width: 3; }
+.scene[data-dark] .person .ringTrack { fill: rgba(5, 9, 30, .55); stroke: rgba(241, 244, 255, .35); }
 .person .ring { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset .3s linear; }
-.person[data-queued] .head, .person[data-queued] .body { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 2 2; }
+.scene[data-dark] .person .ring { stroke: #8fb4ff; }
+.person[data-queued] .head, .person[data-queued] .body { fill: none; stroke: var(--figure); stroke-width: 1.4; stroke-dasharray: 2 2; }
 .person[data-hungry] .head, .person[data-hungry] .body { fill: var(--error); }
 
-.nightShade { fill: #0b1230; opacity: .5; }
+.nightShade { fill: #0a1030; opacity: .3; }
 .moon { fill: #f4ecd2; }
-.moonBite { fill: #0b1230; opacity: .5; }
-.lanternGlow { fill: #ffb547; opacity: .3; }
+.glint rect { fill: #e9efff; }
+.lanternGlow { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .82; } }
 .clock { fill: var(--paper); font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: color-mix(in srgb, var(--ink) 70%, transparent); stroke-width: 3px; }
 .clock[data-soon] { fill: #ffd2c9; }
 
 .targets { position: absolute; inset: 0; display: grid; grid-template-rows: repeat(4, 1fr); }
-.target { position: relative; margin: 0; padding: 0 10px; border: 0; background: transparent; color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.target { position: relative; margin: 0; padding: 0 10px; border: 0; background: transparent; color: var(--label); font: inherit; text-align: left; cursor: pointer; }
 .target:hover { background: color-mix(in srgb, var(--paper) 10%, transparent); }
 .target[aria-pressed="true"] { box-shadow: inset 0 0 0 3px var(--paper); }
 .target:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
-.targetName { position: absolute; left: 10px; top: 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--paper); text-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 70%, transparent); opacity: .85; }
+/* Ink with a paper halo by day, light with a navy halo by night: readable over sand, mud, reef, wreck and water alike. */
+.targetName {
+  position: absolute; left: 10px; top: 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--label);
+  text-shadow: 0 0 2px var(--halo), 0 0 2px var(--halo), 0 0 4px var(--halo), 1px 1px 0 var(--halo), -1px -1px 0 var(--halo), 1px -1px 0 var(--halo), -1px 1px 0 var(--halo);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .water, .person .ring { transition: none; }
-  .waves, .scene[data-rising] .foam { animation: none; }
+  .waves, .scene[data-rising] .foam, .lanternGlow { animation: none; }
 }
 
-.reachable { fill: none; stroke: var(--foam); stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .8; }
-.reachLabel { fill: var(--paper); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 700; letter-spacing: .06em; paint-order: stroke; stroke: color-mix(in srgb, var(--ink) 60%, transparent); stroke-width: 3px; }
+/* Dashed white over a dark under-stroke, so the outline reads on pale day water and on night water alike. */
+.reachableUnder { fill: none; stroke: var(--reach-halo); stroke-width: 3.2; opacity: .4; }
+.reachable { fill: none; stroke: #ffffff; stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .95; }
+.reachLabel { fill: var(--reach-ink); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 700; letter-spacing: .06em; paint-order: stroke; stroke: var(--reach-halo); stroke-opacity: .75; stroke-width: 3px; }
 @media (max-width: 820px) {
   .scene { max-height: 46svh; }
 }
