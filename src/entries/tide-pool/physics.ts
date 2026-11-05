@@ -21,7 +21,8 @@
  * Known limits: no added mass, no vorticity or wake interaction between parts, no
  * lift, no hydrodynamic coupling between organisms, and appendage reaction forces
  * exist only through drag. A little linear and angular damping, a speed cap and a
- * spin cap keep evolved bodies from exploiting numerical corners. Walls are soft
+ * far numerical-safety spin clamp keep evolved bodies from exploiting numerical corners;
+ * real spin is limited by a billed whole-body rotational drag. Walls are soft
  * springs with a hard clamp as a last resort.
  *
  * `organism.velocity` is the centre-of-mass velocity (internal motion cannot move
@@ -44,8 +45,15 @@ export const PHYSICS = {
   linearDamping: 0.2,
   angularDamping: 1.0,
   maxSpeed: 160,
-  /** Rad/s: a whole swimmer turning more than about half a revolution per second is not plausible at this scale. */
-  maxSpin: 3,
+  /**
+   * Whole-body rotational drag: torque = -rotDrag * visc * span^3 * |w| * w, where span is the
+   * longer side of the body's bounding box. Quadratic in spin like fast-flow drag, and cubic in
+   * size because a bigger body sweeps more water further from its centre. Its dissipated power
+   * rotDrag * visc * span^3 * |w|^3 is billed in `work`, so spinning is never free.
+   */
+  rotDrag: 0.2,
+  /** Rad/s. Numerical safety net only, far above anything rotDrag lets a body sustain: not a behavioural limit. */
+  maxSpin: 12,
   /** Wall spring (1/s^2 per unit penetration), margin from the wall, outward velocity bleed (1/s). */
   wallSpring: 300,
   wallMargin: 6,
@@ -213,6 +221,14 @@ export const stepOrganism: StepOrganism = (organism, water, dt) => {
   if (maxX > water.width - margin && vx > 0) bleedX = PHYSICS.wallBleed;
   if (minY < margin && vy < 0) bleedY = PHYSICS.wallBleed;
   if (maxY > water.height - margin && vy > 0) bleedY = PHYSICS.wallBleed;
+
+  // 5b. Whole-body rotational drag (quadratic in spin, scaled by the body's span) and its dissipation.
+  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+  const rotK = PHYSICS.rotDrag * visc * span * span * span;
+  const absOmega = Math.abs(omega);
+  torque -= rotK * absOmega * omega;
+  spinK += 2 * rotK * absOmega;
+  dissipated += rotK * absOmega * absOmega * absOmega;
 
   // 6. Semi-implicit integration of CoM velocity and spin.
   const linDen = mass + dt * dragK;

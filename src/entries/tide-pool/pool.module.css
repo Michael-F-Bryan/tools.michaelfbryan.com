@@ -34,6 +34,7 @@
 
 .inspector { width: 100%; padding: 8px 12px 10px; overflow-y: auto; }
 .inspector header { display: flex; align-items: center; gap: 6px; }
+.swatch[data-twin] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink); }
 .inspector header .swatch { margin-right: 2px; }
 .inspector h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 700; }
 .inspector h2 small { color: var(--text-muted); font-size: 12px; font-weight: 400; }

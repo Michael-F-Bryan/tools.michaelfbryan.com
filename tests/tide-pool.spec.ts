@@ -147,10 +147,12 @@ test("lineage chips show counts, lead with the largest and use distinct colours"
   const names = await chips.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label") ?? ""));
   const counts = names.map((name) => Number(/(\d+) alive/.exec(name)?.[1]));
   expect(names.every((name) => /^Lineage \d+, \d+ alive/.test(name))).toBe(true);
+  expect(names.every((name) => / · .*(segment|fin|sensor)/.test(name))).toBe(true);
   expect(counts).toEqual([...counts].sort((a, b) => b - a));
   expect(await chips.first().textContent()).toMatch(/×\d+/);
   const colours = await chips.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node.querySelector("span")!).backgroundColor));
-  expect(new Set(colours).size).toBe(colours.length);
+  const firstEight = colours.slice(0, 8);
+  expect(new Set(firstEight).size).toBe(firstEight.length);
   expect(await chips.count()).toBeLessThanOrEqual(12);
 });
 

@@ -34,6 +34,44 @@ import {
  * so a drifter starves ~100 s after birth, and the food supply sustains roughly
  * 40–100 organisms. Retune `foodEnergy` and `workCost` first once the real physics lands.
  */
+const CONTACT_CELL = 40;
+const contactPts = { ax: 0, ay: 0, bx: 0, by: 0 };
+
+/** Closest points between segments p1-q1 and p2-q2 (Ericson, Real-Time Collision Detection 5.1.9). */
+function closestOnSegments(p1: Vec2, q1: Vec2, p2: Vec2, q2: Vec2, out: typeof contactPts): void {
+  const d1x = q1.x - p1.x, d1y = q1.y - p1.y;
+  const d2x = q2.x - p2.x, d2y = q2.y - p2.y;
+  const rx = p1.x - p2.x, ry = p1.y - p2.y;
+  const a = d1x * d1x + d1y * d1y;
+  const e = d2x * d2x + d2y * d2y;
+  const f = d2x * rx + d2y * ry;
+  let s: number;
+  let t: number;
+  if (a <= 1e-9 && e <= 1e-9) { s = 0; t = 0; }
+  else if (a <= 1e-9) { s = 0; t = clamp(f / e, 0, 1); }
+  else {
+    const c = d1x * rx + d1y * ry;
+    if (e <= 1e-9) { t = 0; s = clamp(-c / a, 0, 1); }
+    else {
+      const b = d1x * d2x + d1y * d2y;
+      const denom = a * e - b * b;
+      s = denom > 1e-9 ? clamp((b * f - c * e) / denom, 0, 1) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); }
+      else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+    }
+  }
+  out.ax = p1.x + d1x * s; out.ay = p1.y + d1y * s;
+  out.bx = p2.x + d2x * t; out.by = p2.y + d2y * t;
+}
+
+/** Translate an organism rigidly, keeping its cached poses consistent with its root position. */
+function shiftOrganism(o: Organism, dx: number, dy: number): void {
+  o.position.x += dx;
+  o.position.y += dy;
+  for (const p of o.poses) { p.base.x += dx; p.base.y += dy; p.tip.x += dx; p.tip.y += dy; }
+}
+
 export const TUNING = {
   // --- Body energetics -----------------------------------------------------
   /** Energy capacity = capacityBase + capacityPerMass · mass. Bigger bodies store more, but sublinearly vs. their upkeep. */
@@ -55,6 +93,10 @@ export const TUNING = {
   crowdCost: 0.04,
   crowdCap: 8,
   crowdEverySteps: 10,
+  /** Organism-organism contact: damped spring between root-trunk capsules (stiffness 1/s^2, damping 1/s, share of overlap removed outright). */
+  contactStiffness: 400,
+  contactDamping: 14,
+  contactPush: 0.3,
   /** Seeded organisms start with this fraction of capacity. */
   startEnergy: 0.6,
 
@@ -152,6 +194,8 @@ export class World implements WorldLike {
   private readonly lineageRecords = new Map<number, LineageRecord>();
   private readonly pendingBirths: Organism[] = [];
   private readonly crowding = new Map<number, number>();
+  private contactHead = new Int32Array(0);
+  private contactNext = new Int32Array(0);
   private stepCount = 0;
   private births = 0;
   private deaths = 0;
@@ -273,7 +317,6 @@ export class World implements WorldLike {
     this.moveFood();
     this.updateScent();
     this.hashFood();
-    if (this.stepCount % TUNING.crowdEverySteps === 1) this.countCrowding();
 
     const list = this.organisms;
     let write = 0;
@@ -282,6 +325,7 @@ export class World implements WorldLike {
       if (this.stepOrganism(org)) list[write++] = org;
     }
     list.length = write;
+    this.resolveContacts();
     for (const child of this.pendingBirths) list.push(child);
     this.pendingBirths.length = 0;
 
@@ -542,21 +586,75 @@ export class World implements WorldLike {
     else if (p.y > this.height - m) { p.y = this.height - m; org.velocity.y = Math.min(0, org.velocity.y); }
   }
 
-  /** Neighbours within `crowdRadius` for every organism (capped), by mouth position. */
-  private countCrowding(): void {
+  /**
+   * Soft organism-organism contact. Each root trunk is a capsule (base to tip, radius
+   * width / 2). Overlapping capsules push apart along the closest-point normal with a damped
+   * spring on velocity (mass-weighted, so heavy bodies shove light ones) plus a small direct
+   * position correction. The number of real contacts per organism is the crowding count
+   * that `stepOrganism` bills through `crowdCost`.
+   */
+  private resolveContacts(): void {
     const list = this.organisms;
-    const r2 = TUNING.crowdRadius * TUNING.crowdRadius;
     this.crowding.clear();
+    const cell = CONTACT_CELL;
+    const cols = Math.ceil(this.width / cell);
+    const rows = Math.ceil(this.height / cell);
+    const heads = this.contactHead.length >= cols * rows ? this.contactHead : (this.contactHead = new Int32Array(cols * rows));
+    heads.fill(-1, 0, cols * rows);
+    if (this.contactNext.length < list.length) this.contactNext = new Int32Array(list.length * 2);
+    const nextIdx = this.contactNext;
     for (let i = 0; i < list.length; i++) {
-      let near = 0;
-      const a = list[i].position;
-      for (let j = 0; j < list.length && near < TUNING.crowdCap; j++) {
-        if (j === i) continue;
-        const dx = list[j].position.x - a.x;
-        const dy = list[j].position.y - a.y;
-        if (dx * dx + dy * dy <= r2) near++;
+      const o = list[i];
+      const p = o.poses[0];
+      if (!p) continue;
+      const cx = clamp(Math.floor((p.base.x + p.tip.x) * 0.5 / cell), 0, cols - 1);
+      const cy = clamp(Math.floor((p.base.y + p.tip.y) * 0.5 / cell), 0, rows - 1);
+      nextIdx[i] = heads[cy * cols + cx];
+      heads[cy * cols + cx] = i;
+    }
+    const k = TUNING.contactStiffness * DT;
+    const damp = TUNING.contactDamping * DT;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      const pa = a.poses[0];
+      if (!pa) continue;
+      const ra = Math.max(0, a.genome.parts[0].width) / 2;
+      const acx = clamp(Math.floor((pa.base.x + pa.tip.x) * 0.5 / cell), 0, cols - 1);
+      const acy = clamp(Math.floor((pa.base.y + pa.tip.y) * 0.5 / cell), 0, rows - 1);
+      for (let y = Math.max(0, acy - 1); y <= Math.min(rows - 1, acy + 1); y++) {
+        for (let x = Math.max(0, acx - 1); x <= Math.min(cols - 1, acx + 1); x++) {
+          for (let j = heads[y * cols + x]; j >= 0; j = nextIdx[j]) {
+            if (j <= i) continue;
+            const b = list[j];
+            const pb = b.poses[0];
+            const rr = ra + Math.max(0, b.genome.parts[0].width) / 2;
+            closestOnSegments(pa.base, pa.tip, pb.base, pb.tip, contactPts);
+            let nx = contactPts.bx - contactPts.ax;
+            let ny = contactPts.by - contactPts.ay;
+            const d2 = nx * nx + ny * ny;
+            if (d2 >= rr * rr) continue;
+            const d = Math.sqrt(d2);
+            if (d > 1e-6) { nx /= d; ny /= d; } else { const ang = (a.id * 2.399963 + b.id) % (2 * Math.PI); nx = Math.cos(ang); ny = Math.sin(ang); }
+            const overlap = rr - d;
+            const ma = Math.max(1e-3, a.mass);
+            const mb = Math.max(1e-3, b.mass);
+            const wa = mb / (ma + mb);
+            const wb = ma / (ma + mb);
+            // Relative approach speed along the normal (positive = closing).
+            const closing = (a.velocity.x - b.velocity.x) * nx + (a.velocity.y - b.velocity.y) * ny;
+            const impulse = k * overlap + damp * Math.max(0, closing);
+            a.velocity.x -= nx * impulse * wa;
+            a.velocity.y -= ny * impulse * wa;
+            b.velocity.x += nx * impulse * wb;
+            b.velocity.y += ny * impulse * wb;
+            const push = overlap * TUNING.contactPush;
+            shiftOrganism(a, -nx * push * wa, -ny * push * wa);
+            shiftOrganism(b, nx * push * wb, ny * push * wb);
+            this.crowding.set(a.id, Math.min(TUNING.crowdCap, (this.crowding.get(a.id) ?? 0) + 1));
+            this.crowding.set(b.id, Math.min(TUNING.crowdCap, (this.crowding.get(b.id) ?? 0) + 1));
+          }
+        }
       }
-      this.crowding.set(list[i].id, near);
     }
   }
 

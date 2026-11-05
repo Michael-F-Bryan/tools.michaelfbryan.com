@@ -13,6 +13,7 @@ import {
   type Organism,
   type StepOrganism,
 } from "../src/entries/tide-pool/types";
+import { stepOrganism } from "../src/entries/tide-pool/physics";
 import { TUNING, World } from "../src/entries/tide-pool/world";
 
 /**
@@ -188,6 +189,30 @@ test("with real physics, 20 minutes stay finite and bounded", () => {
   console.log(`real physics: 72,000 steps in ${Date.now() - started} ms; population per minute`, curve.join(","));
   expect(hasNaN(world)).toBe(false);
   assertBounded(world);
+});
+
+test("two organisms placed on the same spot are pushed apart by contact within a second", () => {
+  const world = new World(5, { foodRate: 0 }, stepOrganism);
+  world.organisms.length = 2;
+  const [a, b] = world.organisms;
+  for (const o of [a, b]) {
+    o.genome = { ...o.genome, parts: [{ ...o.genome.parts[0], amplitude: 0, frequency: 0 }] };
+    o.mass = genomeMass(o.genome);
+    o.capacity = world.capacityFor(o.mass);
+    o.energy = o.capacity * 0.3;
+    o.poses = [];
+    o.senses = [];
+    o.position = { x: 500, y: 400 };
+    o.velocity = { x: 0, y: 0 };
+    o.angularVelocity = 0;
+    o.heading = 0.3;
+  }
+  const radii = (a.genome.parts[0].width + b.genome.parts[0].width) / 2;
+  for (let i = 0; i < Math.round(1 / DT); i++) world.step();
+  expect(world.organisms).toHaveLength(2);
+  const gap = Math.hypot(a.position.x - b.position.x, a.position.y - b.position.y);
+  expect(gap).toBeGreaterThanOrEqual(radii);
+  expect(hasNaN(world)).toBe(false);
 });
 
 test("stub forager ecology: sustained at default food, collapses when food is scarce", () => {
