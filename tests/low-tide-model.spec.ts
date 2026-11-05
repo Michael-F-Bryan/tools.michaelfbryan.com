@@ -288,21 +288,28 @@ test("reach opens a band past the waterline until the turn, slower, and the tide
   const kelp = availableJobs(waded, 0).find((option) => option.resource === "kelp")!;
   expect(kelp).toMatchObject({ feasible: true, beyond: 1, duration: 30_000, floodsAt: TURN_MS });
 
-  // Raft and waders at depth 2: the wreck is two bands out at 2x time, and 56 s does not fit before the turn.
+  // A neap tide is not dead: with waders alone, a pearl one band out takes 45 s and fits at the start of the tide.
+  expect(availableJobs(waded, 0).find((option) => option.resource === "pearl")).toMatchObject({ feasible: true, beyond: 1, duration: 45_000 });
+
+  // Raft and waders at depth 2: the wreck is two bands out at 2x time, and brass (48 s) just fits before the turn.
   const rafted = withBuilt(base, ["waders", "raft"]);
   expect(reach(rafted)).toBe(2);
   const noWinch = availableJobs(rafted, 0).find((option) => option.resource === "brass")!;
-  expect(noWinch).toMatchObject({ feasible: false, blocked: "Would flood first.", beyond: 2, duration: 56_000 });
-  // With the winch it takes 28 s and fits.
+  expect(noWinch).toMatchObject({ feasible: true, beyond: 2, duration: 48_000 });
+  // Oil (52 s) does not, and neither does a pearl two bands out at depth 1 (60 s).
+  expect(availableJobs(rafted, 0).find((option) => option.resource === "oil")).toMatchObject({ feasible: false, blocked: "Would flood first.", duration: 52_000 });
+  const neap = withBuilt({ ...base, tides: [1, ...base.tides.slice(1)] }, ["waders", "raft"]);
+  expect(availableJobs(neap, 0).find((option) => option.resource === "pearl")).toMatchObject({ feasible: false, blocked: "Would flood first.", beyond: 2, duration: 60_000 });
+  // With the winch brass takes 24 s and fits.
   const winched = withBuilt(base, ["waders", "raft", "winch"]);
-  expect(availableJobs(winched, 0).find((option) => option.resource === "brass")).toMatchObject({ feasible: true, duration: 28_000 });
+  expect(availableJobs(winched, 0).find((option) => option.resource === "brass")).toMatchObject({ feasible: true, duration: 24_000 });
   let out = send(winched, 0, 3, "brass");
   expect(lastLog(out)).toContain("on the raft");
-  out = advance(out, 28_000);
+  out = advance(out, 24_000);
   expect(out.inventory.brass).toBe(1);
-  // A reached job carries the turn as its flood time (oil: 30 s base, halved by the winch, doubled on the raft).
+  // A reached job carries the turn as its flood time (oil: 26 s base, halved by the winch, doubled on the raft).
   const oil = send(winched, 0, 3, "oil");
-  expect(oil.jobs[0]).toMatchObject({ beyond: 2, floodsAt: TURN_MS, finishesAt: 30_000 });
+  expect(oil.jobs[0]).toMatchObject({ beyond: 2, floodsAt: TURN_MS, finishesAt: 26_000 });
   // Started late, it no longer fits: it waits for the next tide instead.
   const lateOil = availableJobs(advance(winched, 25_000), 0).find((option) => option.resource === "oil")!;
   expect(lateOil).toMatchObject({ feasible: false, blocked: "Would flood first.", waits: true });
@@ -311,7 +318,7 @@ test("reach opens a band past the waterline until the turn, slower, and the tide
   expect(floodTime(rafted, 1)).toBe(TURN_MS);
   // Depth 4 bare with the winch: three trips fit before the turn.
   const deep = withBuilt({ ...base, tides: [4, ...base.tides.slice(1)] }, ["winch"]);
-  expect(jobDuration(deep, 0, "brass")).toBe(14_000);
+  expect(jobDuration(deep, 0, "brass")).toBe(12_000);
 });
 
 test("structures change the rules: net, sled, winch, lantern, beacon, shelter", () => {
@@ -319,8 +326,8 @@ test("structures change the rules: net, sled, winch, lantern, beacon, shelter", 
     const run = runWhere((tides) => tides[0] === 3 && tides[3] >= 2);
     return { ...run, tides: [4, ...run.tides.slice(1)] };
   })();
-  expect(jobDuration(base, 0, "brass")).toBe(28_000);
-  expect(jobDuration(withBuilt(base, ["winch"]), 0, "brass")).toBe(14_000);
+  expect(jobDuration(base, 0, "brass")).toBe(24_000);
+  expect(jobDuration(withBuilt(base, ["winch"]), 0, "brass")).toBe(12_000);
   expect(jobDuration(withBuilt(base, ["winch"]), 0, "stone")).toBe(18_000);
 
   // The net no longer multiplies fish jobs, and the sled does not touch food.
@@ -379,7 +386,7 @@ test("a queued job waits until it can finish, then starts by itself; queue behin
   expect(busy.jobs).toHaveLength(0);
 });
 
-test("the trader takes the most valuable piece at each turn and never the last one of a kind until the final turn", () => {
+test("the trader takes the most valuable piece at each turn and leaves only the last of a kind the workbench still needs, until the final turn", () => {
   const sold = turn(at({ inventory: { pearl: 2, brass: 3 } }));
   expect(sold.inventory).toEqual({ pearl: 1, brass: 3 });
   expect(sold.sales).toEqual({ trader: 20, boat: 0, ship: 0 });
@@ -387,12 +394,31 @@ test("the trader takes the most valuable piece at each turn and never the last o
   expect(score(sold)).toBe(20);
   expect(saleLog(sold)).toMatchObject({ text: "At the turn: the trader takes 1 pearl (20).", kind: "gain" });
 
-  // The last one is kept: a brass waiting for its oil is safe.
-  const kept = turn(at({ inventory: { pearl: 1 } }));
-  expect(kept.inventory).toEqual({ pearl: 1 });
+  // No blueprint takes a pearl, so even the only one sells at the first turn.
+  const lone = turn(at({ inventory: { pearl: 1 } }));
+  expect(lone.inventory).toEqual({});
+  expect(lone.sales.trader).toBe(20);
+  expect(lone.turnSales).toEqual([20]);
+
+  // A brass and an oil are waiting for the lantern: they are safe until it stands, and the plan says so.
+  const waiting = at({ inventory: { brass: 1, oil: 1 } });
+  expect(planTrade(waiting)).toMatchObject({ total: 0, trader: [], held: ["brass", "oil"] });
+  const kept = turn(waiting);
+  expect(kept.inventory).toEqual({ brass: 1, oil: 1 });
   expect(score(kept)).toBe(0);
   expect(kept.turnSales).toEqual([0]);
   expect(saleLog(kept)).toMatchObject({ text: "At the turn: nothing to sell.", kind: "info" });
+  // Once a lantern stands, the brass is only cargo.
+  const lit = at({ built: ["lantern"], inventory: { brass: 1, oil: 1 } });
+  expect(planTrade(lit)).toMatchObject({ trader: ["brass"], held: [] });
+  expect(turn(lit).inventory).toEqual({ oil: 1 });
+  // An iron waits for the winch: the second one sells.
+  const iron = at({ inventory: { iron: 2 } });
+  expect(planTrade(iron)).toMatchObject({ trader: ["iron"], held: ["iron"] });
+  expect(turn(iron).inventory).toEqual({ iron: 1 });
+  expect(planTrade(at({ built: ["winch"], inventory: { iron: 1 } }))).toMatchObject({ trader: ["iron"], held: [] });
+  // A lantern spent into the beacon is done with: nothing waits for it any more.
+  expect(planTrade(at({ built: ["bellTower", "beacon"], inventory: { brass: 1 } }))).toMatchObject({ held: [] });
 
   // Building stock never sells, whatever the amount.
   const stock = turn(at({ inventory: { driftwood: 9, kelp: 9, rope: 4, brick: 4, clay: 3 } }));
@@ -406,21 +432,23 @@ test("the trader takes the most valuable piece at each turn and never the last o
 });
 
 test("the ship buys one of every kind once the beacon stands, before the trader chooses", () => {
-  const state = at({ built: ["beacon"], inventory: { pearl: 2, brass: 2, iron: 2, oil: 2, salt: 2 } });
+  const state = at({ built: ["beacon", "winch"], inventory: { pearl: 1, brass: 1, iron: 1, oil: 1, salt: 1 } });
   const plan = planTrade(state);
   expect(plan.ship).toEqual(["pearl", "brass", "iron", "oil", "salt"]);
   expect(plan.trader).toEqual([]);
   expect(plan.total).toBe(62);
   const sold = turn(state);
   expect(sold.sales).toEqual({ trader: 0, boat: 0, ship: 62 });
-  expect(sold.inventory).toEqual({ pearl: 1, brass: 1, iron: 1, oil: 1, salt: 1 });
+  expect(sold.inventory).toEqual({});
   expect(saleLog(sold)?.text).toContain("the ship buys pearl, brass, iron, oil, salt (62)");
 
   // Surplus goes to the trader after the ship has had its one of each.
   const more = planTrade(at({ built: ["beacon"], inventory: { pearl: 3, brass: 1 } }));
-  expect(more.ship).toEqual(["pearl"]);
+  expect(more.ship).toEqual(["pearl", "brass"]);
   expect(more.trader).toEqual(["pearl"]);
-  expect(more.held).toEqual(["brass"]);
+  expect(more.held).toEqual([]);
+  // The workbench still holds back an iron without a winch, even from the ship.
+  expect(planTrade(at({ built: ["beacon"], inventory: { iron: 1 } }))).toMatchObject({ ship: [], held: ["iron"] });
 });
 
 test("the boat carries the next most valuable pieces after the trader, ties by cargo order", () => {
@@ -431,8 +459,9 @@ test("the boat carries the next most valuable pieces after the trader, ties by c
 
   const mixed = planTrade(at({ built: ["boat"], inventory: { pearl: 2, brass: 3, iron: 3, oil: 3 } }));
   expect(mixed.trader).toEqual(["pearl"]);
-  expect(mixed.boat).toEqual(["brass", "brass", "iron"]);
-  expect(mixed.value).toEqual({ ship: 0, trader: 20, boat: 12 + 12 + 10 });
+  expect(mixed.boat).toEqual(["pearl", "brass", "brass"]);
+  expect(mixed.held).toEqual(["brass", "iron", "oil"]);
+  expect(mixed.value).toEqual({ ship: 0, trader: 20, boat: 20 + 12 + 12 });
   expect(planTrade(at({ built: ["boat", "beacon"], inventory: {} }))).toMatchObject({ total: 0, ship: [], trader: [], boat: [] });
 });
 
@@ -491,12 +520,12 @@ test("a saltworks adds a salt at every turn, and the saltworks needs a kiln; bui
   expect(state.inventory.clay).toBeUndefined();
   expect(state.inventory.driftwood).toBe(3);
   state = { ...state, food: 20 };
-  // Two turns: one salt each. The first is kept, the second lets the trader take one.
+  // Two turns: one salt each, and no blueprint needs salt, so the trader takes each at once.
   state = advance(state, 2 * TIDE_MS);
   expect(state.tide).toBe(2);
-  expect(state.inventory.salt).toBe(1);
-  expect(state.sales.trader).toBe(10);
-  expect(state.turnSales).toEqual([0, 10]);
+  expect(state.inventory.salt).toBeUndefined();
+  expect(state.sales.trader).toBe(20);
+  expect(state.turnSales).toEqual([10, 10]);
 
   state = build(state, "hull");
   state = build(state, "sail");

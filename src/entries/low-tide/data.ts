@@ -78,10 +78,12 @@ export const RESOURCES: Record<Resource, ResourceInfo> = {
   clams: { band: 1, duration: 20_000, yield: 3, food: true, label: "Clams" },
   kelp: { band: 2, duration: 20_000, yield: 1, food: false, label: "Kelp" },
   fish: { band: 2, duration: 24_000, yield: 4, food: true, label: "Fish" },
-  pearl: { band: 2, duration: 36_000, yield: 1, food: false, label: "Pearl" },
-  brass: { band: 3, duration: 28_000, yield: 1, food: false, label: "Brass" },
-  iron: { band: 3, duration: 28_000, yield: 1, food: false, label: "Iron" },
-  oil: { band: 3, duration: 30_000, yield: 1, food: false, label: "Oil" },
+  // Cargo durations are deliberate: they keep a neap tide (depth 1-2) from being dead. Trips per crew in the
+  // 50 s window, as bare / waders / raft (winch in brackets): pearl 1/1/0; brass and iron 2(4)/1(2)/1(2); oil 1(3)/1(2)/0(1).
+  pearl: { band: 2, duration: 30_000, yield: 1, food: false, label: "Pearl" },
+  brass: { band: 3, duration: 24_000, yield: 1, food: false, label: "Brass" },
+  iron: { band: 3, duration: 24_000, yield: 1, food: false, label: "Iron" },
+  oil: { band: 3, duration: 26_000, yield: 1, food: false, label: "Oil" },
 };
 
 export const RESOURCES_BY_BAND: Record<Band, readonly Resource[]> = {
@@ -270,7 +272,8 @@ export const BUILT_LABELS: Record<Built, string> = {
 /**
  * What sells at the turn, in tie-break order. Shingle and mudflat goods, rope,
  * brick and kelp are building stock and never sell: every blueprint input is
- * either one of these (protected by the keep-last-one rule) or not cargo at all.
+ * either one of these or not cargo at all. Brass, oil and iron are blueprint inputs, so
+ * `planTrade` holds back the last of each until the plan that needs it is built.
  */
 export const CARGO = ["pearl", "brass", "iron", "oil", "salt"] as const satisfies readonly Item[];
 export type Cargo = (typeof CARGO)[number];
