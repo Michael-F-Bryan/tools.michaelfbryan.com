@@ -109,18 +109,22 @@ export const TUNING = {
   initialFood: 90,
   /** Uneaten food dissolves after this many seconds, keeping the pool from silting up. */
   foodLifetime: 300,
-  /** Share of new food that appears near a patch rather than uniformly. */
+  /**
+   * Share of the nominal food rate that is emitted by patches rather than scattered uniformly.
+   * Patch output is absolute in stock (see spawnFood), so total food depends on stock: that is the
+   * point. The remaining (1 - patchShare) is scattered regardless and is the famine floor.
+   */
   patchShare: 0.85,
   /** Number of drifting rich patches, their radius range, and wander speed (units/s). */
   patchCount: 4,
   patchRadius: [60, 90] as const,
   patchSpeed: 3,
-  /** Each meal taken inside a patch removes this much of its stock (0..1); spawn weight is proportional to stock. */
+  /** Each meal taken inside a patch removes this much of its stock (0..1); the patch's spawn rate is proportional to its stock. */
   patchGrazePerMeal: 0.04,
   /** Logistic regrowth rate (1/s) of stock: slow, so a grazed-down patch takes minutes to come back. */
   patchRecovery: 0.02,
-  /** Stock never falls below this, since logistic regrowth cannot restart from exactly zero. */
-  patchMinStock: 0.03,
+  /** Stock never falls below this; high enough that logistic regrowth from the floor (~0.0015/s) is meaningful. */
+  patchMinStock: 0.08,
   /** Keep patches this far from the walls when seeding. */
   patchMargin: 80,
   /** Distance from the wall that food and spawns keep. */
@@ -453,28 +457,36 @@ export class World implements WorldLike {
     });
   }
 
+  /** Integer count with the given expectation (floor plus a Bernoulli on the remainder). */
+  private stochasticCount(expected: number): number {
+    return Math.floor(expected) + (this.rng.chance(expected % 1) ? 1 : 0);
+  }
+
+  /**
+   * Food spawning is ABSOLUTE in patch stock. The scattered share arrives uniformly regardless of
+   * stock (the famine floor); each patch independently contributes
+   * foodRate * patchShare * DT * stock / patchCount, so full patches reproduce the nominal rate
+   * while a grazed-down patch really goes quiet and total food falls when every patch is depleted.
+   */
   private spawnFood(): void {
-    const expected = this.env.foodRate * DT;
-    let n = Math.floor(expected) + (this.rng.chance(expected % 1) ? 1 : 0);
-    while (n-- > 0 && this.food.length < MAX_FOOD) this.spawnOneFood();
-  }
-
-  /** Choose a patch with probability proportional to its remaining stock. */
-  private pickPatchByStock(): FoodPatch {
-    let total = 0;
-    for (const p of this.patches) total += p.stock;
-    let r = this.rng.float() * total;
-    for (const p of this.patches) {
-      r -= p.stock;
-      if (r <= 0) return p;
+    const n = this.patches.length;
+    const share = n > 0 ? TUNING.patchShare : 0;
+    const scattered = this.stochasticCount(this.env.foodRate * (1 - share) * DT);
+    for (let i = 0; i < scattered && this.food.length < MAX_FOOD; i++) {
+      this.addFood(this.rng.range(0, this.width), this.rng.range(0, this.height));
     }
-    return this.patches[this.patches.length - 1];
+    for (const patch of this.patches) {
+      const count = this.stochasticCount((this.env.foodRate * share * DT * patch.stock) / n);
+      for (let i = 0; i < count && this.food.length < MAX_FOOD; i++) {
+        this.addFood(patch.position.x + this.rng.gaussian() * patch.radius * 0.5, patch.position.y + this.rng.gaussian() * patch.radius * 0.5);
+      }
+    }
   }
 
-  /** One particle: mostly clustered around a patch, otherwise scattered uniformly. */
+  /** One seed particle (initial food only): patch-clustered with the patch share, otherwise scattered. */
   private spawnOneFood(): void {
-    if (this.rng.chance(TUNING.patchShare) && this.patches.length > 0) {
-      const patch = this.pickPatchByStock();
+    if (this.patches.length > 0 && this.rng.chance(TUNING.patchShare)) {
+      const patch = this.patches[Math.floor(this.rng.float() * this.patches.length) % this.patches.length];
       this.addFood(patch.position.x + this.rng.gaussian() * patch.radius * 0.5, patch.position.y + this.rng.gaussian() * patch.radius * 0.5);
     } else {
       this.addFood(this.rng.range(0, this.width), this.rng.range(0, this.height));
