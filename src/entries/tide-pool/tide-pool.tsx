@@ -34,6 +34,8 @@ const DRAG_THRESHOLD = 6;
 /** On narrow viewports the camera re-centres on the population after this long without a user pan. */
 const AUTO_CENTRE_IDLE_MS = 6000;
 const FOLLOW_ZOOM = 2;
+/** Real milliseconds the Meals value stays accented after the inspected organism eats. */
+const FED_ROW_MS = 2000;
 const CHIP_LIMIT = 12;
 const TAKEOVER_SHARE = 0.6;
 const DOMINANT_MARK_SHARE = 0.4;
@@ -726,6 +728,19 @@ export function TidePool() {
 
   const selectedLineage = inspected?.lineage;
   const energyShare = inspected && inspected.capacity > 0 ? Math.max(0, Math.min(1, inspected.energy / inspected.capacity)) : 0;
+  // A completed meal accents the Meals value for two real seconds (the engine's count is only read, never changed).
+  const [fedAt, setFedAt] = useState(0);
+  const mealsSeen = useRef<{ id: number; meals: number } | null>(null);
+  const inspectedId = inspected?.id ?? null;
+  const inspectedMeals = inspected?.meals ?? 0;
+  useEffect(() => {
+    const seen = mealsSeen.current;
+    mealsSeen.current = inspectedId === null ? null : { id: inspectedId, meals: inspectedMeals };
+    if (!seen || seen.id !== inspectedId || inspectedMeals <= seen.meals) return;
+    setFedAt(performance.now());
+    const timer = window.setTimeout(() => setFedAt(0), FED_ROW_MS);
+    return () => window.clearTimeout(timer);
+  }, [inspectedId, inspectedMeals]);
   const mealsPerMinute = inspected && inspected.age >= 1 ? ((inspected.meals / inspected.age) * 60).toFixed(1) : "–";
   const takeover = readout.takeover && readout.takeover.share >= TAKEOVER_SHARE ? readout.takeover : null;
 
@@ -859,7 +874,7 @@ export function TidePool() {
                     </div>
                     <div>
                       <dt>Meals</dt>
-                      <dd>{inspected.meals}</dd>
+                      <dd key={fedAt} className={styles.meals} data-fed={fedAt > 0 ? "" : undefined}>{inspected.meals}</dd>
                     </div>
                     <div>
                       <dt>Offspring</dt>
