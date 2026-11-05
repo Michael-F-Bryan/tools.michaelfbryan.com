@@ -10,10 +10,10 @@ export const MUTATION = {
   /** Move a part along its parent / change side / rest angle (not a topology change). */
   reattach: 0.05,
   /** Structural operators; each one changes topology (new lineage). */
-  addPart: 0.035,
-  removePart: 0.03,
-  changeKind: 0.02,
-  duplicateMirrored: 0.03,
+  addPart: 0.05,
+  removePart: 0.04,
+  changeKind: 0.03,
+  duplicateMirrored: 0.04,
   /** Hue drift in degrees (uniform ±) per ordinary / per topology-changing mutation. */
   hueDrift: 4,
   hueJump: 25,
@@ -28,7 +28,8 @@ type Range = { min: number; max: number };
 const SIZE: Record<PartKind, { length: Range; width: Range }> = {
   trunk: { length: { min: 4, max: 60 }, width: { min: 2, max: 16 } },
   fin: { length: { min: 4, max: 60 }, width: { min: 2, max: 16 } },
-  sensor: { length: { min: 3, max: 8 }, width: { min: 1, max: 2 } },
+  // Scent cells are ~10 units wide, so a stalk must be able to reach well past that to sample a different cell.
+  sensor: { length: { min: 3, max: 25 }, width: { min: 1, max: 2 } },
 };
 const WEIGHT_LIMIT = 2;
 const TAU = Math.PI * 2;
@@ -83,7 +84,7 @@ export function validateGenome(genome: Genome): string | null {
     if (p.length <= 0 || p.width <= 0) return `size at ${i}`;
     if (p.skew <= 0 || p.skew >= 1 || p.feather < 0 || p.feather >= 1 || p.amplitude < 0) return `oscillator at ${i}`;
     for (const w of [p.ampWeights, p.freqWeights]) {
-      if (w.length !== sensors + 1) return `weights misaligned at ${i}`;
+      if (w.length !== 2 * sensors + 1) return `weights misaligned at ${i}`;
       if (!w.every(Number.isFinite)) return `non-finite weight at ${i}`;
     }
   }
@@ -142,9 +143,10 @@ function randomOscillator(rng: Rng) {
   };
 }
 
+/** Weights over [readings (n), rates (n), bias]: length 2n + 1. */
 function randomWeights(rng: Rng, sensors: number): number[] {
   const w: number[] = [];
-  for (let i = 0; i < sensors; i++) w.push(rng.gaussian() * 0.3);
+  for (let i = 0; i < 2 * sensors; i++) w.push(rng.gaussian() * 0.3);
   w.push(rng.gaussian() * 0.1); // bias stays small so bodies keep their rest rhythm
   return w;
 }
@@ -161,7 +163,7 @@ function newPart(rng: Rng, id: number, kind: PartKind, parent: number, sensors: 
   const size = SIZE[kind];
   const osc = randomOscillator(rng);
   if (kind === "sensor") osc.amplitude = 0;
-  const length = kind === "sensor" ? rng.range(3, 8) : kind === "fin" ? rng.range(8, 28) : rng.range(8, 24);
+  const length = kind === "sensor" ? rng.range(4, 14) : kind === "fin" ? rng.range(8, 28) : rng.range(8, 24);
   const width = kind === "sensor" ? rng.range(1, 2) : kind === "fin" ? rng.range(2, 8) : rng.range(3, 9);
   return {
     id,
@@ -171,8 +173,8 @@ function newPart(rng: Rng, id: number, kind: PartKind, parent: number, sensors: 
     length: clamp(length, size.length.min, size.length.max),
     width: clamp(width, size.width.min, size.width.max),
     ...osc,
-    ampWeights: zeros(sensors + 1),
-    freqWeights: zeros(sensors + 1),
+    ampWeights: zeros(2 * sensors + 1),
+    freqWeights: zeros(2 * sensors + 1),
   };
 }
 
@@ -217,8 +219,8 @@ export function randomGenome(rng: Rng): Genome {
   const genome: Genome = { parts, hue: rng.range(0, 360), reproduceAt: rng.range(0.6, 0.95) };
   for (const p of parts) {
     const moving = p.kind !== "sensor" && p.parent !== -1;
-    p.ampWeights = moving ? randomWeights(rng, sensors) : zeros(sensors + 1);
-    p.freqWeights = moving ? randomWeights(rng, sensors) : zeros(sensors + 1);
+    p.ampWeights = moving ? randomWeights(rng, sensors) : zeros(2 * sensors + 1);
+    p.freqWeights = moving ? randomWeights(rng, sensors) : zeros(2 * sensors + 1);
   }
   return genome;
 }
@@ -229,19 +231,22 @@ export function randomGenome(rng: Rng): Genome {
 
 /**
  * Re-align every part's weight arrays after the sensor set changed. `before` is the
- * sensor id order the arrays were written against. Surviving columns keep their
- * values, new sensors get small random weights, removed sensors lose their column.
+ * sensor id order the arrays were written against. Arrays are laid out as
+ * [reading weights (n), rate weights (n), bias]; surviving sensors keep both of their
+ * columns, new sensors get small random weights in both, removed sensors lose theirs.
  */
 function realign(parts: PartGene[], before: readonly number[], rng: Rng): void {
   const after = sensorIds(parts);
   if (after.length === before.length && after.every((id, i) => id === before[i])) return;
   const remap = (old: number[], moving: boolean) => {
-    const out = after.map(id => {
-      const at = before.indexOf(id);
-      if (at >= 0) return old[at] ?? 0;
-      return moving ? rng.gaussian() * 0.3 : 0;
-    });
-    out.push(old[before.length] ?? 0);
+    const out: number[] = [];
+    for (const offset of [0, before.length]) {
+      for (const id of after) {
+        const at = before.indexOf(id);
+        out.push(at >= 0 ? (old[offset + at] ?? 0) : moving ? rng.gaussian() * 0.3 : 0);
+      }
+    }
+    out.push(old[2 * before.length] ?? 0);
     return out;
   };
   for (const p of parts) {
@@ -269,7 +274,8 @@ function perturbPart(p: PartGene, rng: Rng): void {
   const count = 1 + rng.int(2);
   for (let i = 0; i < count; i++) {
     switch (rng.pick(fields)) {
-      case "length": p.length = jitter(p.length, 0.12, rng); break;
+      // Sensor stalks change faster so evolution can reach out of a single scent cell.
+      case "length": p.length = jitter(p.length, p.kind === "sensor" ? 0.25 : 0.12, rng); break;
       case "width": p.width = jitter(p.width, 0.12, rng); break;
       case "angle": p.angle = wrapAngle(p.angle + rng.gaussian() * 0.2); break;
       case "anchor": p.anchor = clamp(p.anchor + rng.gaussian() * 0.1, 0, 1); break;
@@ -342,7 +348,7 @@ function changeKind(g: Genome, rng: Rng): boolean {
   p.kind = kind;
   if (kind === "sensor") {
     p.amplitude = 0;
-    p.length = rng.range(3, 8);
+    p.length = rng.range(4, 14);
     p.width = rng.range(1, 2);
   } else {
     if (p.amplitude === 0) p.amplitude = rng.range(0, 0.8);

@@ -3,8 +3,22 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 
 import { describeGenome } from "./genome";
-import { PoolRenderer, computeLayout, drawGenomeGlyph, readPalette, toWorld, type Layout, type UiState } from "./renderer";
-import { DEFAULT_ENVIRONMENT, DT, POOL_HEIGHT, POOL_WIDTH, type Environment, type Genome, type WorldLike } from "./types";
+import {
+  PoolRenderer,
+  baseScale,
+  clampCamera,
+  computeLayout,
+  drawAnatomy,
+  lineageColour,
+  organismColour,
+  readPalette,
+  toWorld,
+  type Camera,
+  type Layout,
+  type Palette,
+  type UiState,
+} from "./renderer";
+import { DEFAULT_ENVIRONMENT, DT, POOL_HEIGHT, POOL_WIDTH, type Environment, type Genome, type Organism, type Stats, type WorldLike } from "./types";
 import { World } from "./world";
 import styles from "./pool.module.css";
 
@@ -12,25 +26,41 @@ const SPEEDS = [1, 4, 16] as const;
 const MAX_STEPS_PER_FRAME = 16;
 const CAPTION_SECONDS = 20;
 const PICK_RADIUS = 14;
+const TOUCH_PICK_PIXELS = 20;
+const DRAG_THRESHOLD = 6;
+const FOLLOW_ZOOM = 2;
+const CHIP_LIMIT = 12;
+const TAKEOVER_SHARE = 0.6;
+const DOMINANT_MARK_SHARE = 0.4;
+const TICK_MS = 125;
+const MIN_INSPECT_AGE = 20;
+const EMPTY_AFTER = 10;
 
-type Readout = { population: number; lineages: number; food: number; clock: string };
-type LineageChip = { id: number; hue: number; count: number };
+/** Engine statistics the UI reads when present; computed here when absent. */
+type ExtraStats = { dominantLineage?: number; dominantShare?: number; extinct?: boolean };
+
+type Takeover = { id: number; share: number };
+type Readout = { population: number; lineages: number; food: number; clock: string; speed: string; extinct: boolean; takeover: Takeover | null };
+type LineageChip = { id: number; count: number };
 type Inspected = {
   id: number;
+  organism: Organism;
   lineage: number;
-  hue: number;
+  parentLineage: number;
+  genomeHue: number;
   generation: number;
   description: string;
   genome: Genome;
   energy: number;
   capacity: number;
   age: number;
+  speed: number;
   meals: number;
   offspring: number;
   cause: "alive" | "starved" | "age" | "unknown";
 };
 
-const EMPTY_READOUT: Readout = { population: 0, lineages: 0, food: 0, clock: "00:00" };
+const EMPTY_READOUT: Readout = { population: 0, lineages: 0, food: 0, clock: "00:00", speed: "0.0", extinct: false, takeover: null };
 
 const ENVIRONMENT_CONTROLS: readonly {
   key: "foodRate" | "currentStrength" | "temperature" | "viscosity";
@@ -65,17 +95,25 @@ function newSeed(): number {
   return Math.floor(Math.random() * 0x7fffffff);
 }
 
-function swatch(hue: number): string {
-  return `hsl(${Math.round(hue)}, 55%, 50%)`;
-}
-
-function mostSuccessful(world: WorldLike, lineage?: number) {
-  let best;
+/**
+ * The best forager among organisms old enough for the rate to mean something
+ * (meals per second alive), falling back to the most meals when all are young.
+ */
+function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefined {
+  let veteran: Organism | undefined;
+  let veteranRate = -1;
+  let fallback: Organism | undefined;
   for (const organism of world.organisms) {
     if (lineage !== undefined && organism.lineage !== lineage) continue;
-    if (!best || organism.meals > best.meals || (organism.meals === best.meals && organism.energy > best.energy)) best = organism;
+    if (!fallback || organism.meals > fallback.meals || (organism.meals === fallback.meals && organism.energy > fallback.energy)) fallback = organism;
+    if (organism.age <= MIN_INSPECT_AGE) continue;
+    const rate = organism.meals / organism.age;
+    if (!veteran || rate > veteranRate || (rate === veteranRate && organism.energy > veteran.energy)) {
+      veteran = organism;
+      veteranRate = rate;
+    }
   }
-  return best;
+  return veteran ?? fallback;
 }
 
 function snapshot(world: WorldLike, id: number, previous: Inspected | null): Inspected | null {
@@ -83,14 +121,17 @@ function snapshot(world: WorldLike, id: number, previous: Inspected | null): Ins
   if (organism) {
     return {
       id,
+      organism,
       lineage: organism.lineage,
-      hue: organism.genome.hue,
+      parentLineage: organism.parentLineage,
+      genomeHue: organism.genome.hue,
       generation: organism.generation,
       description: previous?.id === id ? previous.description : describeGenome(organism.genome),
       genome: organism.genome,
       energy: organism.energy,
       capacity: organism.capacity,
       age: organism.age,
+      speed: Math.hypot(organism.velocity.x, organism.velocity.y),
       meals: organism.meals,
       offspring: organism.offspring,
       cause: "alive",
@@ -102,48 +143,93 @@ function snapshot(world: WorldLike, id: number, previous: Inspected | null): Ins
   for (const event of world.events) {
     if (event.kind === "death" && event.organism === id) cause = event.cause;
   }
-  return { ...previous, energy: cause === "starved" ? 0 : previous.energy, cause };
+  return { ...previous, speed: 0, energy: cause === "starved" ? 0 : previous.energy, cause };
 }
 
-function drawSparkline(canvas: HTMLCanvasElement, world: WorldLike, accent: string, muted: string) {
+type ChartColours = { speed: string; lineages: string; population: string; rule: string };
+
+function chartColours(): ChartColours {
+  const tokens = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) => tokens.getPropertyValue(name).trim() || fallback;
+  return {
+    speed: token("--accent", "#164dcc"),
+    lineages: token("--ink", "#17191d"),
+    population: token("--rule", "#848d98"),
+    rule: token("--rule-subtle", "#c7ccd2"),
+  };
+}
+
+/** Population as a faint area, living lineages as a stepped line, mean speed as the accent line; each on its own scale. */
+function drawHistory(canvas: HTMLCanvasElement, world: WorldLike, colours: ChartColours) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = Math.min(devicePixelRatio || 1, 2);
   const width = canvas.clientWidth, height = canvas.clientHeight;
   if (!width || !height) return;
-  if (canvas.width !== Math.round(width * dpr)) {
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  const history = world.history;
-  ctx.strokeStyle = muted;
-  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = colours.rule;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, height - 0.5);
   ctx.lineTo(width, height - 0.5);
   ctx.stroke();
-  ctx.globalAlpha = 1;
+  const history = world.history;
   if (history.length < 2) return;
-  let max = 1;
-  for (const entry of history) max = Math.max(max, entry.population);
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 1.5;
+  let maxPopulation = 10, maxLineages = 4, maxSpeed = 1;
+  for (const entry of history) {
+    maxPopulation = Math.max(maxPopulation, entry.population);
+    maxLineages = Math.max(maxLineages, entry.lineages);
+    maxSpeed = Math.max(maxSpeed, entry.meanSpeed);
+  }
+  const last = history.length - 1;
+  const span = height - 5;
+  const px = (i: number) => (i / last) * (width - 2) + 1;
+  const py = (value: number, max: number) => height - 2 - (value / max) * span;
+
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = colours.population;
+  ctx.beginPath();
+  ctx.moveTo(px(0), height - 1);
+  for (let i = 0; i <= last; i++) ctx.lineTo(px(i), py(history[i].population, maxPopulation));
+  ctx.lineTo(px(last), height - 1);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.globalAlpha = 0.85;
+  ctx.strokeStyle = colours.lineages;
+  ctx.lineWidth = 1.2;
+  ctx.lineJoin = "miter";
+  ctx.beginPath();
+  for (let i = 0; i <= last; i++) {
+    const y = py(history[i].lineages, maxLineages);
+    if (i === 0) ctx.moveTo(px(0), y);
+    else {
+      ctx.lineTo(px(i), py(history[i - 1].lineages, maxLineages));
+      ctx.lineTo(px(i), y);
+    }
+  }
+  ctx.stroke();
+
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = colours.speed;
+  ctx.lineWidth = 1.6;
   ctx.lineJoin = "round";
   ctx.beginPath();
-  const last = history.length - 1;
   for (let i = 0; i <= last; i++) {
-    const x = (i / last) * (width - 2) + 1;
-    const y = height - 2 - (history[i].population / max) * (height - 5);
+    const x = px(i), y = py(history[i].meanSpeed, maxSpeed);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
 }
 
-function Glyph({ genome, themeVersion }: { genome: Genome; themeVersion: number }) {
+/** The inspected organism's anatomy, redrawn every frame from its live poses in a head-right frame. */
+function Anatomy({ organism, themeVersion }: { organism: Organism; themeVersion: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -153,26 +239,42 @@ function Glyph({ genome, themeVersion }: { genome: Genome; themeVersion: number 
     const dpr = Math.min(devicePixelRatio || 1, 3);
     canvas.width = Math.round(size * dpr);
     canvas.height = Math.round(size * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size, size);
-    drawGenomeGlyph(ctx, genome, size, readPalette());
-  }, [genome, themeVersion]);
+    const palette: Palette = readPalette();
+    let frameId = 0;
+    const draw = () => {
+      frameId = requestAnimationFrame(draw);
+      if (document.hidden) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size, size);
+      drawAnatomy(ctx, organism.genome, size, palette, { poses: organism.poses, senses: organism.senses, lineage: organism.lineage });
+    };
+    frameId = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frameId);
+  }, [organism, themeVersion]);
   return <canvas ref={ref} className={styles.glyph} role="img" aria-label="Anatomy" />;
 }
 
 export function TidePool() {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sparkRef = useRef<HTMLCanvasElement>(null);
+  const chartRef = useRef<HTMLCanvasElement>(null);
   const inspectButtonRef = useRef<HTMLButtonElement>(null);
   const worldRef = useRef<WorldLike | null>(null);
   const rendererRef = useRef<PoolRenderer | null>(null);
   const layoutRef = useRef<Layout>(computeLayout(POOL_WIDTH, POOL_HEIGHT, 1));
-  const uiRef = useRef<UiState>({ selectedId: null, hoverId: null });
+  const sizeRef = useRef({ width: POOL_WIDTH, height: POOL_HEIGHT, dpr: 1, cover: false });
+  const cameraRef = useRef<Camera>({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2, zoom: 1 });
+  const panRef = useRef({ cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2 });
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
+  const uiRef = useRef<UiState>({ selectedId: null, hoverId: null, following: false });
   const envRef = useRef<Environment>({ ...DEFAULT_ENVIRONMENT });
   const speedRef = useRef(1);
   const pausedRef = useRef(false);
+  const reducedRef = useRef(false);
   const inspectedRef = useRef<Inspected | null>(null);
+  const dominantRef = useRef<Takeover | null>(null);
+  const chartColoursRef = useRef<ChartColours | null>(null);
 
   const prefersReducedMotion = useSyncExternalStore(subscribeReducedMotion, () => matchMedia(REDUCED_MOTION).matches, () => false);
   const [userPaused, setUserPaused] = useState<boolean | null>(null);
@@ -181,68 +283,115 @@ export function TidePool() {
   const [envOpen, setEnvOpen] = useState(false);
   const [env, setEnv] = useState<Environment>({ ...DEFAULT_ENVIRONMENT });
   const [readout, setReadout] = useState<Readout>(EMPTY_READOUT);
-  const [lineages, setLineages] = useState<LineageChip[]>([]);
+  const [chips, setChips] = useState<{ visible: LineageChip[]; more: number }>({ visible: [], more: 0 });
   const [inspected, setInspected] = useState<Inspected | null>(null);
+  const [following, setFollowing] = useState(false);
   const [showCaption, setShowCaption] = useState(true);
   const [themeVersion, setThemeVersion] = useState(0);
+  const [dark, setDark] = useState(false);
   const idBase = useId();
 
   useEffect(() => {
     pausedRef.current = paused;
-  }, [paused]);
+    reducedRef.current = prefersReducedMotion;
+  }, [paused, prefersReducedMotion]);
 
-  const refresh = useCallback((full: boolean) => {
+  const refresh = useCallback((level: "inspector" | "readouts" | "chips") => {
     const world = worldRef.current;
     if (!world) return;
-    const next: Readout = {
-      population: world.organisms.length,
-      lineages: world.stats.lineages,
-      food: world.food.length,
-      clock: formatClock(world.time),
-    };
-    setReadout((prev) => (prev.population === next.population && prev.lineages === next.lineages && prev.food === next.food && prev.clock === next.clock ? prev : next));
-    setShowCaption(world.time < CAPTION_SECONDS);
     if (uiRef.current.selectedId !== null) {
       const updated = snapshot(world, uiRef.current.selectedId, inspectedRef.current);
       inspectedRef.current = updated;
       setInspected(updated);
+      if (updated && updated.cause !== "alive" && uiRef.current.following) {
+        panRef.current = { cx: cameraRef.current.cx, cy: cameraRef.current.cy };
+        uiRef.current.following = false;
+        setFollowing(false);
+      }
     }
-    if (full) {
-      const chips = world
+    if (level === "inspector") return;
+
+    if (level === "chips") {
+      const alive = world
         .lineages()
         .filter((lineage) => lineage.count > 0)
-        .sort((a, b) => b.count - a.count || a.id - b.id)
-        .slice(0, 16)
-        .map((lineage) => ({ id: lineage.id, hue: lineage.hue, count: lineage.count }));
-      setLineages(chips);
+        .sort((a, b) => b.count - a.count || a.id - b.id);
+      setChips({ visible: alive.slice(0, CHIP_LIMIT).map((lineage) => ({ id: lineage.id, count: lineage.count })), more: Math.max(0, alive.length - CHIP_LIMIT) });
+      const population = world.organisms.length;
+      dominantRef.current = alive.length && population > 0 ? { id: alive[0].id, share: alive[0].count / population } : null;
     }
-    const spark = sparkRef.current;
-    if (spark) {
-      const tokens = getComputedStyle(document.documentElement);
-      drawSparkline(spark, world, tokens.getPropertyValue("--accent").trim() || "#164dcc", tokens.getPropertyValue("--rule").trim() || "#848d98");
+    const stats = world.stats as Stats & ExtraStats;
+    const population = world.organisms.length;
+    const takeover =
+      stats.dominantShare !== undefined && stats.dominantLineage !== undefined && stats.dominantShare > 0
+        ? { id: stats.dominantLineage, share: stats.dominantShare }
+        : dominantRef.current;
+    const next: Readout = {
+      population,
+      lineages: stats.lineages,
+      food: world.food.length,
+      clock: formatClock(world.time),
+      speed: stats.meanSpeed.toFixed(1),
+      extinct: stats.extinct ?? (population === 0 && world.time > EMPTY_AFTER),
+      takeover: takeover && takeover.share >= DOMINANT_MARK_SHARE ? takeover : null,
+    };
+    setReadout((prev) =>
+      prev.population === next.population &&
+      prev.lineages === next.lineages &&
+      prev.food === next.food &&
+      prev.clock === next.clock &&
+      prev.speed === next.speed &&
+      prev.extinct === next.extinct &&
+      prev.takeover?.id === next.takeover?.id &&
+      Math.round((prev.takeover?.share ?? 0) * 100) === Math.round((next.takeover?.share ?? 0) * 100)
+        ? prev
+        : next,
+    );
+    setShowCaption(world.time < CAPTION_SECONDS);
+    const chart = chartRef.current;
+    if (chart) {
+      chartColoursRef.current ??= chartColours();
+      drawHistory(chart, world, chartColoursRef.current);
     }
   }, []);
 
-  const select = useCallback((id: number | null) => {
-    const world = worldRef.current;
-    uiRef.current.selectedId = id;
-    if (id === null || !world) {
-      inspectedRef.current = null;
-      setInspected(null);
-      return;
-    }
-    const next = snapshot(world, id, null);
-    inspectedRef.current = next;
-    setInspected(next);
+  const resetCamera = useCallback(() => {
+    cameraRef.current = { cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2, zoom: 1 };
+    panRef.current = { cx: POOL_WIDTH / 2, cy: POOL_HEIGHT / 2 };
   }, []);
+
+  const setFollow = useCallback((on: boolean) => {
+    if (!on) panRef.current = { cx: cameraRef.current.cx, cy: cameraRef.current.cy };
+    uiRef.current.following = on;
+    setFollowing(on);
+  }, []);
+
+  const select = useCallback(
+    (id: number | null) => {
+      const world = worldRef.current;
+      uiRef.current.selectedId = id;
+      if (id === null || !world) {
+        inspectedRef.current = null;
+        setInspected(null);
+        setFollow(false);
+        return;
+      }
+      const next = snapshot(world, id, null);
+      inspectedRef.current = next;
+      setInspected(next);
+    },
+    [setFollow],
+  );
 
   const startPool = useCallback(() => {
     worldRef.current = new World(newSeed(), { ...envRef.current });
     uiRef.current.hoverId = null;
+    dominantRef.current = null;
+    resetCamera();
     select(null);
     setShowCaption(true);
-    refresh(true);
-  }, [refresh, select]);
+    refresh("chips");
+  }, [refresh, resetCamera, select]);
 
   // The simulation loop, drawing and observers. All simulation state lives in refs.
   useEffect(() => {
@@ -267,10 +416,21 @@ export function TidePool() {
       const dpr = Math.min(devicePixelRatio || 1, 2);
       canvas!.width = Math.round(width * dpr);
       canvas!.height = Math.round(height * dpr);
-      layoutRef.current = computeLayout(width, height, dpr);
+      // Narrow or portrait canvases fill the view and crop the pool's sides; wide ones show it whole.
+      const cover = width <= 720 || height > width;
+      sizeRef.current = { width, height, dpr, cover };
+      surface!.style.setProperty("--surface-height", `${height}px`);
+      // Overlays hug the pool's own corners when it is letterboxed.
+      const fit = baseScale(width, height, false);
+      surface!.style.setProperty("--pool-x", cover ? "0px" : `${Math.max(0, (width - POOL_WIDTH * fit) / 2)}px`);
+      surface!.style.setProperty("--pool-y", cover ? "0px" : `${Math.max(0, (height - POOL_HEIGHT * fit) / 2)}px`);
+      layoutRef.current = computeLayout(width, height, dpr, cover, cameraRef.current);
     }
     function retheme() {
-      renderer.setPalette(readPalette());
+      const palette = readPalette();
+      renderer.setPalette(palette);
+      chartColoursRef.current = chartColours();
+      setDark(palette.dark);
       setThemeVersion((version) => version + 1);
     }
     function frame(now: number) {
@@ -292,7 +452,22 @@ export function TidePool() {
           if (performance.now() - started > 28) break;
         }
       }
-      renderer.draw(ctx!, world, layoutRef.current, uiRef.current, now);
+
+      // Camera: glide towards the followed organism, or back to the user's pan at whole-pool zoom.
+      const ui = uiRef.current;
+      const target = ui.following && ui.selectedId !== null ? world.getOrganism(ui.selectedId) : undefined;
+      const camera = cameraRef.current;
+      const goalX = target ? target.position.x : panRef.current.cx;
+      const goalY = target ? target.position.y : panRef.current.cy;
+      const goalZoom = target ? FOLLOW_ZOOM : 1;
+      const k = reducedRef.current ? 1 : 1 - Math.exp(-elapsed * 5);
+      camera.cx += (goalX - camera.cx) * k;
+      camera.cy += (goalY - camera.cy) * k;
+      camera.zoom += (goalZoom - camera.zoom) * k;
+      const size = sizeRef.current;
+      clampCamera(camera, size.width, size.height, size.cover);
+      layoutRef.current = computeLayout(size.width, size.height, size.dpr, size.cover, camera);
+      renderer.draw(ctx!, world, layoutRef.current, ui, now);
     }
 
     resize();
@@ -303,8 +478,12 @@ export function TidePool() {
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const scheme = matchMedia("(prefers-color-scheme: dark)");
     scheme.addEventListener("change", retheme);
+    // Inspector values at ~8 Hz, HUD and chart at ~4 Hz, lineage chips at ~1 Hz.
     let ticks = 0;
-    const readouts = window.setInterval(() => refresh(++ticks % 4 === 0), 250);
+    const readouts = window.setInterval(() => {
+      ticks += 1;
+      refresh(ticks % 8 === 0 ? "chips" : ticks % 2 === 0 ? "readouts" : "inspector");
+    }, TICK_MS);
     frameId = requestAnimationFrame(frame);
     return () => {
       disposed = true;
@@ -324,23 +503,63 @@ export function TidePool() {
     return point.x >= 0 && point.y >= 0 && point.x <= POOL_WIDTH && point.y <= POOL_HEIGHT ? point : null;
   }
 
+  function pickRadius() {
+    return Math.max(PICK_RADIUS, (sizeRef.current.cover ? TOUCH_PICK_PIXELS : 0) / layoutRef.current.scale);
+  }
+
   function onCanvasClick(event: MouseEvent<HTMLCanvasElement>) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const world = worldRef.current;
     const point = world && worldPoint(event);
     if (!world || !point) return;
-    const hit = world.organismAt(point, PICK_RADIUS);
+    const hit = world.organismAt(point, pickRadius());
     if (hit) select(hit.id);
     else world.dropFood(point);
-    refresh(false);
+    refresh("readouts");
+  }
+
+  function onCanvasDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    suppressClickRef.current = false;
+    const camera = cameraRef.current;
+    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, cx: camera.cx, cy: camera.cy, moved: false };
   }
 
   function onCanvasMove(event: PointerEvent<HTMLCanvasElement>) {
     const world = worldRef.current;
-    if (!world || event.pointerType !== "mouse") return;
+    if (!world) return;
+    const drag = dragRef.current;
+    if (drag && drag.pointerId === event.pointerId) {
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        drag.moved = true;
+        suppressClickRef.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+      if (drag.moved && !uiRef.current.following) {
+        const camera = cameraRef.current;
+        const size = sizeRef.current;
+        const scale = layoutRef.current.scale;
+        const view = clampCamera({ cx: drag.cx - dx / scale, cy: drag.cy - dy / scale, zoom: camera.zoom }, size.width, size.height, size.cover);
+        panRef.current = { cx: view.cx, cy: view.cy };
+        camera.cx = view.cx;
+        camera.cy = view.cy;
+      }
+      return;
+    }
+    if (event.pointerType !== "mouse") return;
     const point = worldPoint(event);
-    const hit = point ? world.organismAt(point, PICK_RADIUS) : undefined;
+    const hit = point ? world.organismAt(point, pickRadius()) : undefined;
     uiRef.current.hoverId = hit?.id ?? null;
     event.currentTarget.style.cursor = hit ? "pointer" : "";
+  }
+
+  function onCanvasUp(event: PointerEvent<HTMLCanvasElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
   }
 
   function onCanvasLeave(event: PointerEvent<HTMLCanvasElement>) {
@@ -379,6 +598,8 @@ export function TidePool() {
 
   const selectedLineage = inspected?.lineage;
   const energyShare = inspected && inspected.capacity > 0 ? Math.max(0, Math.min(1, inspected.energy / inspected.capacity)) : 0;
+  const mealsPerMinute = inspected && inspected.age >= 1 ? ((inspected.meals / inspected.age) * 60).toFixed(1) : "–";
+  const takeover = readout.takeover && readout.takeover.share >= TAKEOVER_SHARE ? readout.takeover : null;
 
   return (
     <div className={styles.pool}>
@@ -390,7 +611,10 @@ export function TidePool() {
           aria-label="Tide pool simulation"
           data-pool-canvas=""
           onClick={onCanvasClick}
+          onPointerDown={onCanvasDown}
           onPointerMove={onCanvasMove}
+          onPointerUp={onCanvasUp}
+          onPointerCancel={onCanvasUp}
           onPointerLeave={onCanvasLeave}
         />
         <div className={styles.hud}>
@@ -412,8 +636,22 @@ export function TidePool() {
               <dd data-stat="clock">{readout.clock}</dd>
             </div>
           </dl>
+          {takeover ? (
+            <p className={styles.takeover} data-takeover="">
+              <span className={styles.swatch} style={{ background: lineageColour(takeover.id, dark) }} aria-hidden="true" />
+              Lineage {takeover.id} · {Math.round(takeover.share * 100)}% of the pool
+            </p>
+          ) : null}
           {showCaption ? <p className={styles.caption}>Seeded with random bodies. What survives is what breeds.</p> : null}
         </div>
+        {readout.extinct ? (
+          <div className={styles.notice} role="status">
+            <p>The pool is empty.</p>
+            <button type="button" className={styles.button} onClick={startPool}>
+              New pool
+            </button>
+          </div>
+        ) : null}
         <div className={styles.dock}>
           {envOpen ? (
             <div id={`${idBase}-environment`} className={styles.environment} role="group" aria-label="Environment">
@@ -440,85 +678,125 @@ export function TidePool() {
           {inspected ? (
             <section className={styles.inspector} role="region" aria-label="Inspector" onKeyDown={(event) => event.key === "Escape" && closeInspector()}>
               <header>
-                <span className={styles.swatch} style={{ background: swatch(inspected.hue) }} aria-hidden="true" />
+                <span className={styles.swatch} style={{ background: organismColour(inspected.lineage, inspected.genomeHue, dark) }} aria-hidden="true" />
                 <h2>
                   Organism {inspected.id}
                   <small> · lineage {inspected.lineage}</small>
                 </h2>
+                <button type="button" className={styles.button} aria-pressed={following} disabled={inspected.cause !== "alive"} onClick={() => setFollow(!following)}>
+                  Follow
+                </button>
                 <button type="button" className={styles.button} onClick={closeInspector}>
                   Close
                 </button>
               </header>
               <div className={styles.inspectorBody}>
-                <Glyph genome={inspected.genome} themeVersion={themeVersion} />
-                <div>
-                  <p className={styles.description}>{inspected.description}</p>
-                  {inspected.cause === "alive" ? null : (
-                    <p className={styles.died}>{inspected.cause === "age" ? "died (old age)" : inspected.cause === "starved" ? "died (starved)" : "died"}</p>
-                  )}
+                <Anatomy organism={inspected.organism} themeVersion={themeVersion} />
+                <div className={styles.details}>
+                  <p className={styles.description}>
+                    {inspected.description}
+                    {inspected.cause === "alive" ? null : (
+                      <strong className={styles.died}> · {inspected.cause === "age" ? "died (old age)" : inspected.cause === "starved" ? "died (starved)" : "died"}</strong>
+                    )}
+                  </p>
+                  <div
+                    className={styles.energy}
+                    role="meter"
+                    aria-label="Energy"
+                    aria-valuemin={0}
+                    aria-valuemax={Math.round(inspected.capacity)}
+                    aria-valuenow={Math.round(inspected.energy)}
+                  >
+                    <span style={{ width: `${energyShare * 100}%` }} />
+                  </div>
+                  <dl className={styles.facts}>
+                    <div>
+                      <dt>Speed</dt>
+                      <dd>{inspected.speed.toFixed(1)} u/s</dd>
+                    </div>
+                    <div>
+                      <dt>Meals/min</dt>
+                      <dd>{mealsPerMinute}</dd>
+                    </div>
+                    <div>
+                      <dt>Energy</dt>
+                      <dd>
+                        {Math.round(inspected.energy)}/{Math.round(inspected.capacity)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Age</dt>
+                      <dd>{inspected.age.toFixed(0)} s</dd>
+                    </div>
+                    <div>
+                      <dt>Meals</dt>
+                      <dd>{inspected.meals}</dd>
+                    </div>
+                    <div>
+                      <dt>Offspring</dt>
+                      <dd>{inspected.offspring}</dd>
+                    </div>
+                    <div>
+                      <dt>Generation</dt>
+                      <dd>{inspected.generation}</dd>
+                    </div>
+                    <div>
+                      <dt>Parent lineage</dt>
+                      <dd>
+                        {inspected.parentLineage >= 0 ? (
+                          <>
+                            <span className={styles.swatch} style={{ background: lineageColour(inspected.parentLineage, dark) }} aria-hidden="true" /> {inspected.parentLineage}
+                          </>
+                        ) : (
+                          "seed"
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
-              <div
-                className={styles.energy}
-                role="meter"
-                aria-label="Energy"
-                aria-valuemin={0}
-                aria-valuemax={Math.round(inspected.capacity)}
-                aria-valuenow={Math.round(inspected.energy)}
-              >
-                <span style={{ width: `${energyShare * 100}%` }} />
-              </div>
-              <dl className={styles.facts}>
-                <div>
-                  <dt>Generation</dt>
-                  <dd>{inspected.generation}</dd>
-                </div>
-                <div>
-                  <dt>Energy</dt>
-                  <dd>
-                    {Math.round(inspected.energy)} / {Math.round(inspected.capacity)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Age</dt>
-                  <dd>{inspected.age.toFixed(0)} s</dd>
-                </div>
-                <div>
-                  <dt>Meals</dt>
-                  <dd>{inspected.meals}</dd>
-                </div>
-                <div>
-                  <dt>Offspring</dt>
-                  <dd>{inspected.offspring}</dd>
-                </div>
-              </dl>
             </section>
           ) : null}
         </div>
       </div>
-      {lineages.length ? (
+      {chips.visible.length ? (
         <div className={styles.lineages} role="group" aria-label="Lineages">
-          {lineages.map((lineage) => (
-            <button
-              key={lineage.id}
-              type="button"
-              className={styles.chip}
-              aria-pressed={selectedLineage === lineage.id}
-              aria-label={`Lineage ${lineage.id}, ${lineage.count} alive`}
-              onClick={() => selectLineage(lineage.id)}
-            >
-              <span className={styles.swatch} style={{ background: swatch(lineage.hue) }} aria-hidden="true" />
-              {lineage.count}
-            </button>
-          ))}
+          {chips.visible.map((lineage, index) => {
+            const dominant = index === 0 && readout.takeover?.id === lineage.id;
+            return (
+              <button
+                key={lineage.id}
+                type="button"
+                className={styles.chip}
+                data-dominant={dominant ? "" : undefined}
+                aria-pressed={selectedLineage === lineage.id}
+                aria-label={`Lineage ${lineage.id}, ${lineage.count} alive${dominant ? ", dominant" : ""}`}
+                onClick={() => selectLineage(lineage.id)}
+              >
+                <span className={styles.swatch} style={{ background: lineageColour(lineage.id, dark) }} aria-hidden="true" />
+                <span className={styles.chipId}>{lineage.id}</span>
+                <span className={styles.chipCount}>×{lineage.count}</span>
+              </button>
+            );
+          })}
+          {chips.more > 0 ? (
+            <span className={styles.more} aria-label={`${chips.more} more lineages`}>
+              +{chips.more}
+            </span>
+          ) : null}
         </div>
       ) : null}
       <div className={styles.bar}>
-        <button type="button" className={styles.button} aria-pressed={paused} onClick={() => {
+        <button
+          type="button"
+          className={styles.button}
+          aria-pressed={paused}
+          onClick={() => {
             pausedRef.current = !paused;
             setUserPaused(!paused);
-            refresh(false);
-          }}>
+            refresh("readouts");
+          }}
+        >
           {paused ? "Play" : "Pause"}
         </button>
         <div className={styles.segmented} role="group" aria-label="Speed">
@@ -531,7 +809,7 @@ export function TidePool() {
         <button type="button" className={styles.button} onClick={startPool}>
           New pool
         </button>
-        <button ref={inspectButtonRef} type="button" className={styles.button} onClick={inspectBest}>
+        <button ref={inspectButtonRef} type="button" className={styles.button} disabled={readout.extinct} onClick={inspectBest}>
           Inspect
         </button>
         <button
@@ -543,7 +821,14 @@ export function TidePool() {
         >
           Environment
         </button>
-        <canvas ref={sparkRef} className={styles.spark} role="img" aria-label="Population history" />
+        <div className={styles.chart}>
+          <canvas ref={chartRef} className={styles.chartCanvas} role="img" aria-label="History of mean speed, living lineages and population" />
+          <div className={styles.legend} aria-hidden="true">
+            <span data-series="speed">speed {readout.speed}</span>
+            <span data-series="lineages">lineages {readout.lineages}</span>
+            <span data-series="population">pop {readout.population}</span>
+          </div>
+        </div>
       </div>
     </div>
   );

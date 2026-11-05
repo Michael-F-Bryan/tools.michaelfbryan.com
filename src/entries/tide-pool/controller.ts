@@ -3,8 +3,15 @@
  * angles, plus a per-part drag multiplier for passive feathering.
  *
  * joint angle = angle + amplitude * ampMul * wave(phase)
- *   ampMul  = clamp(1 + sum(ampWeights[i] * senses[i]) + ampWeights[sensorCount], 0, 2)
- *   freqMul = clamp(1 + sum(freqWeights[i] * senses[i]) + freqWeights[sensorCount], 0.25, 2.5)
+ *   ampMul  = clamp(1 + w . inputs, 0, 2)  with w = ampWeights
+ *   freqMul = clamp(1 + w . inputs, 0.25, 2.5)  with w = freqWeights
+ *
+ * Inputs, for n sensors, are [s_1..s_n, ds_1..ds_n, 1]: the scent readings, then each
+ * reading's rate of change, then a constant bias. Weight arrays therefore have length
+ * 2n + 1. The rate input is the reading minus a slow running average of itself
+ * (time constant `RATE_TAU`), scaled by `RATE_GAIN` and clamped to [-1, 1]: it is
+ * positive while the reading is rising (swimming up a gradient) and zero in steady
+ * water. It lets one sensor, moving through space, act as a gradient detector.
  *
  * The oscillator phase is integrated (phase += 2*pi*f*freqMul*dt) instead of
  * computed as 2*pi*f*freqMul*t, because a slowly varying freqMul would otherwise
@@ -22,8 +29,40 @@ const MAX_FEATHER = 0.98;
 /** Amplitude (radians) below which a joint is treated as rigid for feathering. */
 const FEATHER_FULL_AMPLITUDE = 0.1;
 
+/** Time constant (s) of the running average that the rate-of-change input is measured against. */
+export const RATE_TAU = 0.4;
+/** Scale from (reading - running average) to the rate input; a ramp of r per second gives r * RATE_TAU * RATE_GAIN. */
+export const RATE_GAIN = 12;
+
 /** Oscillator phase accumulators, one array per organism. Held weakly. */
 const phases = new WeakMap<Organism, Float64Array>();
+/** Running average of each sensor reading, one array per organism. Held weakly. */
+const averages = new WeakMap<Organism, Float64Array>();
+
+/**
+ * Update the rate-of-change inputs (`organism.senseRates`) from the current readings
+ * and advance the running averages. First sight of a sensor sets its average to its
+ * reading, so a newborn does not see a spurious jump.
+ */
+export function updateSenseRates(organism: Organism, dt: number): number[] {
+  const senses = organism.senses;
+  const n = senses.length;
+  let avg = averages.get(organism);
+  if (!avg || avg.length !== n) {
+    avg = new Float64Array(n);
+    for (let i = 0; i < n; i++) avg[i] = finite(senses[i], 0);
+    averages.set(organism, avg);
+  }
+  const rates = organism.senseRates ?? (organism.senseRates = []);
+  rates.length = n;
+  const k = 1 - Math.exp(-Math.max(0, dt) / RATE_TAU);
+  for (let i = 0; i < n; i++) {
+    const reading = finite(senses[i], 0);
+    rates[i] = clamp((reading - avg[i]) * RATE_GAIN, -1, 1);
+    avg[i] += (reading - avg[i]) * k;
+  }
+  return rates;
+}
 
 /** Fractional position of `x` radians within a stroke cycle, shifted so the cycle starts at the trough. */
 function cycleFraction(x: number): number {
@@ -58,15 +97,28 @@ export function isReturnStroke(x: number, skew: number): boolean {
   return cycleFraction(x) >= clampSkew(skew);
 }
 
-function modulation(weights: readonly number[] | undefined, senses: readonly number[], sensorCount: number): number {
+function modulation(
+  weights: readonly number[] | undefined,
+  senses: readonly number[],
+  rates: readonly number[],
+  sensorCount: number,
+): number {
   if (!weights) return 0;
   let sum = 0;
-  const m = Math.min(sensorCount, weights.length, senses.length);
+  const m = Math.min(sensorCount, senses.length);
   for (let i = 0; i < m; i++) {
-    const term = weights[i] * senses[i];
+    const w = weights[i];
+    if (w === undefined) break;
+    const term = w * senses[i];
     if (Number.isFinite(term)) sum += term;
   }
-  const bias = weights[sensorCount];
+  for (let i = 0; i < m; i++) {
+    const w = weights[sensorCount + i];
+    if (w === undefined) break;
+    const term = w * (rates[i] ?? 0);
+    if (Number.isFinite(term)) sum += term;
+  }
+  const bias = weights[2 * sensorCount];
   if (bias !== undefined && Number.isFinite(bias)) sum += bias;
   return sum;
 }
@@ -97,6 +149,8 @@ export function driveJoints(organism: Organism, dt: number, angles: number[], dr
     phases.set(organism, phase);
   }
 
+  const rates = updateSenseRates(organism, dt);
+
   angles.length = n;
   dragScale.length = n;
   if (n > 0) {
@@ -107,8 +161,8 @@ export function driveJoints(organism: Organism, dt: number, angles: number[], dr
     const gene = parts[i];
     const rest = finite(gene.angle, 0);
     const amplitude = finite(gene.amplitude, 0);
-    const ampMul = clamp(1 + modulation(gene.ampWeights, organism.senses, sensorCount), 0, 2);
-    const freqMul = clamp(1 + modulation(gene.freqWeights, organism.senses, sensorCount), 0.25, 2.5);
+    const ampMul = clamp(1 + modulation(gene.ampWeights, organism.senses, rates, sensorCount), 0, 2);
+    const freqMul = clamp(1 + modulation(gene.freqWeights, organism.senses, rates, sensorCount), 0.25, 2.5);
 
     const x = phase[i] + finite(gene.phase, 0);
     const swing = amplitude * ampMul;
