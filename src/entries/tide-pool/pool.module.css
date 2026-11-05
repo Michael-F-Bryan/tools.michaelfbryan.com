@@ -19,7 +19,7 @@
 .takeover { display: flex; align-items: center; gap: 6px; color: var(--ink); font-family: var(--font-mono, monospace); font-size: 12px; }
 .caption { max-width: 30rem; color: var(--text-secondary); font-size: 12px; }
 
-.notice { position: absolute; top: 50%; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 22px; border: 1px solid var(--rule-subtle); background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink); transform: translate(-50%, -50%); }
+.notice { position: absolute; z-index: 3; top: calc(var(--pool-y, 0px) + 12px); left: 50%; box-sizing: border-box; max-width: calc(100% - var(--pool-x, 0px) * 2 - 16px); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 22px; border: 1px solid var(--rule-subtle); background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink); text-align: center; transform: translateX(-50%); }
 .notice p { margin: 0; font-size: 15px; }
 .notice .cause { color: var(--text-secondary); font-size: 12px; }
 
@@ -63,7 +63,7 @@
 .facts dd { display: flex; align-items: center; gap: 4px; margin: 0; font-family: var(--font-mono, monospace); font-size: 12px; font-variant-numeric: tabular-nums; }
 .swatch { display: inline-block; flex: none; width: 12px; height: 12px; border: 1px solid color-mix(in srgb, var(--ink) 55%, transparent); border-radius: 50%; }
 
-.lineages { display: flex; align-items: center; gap: 4px; overflow-x: auto; border-top: 1px solid var(--rule-subtle); padding: 2px 16px; scrollbar-width: thin; }
+.lineages { box-sizing: border-box; min-height: 49px; display: flex; align-items: center; gap: 4px; overflow-x: auto; border-top: 1px solid var(--rule-subtle); padding: 2px 16px; scrollbar-width: thin; }
 .chip { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-width: 44px; min-height: 44px; padding: 0 10px; border: 1px solid transparent; background: transparent; color: var(--ink); cursor: pointer; font-family: var(--font-mono, monospace); font-size: 12px; font-variant-numeric: tabular-nums; }
 .chip:hover { border-color: var(--rule); }
 .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--panel); }

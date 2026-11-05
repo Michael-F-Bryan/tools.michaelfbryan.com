@@ -721,7 +721,7 @@ export class PoolRenderer {
         const g = 1 - age / MEAL_GLOW_MS;
         const glowR = Math.max(mouthR * 2.2, 9 / this.scale);
         const glow = ctx.createRadialGradient(mouth.x, mouth.y, 0, mouth.x, mouth.y, glowR);
-        glow.addColorStop(0, accent);
+        glow.addColorStop(0, this.palette.food);
         glow.addColorStop(1, "rgba(0,0,0,0)");
         ctx.globalAlpha = 0.5 * g * g;
         ctx.fillStyle = glow;
@@ -743,13 +743,13 @@ export class PoolRenderer {
       const from = mouthR + 3.4 * boost;
       const peak = Math.max(mouthR * MEAL_BLOOM_RADII, MEAL_BLOOM_MIN_PX / this.scale);
       const radius = from + (Math.max(peak, from) - from) * e;
-      // A filled accent disc that fades while it expands, so the meal reads at a glance next to trails and rings.
-      ctx.fillStyle = accent;
+      // A filled amber (food-coloured) disc that fades while it expands: a meal is food, a birth is the hollow accent ring.
+      ctx.fillStyle = this.palette.food;
       ctx.globalAlpha = 0.45 * (1 - t);
       ctx.beginPath();
       ctx.arc(mouth.x, mouth.y, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = accent;
+      ctx.strokeStyle = this.palette.food;
       // Hold at full strength for the first third, then fade: bloom = meal eaten (the arc means food is held).
       ctx.globalAlpha = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
       ctx.lineWidth = 2 / this.scale;

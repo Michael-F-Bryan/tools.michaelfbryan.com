@@ -337,15 +337,27 @@ test("an empty pool says so, disables Inspect and offers a new pool", async ({ p
   test.setTimeout(120_000);
   await page.goto("/tide-pool");
   await page.getByRole("button", { name: "Environment", exact: true }).click();
-  await page.getByRole("slider", { name: "Food" }).fill("0");
+  const food = page.getByRole("slider", { name: "Food" });
+  await expect(food).toHaveAttribute("min", "0.4");
+  await food.fill("0.4");
   await page.getByRole("slider", { name: "Temperature" }).fill("2");
+  await page.getByRole("slider", { name: "Water thickness" }).fill("2");
   await page.getByRole("button", { name: "16×", exact: true }).click();
   const notice = page.getByRole("status").filter({ hasText: "The pool is empty." });
-  await expect(notice).toBeVisible({ timeout: 80_000 });
-  await expect(notice.getByText(/^Last \d+ died of (starvation|old age)$/)).toBeVisible();
+  await expect(notice).toBeVisible({ timeout: 90_000 });
+  const cause = notice.getByText(/^Last \d+ died of (starvation|old age)$/);
+  await expect(cause).toBeVisible();
+  // The sentence is frozen when the pool empties; it must not drift as the death window slides.
+  const frozen = await cause.textContent();
+  await page.waitForTimeout(6000);
+  expect(await cause.textContent()).toBe(frozen);
   await expect(page.getByRole("button", { name: "Inspect", exact: true })).toBeDisabled();
+  // Extinction closes the Environment dock so the recovery control is reachable by a real pointer.
+  await expect(page.getByRole("button", { name: "Environment", exact: true })).toHaveAttribute("aria-expanded", "false");
   await notice.getByRole("button", { name: "New pool", exact: true }).click();
   await expect(notice).toHaveCount(0);
+  await expect.poll(() => seconds(page)).toBeLessThan(5);
+  await expect(page.getByRole("button", { name: "Environment", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect.poll(async () => Number(await stat(page, "population").textContent())).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "Inspect", exact: true })).toBeEnabled();
 });

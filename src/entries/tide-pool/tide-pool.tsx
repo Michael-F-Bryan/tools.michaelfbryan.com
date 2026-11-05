@@ -80,7 +80,9 @@ const ENVIRONMENT_CONTROLS: readonly {
   step: number;
   format: (value: number) => string;
 }[] = [
-  { key: "foodRate", label: "Food", hint: "supply", min: 0, max: 3, step: 0.1, format: (v) => v.toFixed(1) },
+  // Floor measured headless (10 seeds × 12 min, fresh pools): 0 and 0.25 empty 10/10 and 7/10 pools;
+  // 0.4 empties 1/10 while thinning the rest to a handful, so famine still bites without being a trap.
+  { key: "foodRate", label: "Food", hint: "supply", min: 0.4, max: 3, step: 0.05, format: (v) => (v.toFixed(2).endsWith("0") ? v.toFixed(1) : v.toFixed(2)) },
   // Capped below typical evolved swimming speeds (~7–11 u/s mean, many bodies slower), so full strength
   // sorts swimmers from drifters instead of sweeping everyone into a wall heap (40, 16 and 8 all did).
   { key: "currentStrength", label: "Current", hint: "drifts food and bodies", min: 0, max: 4, step: 0.25, format: (v) => v.toFixed(2) },
@@ -371,6 +373,8 @@ export function TidePool() {
   const reducedRef = useRef(false);
   const inspectedRef = useRef<Inspected | null>(null);
   const dominantRef = useRef<Takeover | null>(null);
+  /** The empty-pool sentence, computed once when the pool empties (the 120 s window would otherwise keep sliding). */
+  const extinctCauseRef = useRef<string | null>(null);
   const chartColoursRef = useRef<ChartColours | null>(null);
 
   const prefersReducedMotion = useSyncExternalStore(subscribeReducedMotion, () => matchMedia(REDUCED_MOTION).matches, () => false);
@@ -379,8 +383,7 @@ export function TidePool() {
   const [speed, setSpeedState] = useState<number>(4);
   const [envOpen, setEnvOpen] = useState(false);
   const [env, setEnv] = useState<Environment>({ ...DEFAULT_ENVIRONMENT });
-  const [readout, setReadout] = useState<Readout>(EMPTY_READOUT);
-  const [chips, setChips] = useState<{ visible: LineageChip[]; more: number }>({ visible: [], more: 0 });
+  const [readout, setReadout] = useState<Readout>(EMPTY_READOUT);  const [chips, setChips] = useState<{ visible: LineageChip[]; more: number }>({ visible: [], more: 0 });
   const [inspected, setInspected] = useState<Inspected | null>(null);
   const [following, setFollowing] = useState(false);
   const [showCaption, setShowCaption] = useState(true);
@@ -432,6 +435,12 @@ export function TidePool() {
         ? { id: stats.dominantLineage, share: stats.dominantShare }
         : dominantRef.current;
     const extinct = stats.extinct ?? (population === 0 && world.time > EMPTY_AFTER);
+    if (!extinct) extinctCauseRef.current = null;
+    else if (extinctCauseRef.current === null) {
+      extinctCauseRef.current = describeExtinction(world);
+      // The dock is incompatible with the empty-pool state: close it so recovery is never covered.
+      setEnvOpen(false);
+    }
     const next: Readout = {
       population,
       lineages: stats.lineages,
@@ -439,7 +448,7 @@ export function TidePool() {
       clock: formatClock(world.time),
       speed: stats.meanSpeed.toFixed(1),
       extinct,
-      extinctCause: extinct ? describeExtinction(world) : "",
+      extinctCause: extinct ? (extinctCauseRef.current ?? "") : "",
       takeover: takeover && takeover.share >= DOMINANT_MARK_SHARE ? takeover : null,
     };
     setReadout((prev) =>
@@ -496,6 +505,7 @@ export function TidePool() {
     worldRef.current = new World(newSeed(), { ...envRef.current });
     uiRef.current.hoverId = null;
     dominantRef.current = null;
+    extinctCauseRef.current = null;
     resetCamera();
     select(null);
     setShowCaption(true);
@@ -962,8 +972,9 @@ export function TidePool() {
           ) : null}
         </div>
       </div>
-      {chips.visible.length ? (
-        <div className={styles.lineages} role="group" aria-label="Lineages">
+      {/* Always mounted (with a fixed min-height) so the pool does not resize when the last lineage dies. */}
+      {
+        <div className={styles.lineages} {...(chips.visible.length ? { role: "group", "aria-label": "Lineages" } : { "aria-hidden": true })}>
           {chips.visible.map((lineage, index) => {
             const dominant = index === 0 && readout.takeover?.id === lineage.id;
             const slot = lineageColourIndex(lineage.id);
@@ -992,7 +1003,7 @@ export function TidePool() {
             </span>
           ) : null}
         </div>
-      ) : null}
+      }
       <div className={styles.bar}>
         <button
           type="button"
@@ -1035,7 +1046,7 @@ export function TidePool() {
             <span data-series="lineages">lineages {readout.lineages}</span>
             <span data-series="population">pop {readout.population}</span>
           </div>
-          <div className={styles.marks} data-marks="" aria-label="Marks in the pool: born, starved, aged" role="group">
+          <div className={styles.marks} data-marks="" aria-label="Marks in the pool: born, ate, starved, aged" role="group">
             <span>
               <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
                 <circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
@@ -1053,6 +1064,12 @@ export function TidePool() {
                 <circle cx="6" cy="6" r="3.5" fill="currentColor" opacity="0.4" />
               </svg>
               aged
+            </span>
+            <span>
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <circle cx="6" cy="6" r="4" fill="#d98e04" fillOpacity="0.35" stroke="#d98e04" strokeWidth="1.4" />
+              </svg>
+              ate
             </span>
           </div>
         </div>
