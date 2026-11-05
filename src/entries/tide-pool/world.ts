@@ -114,7 +114,14 @@ export const TUNING = {
    * Patch output is absolute in stock (see spawnFood), so total food depends on stock: that is the
    * point. The remaining (1 - patchShare) is scattered regardless and is the famine floor.
    */
-  patchShare: 0.85,
+  /*
+   * Measured seeds 200-209, 20 min, default environment (extinct / pop>=30 at 20 min / patch cycling):
+   *   patchShare 0.85 (old): 4 extinct, 5 alive>=30, 9 cycling. Collapse mode: the boom ends at ~5 min, survivors are
+   *     sessile sensorless drifters sitting 13-60 units from scattered food they cannot reach, while the patches sit at stock 1.0.
+   *   patchShare 0.85 + patchGrazePerMeal 0.02: 2 extinct, 8 alive>=30, only 4 cycling (patches barely deplete).
+   *   patchShare 0.70 (chosen): 0 extinct, 10 alive>=30 (min 31), 9 cycling. A bigger scattered floor puts food within reach of wanderers.
+   */
+  patchShare: 0.7,
   /** Number of drifting rich patches, their radius range, and wander speed (units/s). */
   patchCount: 4,
   patchRadius: [60, 90] as const,
