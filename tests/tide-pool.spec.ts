@@ -162,6 +162,15 @@ test("Inspect opens the Inspector, lineages select members and Close dismisses i
   await chip.click();
   await expect(inspector).toBeVisible();
 
+  // Desktop: a click in the grey letterbox margin beside the pool also dismisses the Inspector.
+  if (info.project.name !== "mobile-chromium") {
+    const margin = (await canvas.boundingBox())!;
+    await page.mouse.click(margin.x + 10, margin.y + margin.height / 2);
+    await expect(inspector).toHaveCount(0);
+    await chip.click();
+    await expect(inspector).toBeVisible();
+  }
+
   // With an organism selected, a tap on open water deselects instead of dropping food; the next tap drops food.
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   const box = (await canvas.boundingBox())!;

@@ -668,7 +668,15 @@ export function TidePool() {
     }
     const world = worldRef.current;
     const point = world && worldPoint(event);
-    if (!world || !point) return;
+    if (!world) return;
+    if (!point) {
+      // The letterbox margin is outside the pool: it closes an open inspector like open water, and never drops food.
+      if (uiRef.current.selectedId !== null) {
+        closeInspector();
+        refresh("readouts");
+      }
+      return;
+    }
     const hit = world.organismAt(point, pickRadius());
     if (hit) select(hit.id);
     else if (uiRef.current.selectedId !== null) closeInspector();

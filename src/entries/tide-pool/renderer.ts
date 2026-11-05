@@ -86,7 +86,8 @@ export function readPalette(): Palette {
 // ---------------------------------------------------------------------------
 
 /** hue, then saturation and lightness for light mode, then for dark mode. */
-type Swatch = readonly [hue: number, satLight: number, lightLight: number, satDark: number, lightDark: number];
+/** Hue is shared unless `hueDark` overrides it, so the dark palette can swap a grey for a chromatic hue without touching light mode. */
+type Swatch = readonly [hue: number, satLight: number, lightLight: number, satDark: number, lightDark: number, hueDark?: number];
 
 const LINEAGE_PALETTE: readonly Swatch[] = [
   [356, 72, 46, 78, 62], // red
@@ -95,13 +96,13 @@ const LINEAGE_PALETTE: readonly Swatch[] = [
   [270, 56, 48, 68, 70], // violet
   [132, 62, 32, 62, 54], // green
   [330, 72, 56, 82, 72], // pink
-  [172, 90, 27, 70, 48], // teal
+  [168, 90, 27, 70, 48, 172], // teal
   [50, 94, 38, 96, 56], // gold
   [18, 50, 28, 62, 54], // rust brown
   [84, 74, 34, 66, 56], // lime
-  [244, 22, 38, 80, 72], // slate (light) / indigo (dark)
+  [214, 22, 38, 80, 72, 244], // slate (light) / indigo (dark)
   [296, 64, 40, 74, 66], // fuchsia
-  [150, 12, 42, 74, 62], // stone (light) / mint (dark)
+  [40, 12, 42, 74, 62, 150], // stone (light) / mint (dark)
   [192, 100, 36, 92, 56], // cyan
 ];
 export const LINEAGE_PALETTE_SIZE = LINEAGE_PALETTE.length;
@@ -177,7 +178,8 @@ function shadeOffset(genomeHue: number): number {
 }
 
 function swatchHsl(slot: number, shade: number, dark: boolean, lightShift = 0, alpha?: number): string {
-  const [hue, satLight, lightLight, satDark, lightDark] = LINEAGE_PALETTE[slot];
+  const [hueLight, satLight, lightLight, satDark, lightDark, hueDark] = LINEAGE_PALETTE[slot];
+  const hue = dark && hueDark !== undefined ? hueDark : hueLight;
   const h = (hue + shade + 360) % 360;
   const sat = dark ? satDark : satLight;
   const light = (dark ? lightDark : lightLight) + lightShift;
@@ -198,7 +200,8 @@ type OrganismColours = { fill: string; outline: string; fin: string; finEdge: st
 
 function makeColours(slot: number, genomeHue: number, dark: boolean): OrganismColours {
   const shade = shadeOffset(genomeHue);
-  const [hue, satLight, , satDark] = LINEAGE_PALETTE[slot];
+  const [hueLight, satLight, , satDark, , hueDark] = LINEAGE_PALETTE[slot];
+  const hue = dark && hueDark !== undefined ? hueDark : hueLight;
   const h = (hue + shade + 360) % 360;
   const sat = dark ? satDark : satLight;
   return {
