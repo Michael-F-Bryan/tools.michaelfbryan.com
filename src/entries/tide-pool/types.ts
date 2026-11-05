@@ -15,8 +15,8 @@
 export const DT = 1 / 60;
 
 /** Pool size in world units. The renderer scales to the canvas. */
-export const POOL_WIDTH = 960;
-export const POOL_HEIGHT = 600;
+export const POOL_WIDTH = 800;
+export const POOL_HEIGHT = 500;
 
 // ---------------------------------------------------------------------------
 // Genome
@@ -280,8 +280,8 @@ export type WorldLike = WorldView & WorldControls;
 
 /** Initial population size when seeding a pool. */
 export const SEED_POPULATION = 36;
-export const MAX_POPULATION = 160;
-export const MAX_FOOD = 320;
+export const MAX_POPULATION = 120;
+export const MAX_FOOD = 240;
 
 /** A drifting feeding ground: food spawns around it in proportion to its stock, and grazing depletes it. */
 export interface FoodPatch {

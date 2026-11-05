@@ -12,9 +12,9 @@
  * physics loop does not allocate.
  */
 import type { Genome, PartGene, PartPose, Vec2 } from "./types";
+// Sensor mass lives in genome.ts so the energy model and the physics agree.
 
-/** Mass of a sensor stalk/bulb, in the same units as segment area. */
-export const SENSOR_MASS = 0.5;
+import { SENSOR_MASS } from "./genome";
 
 export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 

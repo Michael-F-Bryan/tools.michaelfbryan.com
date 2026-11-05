@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { describeGenome, genomeMass, mutate, randomGenome, validateGenome } from "../src/entries/tide-pool/genome";
+import { describeGenome, genomeMass, mutate, randomGenome, validateGenome, duplicateMirrored, repeatRadial, MAX_PARTS } from "../src/entries/tide-pool/genome";
 import { Rng } from "../src/entries/tide-pool/random";
 import { ScentField } from "../src/entries/tide-pool/scent";
 import {
@@ -10,6 +10,7 @@ import {
   POOL_WIDTH,
   SEED_POPULATION,
   type Genome,
+  type PartGene,
   type Organism,
   type StepOrganism,
 } from "../src/entries/tide-pool/types";
@@ -366,7 +367,8 @@ function spawnCounts(world: World, steps: number) {
 test("grazing a patch reduces its own spawn output and the total patch output", () => {
   const world = new World(3);
   world.setEnvironment({ foodRate: 5 });
-  const steps = Math.round(60 / DT);
+  // 30 s keeps the total under MAX_FOOD so the cap cannot mask the difference.
+  const steps = Math.round(30 / DT);
   const before = spawnCounts(world, steps);
   for (let i = 0; i < 20; i++) graze(world);
   expect(world.patches[0].stock).toBeLessThan(0.3);
@@ -402,4 +404,127 @@ test("with every patch at the floor, total food is roughly the scattered share o
   expect(rate).toBeGreaterThan(expected * 0.7);
   expect(rate).toBeLessThan(expected * 1.3);
   expect(rate).toBeLessThan(5 * 0.5);
+});
+
+function pg(id: number, parent: number, over: Partial<PartGene> = {}): PartGene {
+  return {
+    id,
+    kind: "fin",
+    parent,
+    anchor: 0.5,
+    side: 1,
+    angle: 0.8,
+    length: 12,
+    width: 3,
+    frequency: 1.5,
+    amplitude: 0.5,
+    phase: 1,
+    skew: 0.3,
+    feather: 0.4,
+    ampWeights: [0],
+    freqWeights: [0],
+    ...over,
+  };
+}
+
+function limbBody(): Genome {
+  const root = pg(0, -1, { kind: "trunk", side: 0, angle: 0, anchor: 0, length: 20, width: 6, amplitude: 0 });
+  // root -> arm (side +1) -> hand (inline trunk child, side 0, angle 0.3) and a side fin on the arm.
+  const arm = pg(1, 0, { kind: "trunk", angle: 0.9 });
+  const hand = pg(2, 1, { kind: "fin", side: 0, angle: 0.3, phase: 2 });
+  const fin = pg(3, 1, { kind: "fin", side: -1, angle: 0.5, phase: 3 });
+  return { parts: [root, arm, hand, fin], hue: 100, reproduceAt: 0.8 };
+}
+
+test("duplicateMirrored copies the whole subtree, mirrors it, and keeps the genome valid", () => {
+  let sync = 0;
+  let alternating = 0;
+  for (let seed = 0; seed < 60; seed++) {
+    const g = limbBody();
+    const rng = new Rng(seed);
+    const ok = duplicateMirrored(g, rng);
+    expect(ok).toBe(true);
+    expect(validateGenome(g), `seed ${seed}`).toBeNull();
+    // Either the arm subtree (3 parts), or one of the lone leaves (1 part) was copied.
+    const added = g.parts.length - 4;
+    expect([1, 3]).toContain(added);
+    const src = [1, 2, 3].slice(0, added === 3 ? 3 : 1);
+    if (added === 3) {
+      const [arm, hand, fin] = g.parts.slice(4);
+      expect(arm.parent).toBe(0);
+      expect(arm.side).toBe(-1); // arm was +1
+      expect(hand.parent).toBe(g.parts.indexOf(arm)); // children follow the copy, not the original
+      expect(hand.side).toBe(0);
+      expect(hand.angle).toBeCloseTo(-0.3); // inline parts mirror by negating the angle
+      expect(fin.parent).toBe(g.parts.indexOf(arm));
+      expect(fin.side).toBe(1); // was -1
+      const d = ((arm.phase - 1) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      if (Math.abs(d) < 1e-9) sync++;
+      else {
+        expect(d).toBeCloseTo(Math.PI);
+        alternating++;
+      }
+      // Relative phases inside the copied limb are preserved.
+      expect((((hand.phase - arm.phase) - (2 - 1)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)).toBeCloseTo(0, 6);
+    }
+    expect(src.length).toBeGreaterThan(0);
+    expect(new Set(g.parts.map(p => p.id)).size).toBe(g.parts.length);
+  }
+  expect(sync).toBeGreaterThan(3);
+  expect(alternating).toBeGreaterThan(3);
+});
+
+test("duplicateMirrored refuses when the copy would exceed MAX_PARTS", () => {
+  const g = limbBody();
+  while (g.parts.length < MAX_PARTS) g.parts.push(pg(g.parts.length + 10, 0, { side: -1 }));
+  expect(duplicateMirrored(g, new Rng(1))).toBe(false);
+  expect(g.parts.length).toBe(MAX_PARTS);
+});
+
+test("repeatRadial adds 2-4 phase-lagged copies at one anchor and stays valid", () => {
+  const counts = new Set<number>();
+  for (let seed = 0; seed < 60; seed++) {
+    const g = limbBody();
+    const before = g.parts.length;
+    expect(repeatRadial(g, new Rng(seed))).toBe(true);
+    expect(validateGenome(g), `seed ${seed}`).toBeNull();
+    const n = g.parts.length - before;
+    counts.add(n);
+    expect(n).toBeGreaterThanOrEqual(2);
+    expect(n).toBeLessThanOrEqual(4);
+    // The ring: the members sharing the source's parent, kind and anchor.
+    const copy = g.parts[before];
+    const ring = g.parts.filter(p => p.parent === copy.parent && p.anchor === copy.anchor && p.kind === copy.kind && p.length === copy.length && p.side !== 0);
+    expect(ring.length).toBe(n + 1);
+    const members = n + 1;
+    const lags = ring.map(p => p.phase);
+    const base = lags[0];
+    lags.forEach((ph, j) => {
+      const d = (((ph - base - (2 * Math.PI * j) / members) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      expect(Math.min(d, 2 * Math.PI - d)).toBeLessThan(1e-6);
+    });
+  }
+  expect(counts.size).toBe(3);
+});
+
+test("random founders include mirrored pairs, and 2,000 chained mutations with the new operators stay valid", () => {
+  let paired = 0;
+  for (let seed = 0; seed < 300; seed++) {
+    const g = randomGenome(new Rng(seed));
+    expect(validateGenome(g), `seed ${seed}`).toBeNull();
+    if (hasBilateralPair(g)) paired++;
+  }
+  expect(paired).toBeGreaterThan(300 * 0.15);
+
+  const rng = new Rng(777);
+  let genome = randomGenome(rng);
+  let biggest = 0;
+  for (let i = 0; i < 2000; i++) {
+    const r = mutate(genome, rng);
+    expect(validateGenome(r.genome), `mutation ${i}`).toBeNull();
+    biggest = Math.max(biggest, r.genome.parts.length);
+    genome = r.genome;
+    if (i % 400 === 399) genome = randomGenome(rng);
+  }
+  expect(biggest).toBeLessThanOrEqual(MAX_PARTS);
 });

@@ -40,12 +40,16 @@ const DOMINANT_MARK_SHARE = 0.4;
 const TICK_MS = 125;
 const MIN_INSPECT_AGE = 20;
 const EMPTY_AFTER = 10;
+/** Seconds of recent deaths summarised in the empty-pool notice. */
+const CAUSE_WINDOW = 120;
+/** A mover's speed (world units per second) that counts as fully travelling. */
+const TRAVEL_SPEED = 6;
 
 /** Engine statistics the UI reads when present; computed here when absent. */
 type ExtraStats = { dominantLineage?: number; dominantShare?: number; extinct?: boolean };
 
 type Takeover = { id: number; share: number };
-type Readout = { population: number; lineages: number; food: number; clock: string; speed: string; extinct: boolean; takeover: Takeover | null };
+type Readout = { population: number; lineages: number; food: number; clock: string; speed: string; extinct: boolean; extinctCause: string; takeover: Takeover | null };
 type LineageChip = { id: number; count: number; description: string };
 type Inspected = {
   id: number;
@@ -65,7 +69,7 @@ type Inspected = {
   cause: "alive" | "starved" | "age" | "unknown";
 };
 
-const EMPTY_READOUT: Readout = { population: 0, lineages: 0, food: 0, clock: "00:00", speed: "0.0", extinct: false, takeover: null };
+const EMPTY_READOUT: Readout = { population: 0, lineages: 0, food: 0, clock: "00:00", speed: "0.0", extinct: false, extinctCause: "", takeover: null };
 
 const ENVIRONMENT_CONTROLS: readonly {
   key: "foodRate" | "currentStrength" | "temperature" | "viscosity";
@@ -100,25 +104,47 @@ function newSeed(): number {
   return Math.floor(Math.random() * 0x7fffffff);
 }
 
+/** Mean distance per second along the organism's recent trail (points are ~0.1 s apart). */
+function meanTrailSpeed(organism: Organism): number {
+  const trail = organism.trail;
+  if (trail.length < 2) return 0;
+  let distance = 0;
+  for (let i = 1; i < trail.length; i++) distance += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y);
+  return distance / ((trail.length - 1) * 0.1);
+}
+
 /**
- * The best forager among organisms old enough for the rate to mean something
- * (meals per second alive), falling back to the most meals when all are young.
+ * The most successful mover among organisms old enough for the rate to mean something:
+ * meals per minute, scaled down for animals that barely travel. Falls back to the most meals.
  */
 function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefined {
   let veteran: Organism | undefined;
-  let veteranRate = -1;
+  let veteranScore = -1;
   let fallback: Organism | undefined;
   for (const organism of world.organisms) {
     if (lineage !== undefined && organism.lineage !== lineage) continue;
     if (!fallback || organism.meals > fallback.meals || (organism.meals === fallback.meals && organism.energy > fallback.energy)) fallback = organism;
     if (organism.age <= MIN_INSPECT_AGE) continue;
-    const rate = organism.meals / organism.age;
-    if (!veteran || rate > veteranRate || (rate === veteranRate && organism.energy > veteran.energy)) {
+    const score = (organism.meals / organism.age) * 60 * Math.min(1, meanTrailSpeed(organism) / TRAVEL_SPEED);
+    if (!veteran || score > veteranScore || (score === veteranScore && organism.energy > veteran.energy)) {
       veteran = organism;
-      veteranRate = rate;
+      veteranScore = score;
     }
   }
   return veteran ?? fallback;
+}
+
+/** "Last 12 died of starvation" from the deaths in the last two minutes of world time. */
+function describeExtinction(world: WorldLike): string {
+  let starved = 0, aged = 0;
+  for (const event of world.events) {
+    if (event.kind !== "death" || event.time < world.time - CAUSE_WINDOW) continue;
+    if (event.cause === "starved") starved++;
+    else if (event.cause === "age") aged++;
+  }
+  const total = starved + aged;
+  if (total === 0) return "";
+  return `Last ${total} died of ${starved >= aged ? "starvation" : "old age"}`;
 }
 
 function snapshot(world: WorldLike, id: number, previous: Inspected | null): Inspected | null {
@@ -275,7 +301,8 @@ export function TidePool() {
   const suppressClickRef = useRef(false);
   const uiRef = useRef<UiState>({ selectedId: null, hoverId: null, following: false });
   const envRef = useRef<Environment>({ ...DEFAULT_ENVIRONMENT });
-  const speedRef = useRef(1);
+  // 4× by default: a generation then passes in roughly ten seconds of watching; 1× is the slow view.
+  const speedRef = useRef(4);
   const pausedRef = useRef(false);
   const reducedRef = useRef(false);
   const inspectedRef = useRef<Inspected | null>(null);
@@ -285,7 +312,7 @@ export function TidePool() {
   const prefersReducedMotion = useSyncExternalStore(subscribeReducedMotion, () => matchMedia(REDUCED_MOTION).matches, () => false);
   const [userPaused, setUserPaused] = useState<boolean | null>(null);
   const paused = userPaused ?? prefersReducedMotion;
-  const [speed, setSpeedState] = useState<number>(1);
+  const [speed, setSpeedState] = useState<number>(4);
   const [envOpen, setEnvOpen] = useState(false);
   const [env, setEnv] = useState<Environment>({ ...DEFAULT_ENVIRONMENT });
   const [readout, setReadout] = useState<Readout>(EMPTY_READOUT);
@@ -340,13 +367,15 @@ export function TidePool() {
       stats.dominantShare !== undefined && stats.dominantLineage !== undefined && stats.dominantShare > 0
         ? { id: stats.dominantLineage, share: stats.dominantShare }
         : dominantRef.current;
+    const extinct = stats.extinct ?? (population === 0 && world.time > EMPTY_AFTER);
     const next: Readout = {
       population,
       lineages: stats.lineages,
       food: world.food.length,
       clock: formatClock(world.time),
       speed: stats.meanSpeed.toFixed(1),
-      extinct: stats.extinct ?? (population === 0 && world.time > EMPTY_AFTER),
+      extinct,
+      extinctCause: extinct ? describeExtinction(world) : "",
       takeover: takeover && takeover.share >= DOMINANT_MARK_SHARE ? takeover : null,
     };
     setReadout((prev) =>
@@ -356,6 +385,7 @@ export function TidePool() {
       prev.clock === next.clock &&
       prev.speed === next.speed &&
       prev.extinct === next.extinct &&
+      prev.extinctCause === next.extinctCause &&
       prev.takeover?.id === next.takeover?.id &&
       Math.round((prev.takeover?.share ?? 0) * 100) === Math.round((next.takeover?.share ?? 0) * 100)
         ? prev
@@ -694,6 +724,7 @@ export function TidePool() {
         {readout.extinct ? (
           <div className={styles.notice} role="status">
             <p>The pool is empty.</p>
+            {readout.extinctCause ? <p className={styles.cause}>{readout.extinctCause}</p> : null}
             <button type="button" className={styles.button} onClick={startPool}>
               New pool
             </button>
@@ -878,6 +909,26 @@ export function TidePool() {
             <span data-series="speed">speed {readout.speed}</span>
             <span data-series="lineages">lineages {readout.lineages}</span>
             <span data-series="population">pop {readout.population}</span>
+          </div>
+          <div className={styles.marks} data-marks="" aria-label="Marks in the pool: born, starved, aged" role="group">
+            <span>
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+              born
+            </span>
+            <span>
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="1.5 1.7" opacity="0.7" />
+              </svg>
+              starved
+            </span>
+            <span>
+              <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <circle cx="6" cy="6" r="3.5" fill="currentColor" opacity="0.4" />
+              </svg>
+              aged
+            </span>
           </div>
         </div>
       </div>

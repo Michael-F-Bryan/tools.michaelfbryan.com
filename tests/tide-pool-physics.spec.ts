@@ -353,3 +353,9 @@ test("150 organisms of 8 parts at 16 substeps per frame fit a frame budget", () 
   console.log(`150 organisms x 8 parts x 16 substeps: ${perFrame.toFixed(1)} ms per frame`);
   expect(perFrame).toBeLessThan(60);
 });
+
+test("wide fins with a symmetric reciprocal stroke still barely move", () => {
+  const wide = twoFin({ skew: 0.5, feather: 0, width: 8 });
+  run(wide, still(), 10);
+  expect(distance(wide.position, START)).toBeLessThan(5);
+});
