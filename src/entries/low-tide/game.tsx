@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  availableJobs, buildOptions, depthOf, floodTime, isDark, itemLabel, producers, tideElapsed,
-  BAND_NAMES, BANDS, TIDE_MS,
-  type Band, type BuildOption, type Crew, type Item, type State,
+  availableJobs, buildOptions, depthOf, floodTime, hasBuilt, isDark, itemLabel, planTrade, producers, score, tideElapsed,
+  BAND_NAMES, BANDS, CARGO, CARGO_VALUE, TIDE_MS,
+  type Band, type BuildOption, type Cargo, type Crew, type Item, type State,
 } from "./model";
 import { Scene, describeBand, type Figure } from "./scene";
 import { TideChart } from "./tide-chart";
@@ -16,7 +16,18 @@ function itemName(item: Item) {
   return itemLabel(item).toLowerCase();
 }
 
-const ENDING_LABEL = { beacon: "The beacon is lit", boat: "The boat is away", tides: "The twelfth tide is in" } as const;
+/** What a piece of this kind sells for at the turn, or null for building stock, which never sells. */
+function priceOf(item: Item): number | null {
+  return (CARGO as readonly string[]).includes(item) ? CARGO_VALUE[item as Cargo] : null;
+}
+
+/** Cargo as a short list: "2 pearls, brass". A count shows only when there is more than one. */
+function cargoList(items: readonly Cargo[]): string {
+  return CARGO.map(kind => [kind, items.filter(item => item === kind).length] as const)
+    .filter(([, count]) => count > 0)
+    .map(([kind, count]) => (count > 1 ? `${count} ${itemName(kind)}${kind === "pearl" ? "s" : ""}` : itemName(kind)))
+    .join(", ");
+}
 
 function clock(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -74,6 +85,13 @@ function Camp({ state, best, dispatch }: Props) {
   const plans = buildOptions(state);
   const buildable = plans.filter(plan => plan.ok).length;
   const making = producers(state);
+  const trade = planTrade(state);
+  const sold = score(state);
+  const trading = [
+    { id: "ship", label: "Ship", stands: hasBuilt(state, "beacon"), items: trade.ship, value: trade.value.ship, list: cargoList(trade.ship) },
+    { id: "trader", label: "Trader", stands: true, items: trade.trader, value: trade.value.trader, list: cargoList(trade.trader) },
+    { id: "boat", label: "Boat", stands: hasBuilt(state, "boat"), items: trade.boat, value: trade.value.boat, list: cargoList(trade.boat) },
+  ].filter(row => row.stands);
 
   const figures: Figure[] = state.crew.map(member => {
     const job = state.jobs.find(j => j.crew === member.id);
@@ -89,24 +107,22 @@ function Camp({ state, best, dispatch }: Props) {
 
   if (state.ended) {
     const end = state.ended;
+    const left = CARGO.filter(kind => (end.leftover[kind] ?? 0) > 0).map(kind => `${end.leftover[kind]} ${itemName(kind)}${kind === "pearl" && end.leftover[kind]! > 1 ? "s" : ""}`);
     return (
       <div className={styles.game}>
         <section className={styles.ending} aria-labelledby="low-tide-ending">
-          <p className={styles.label}>{ENDING_LABEL[end.reason]}</p>
-          <h2 id="low-tide-ending" ref={endingRef} tabIndex={-1}>
-            {end.reason === "beacon" ? `A harbour, on tide ${state.tide + 1}` : end.reason === "boat" ? `Under sail, on tide ${state.tide + 1}` : "The flat is under water"}
-          </h2>
+          <p className={styles.label}>The twelfth tide is in</p>
+          <h2 id="low-tide-ending" ref={endingRef} tabIndex={-1}>Twelve tides worked</h2>
           <p className={styles.score}>
             <span>Score</span> <strong>{end.score}</strong>
             {best ? <span className={styles.best}>{best.score > end.score ? `best on this browser ${best.score}` : best.score === end.score && end.score > 0 ? "your best so far" : ""}</span> : null}
           </p>
           <dl className={styles.breakdown}>
-            <dt>{end.reason === "boat" ? "Salvage aboard, counted double" : "Salvage on the tarp"}</dt><dd>{end.salvage}</dd>
-            <dt>{state.built.length} structures standing</dt><dd>{end.structures}</dd>
-            {end.foodScore ? <><dt>Food in store</dt><dd>{end.foodScore}</dd></> : null}
-            {end.beacon ? <><dt>{end.reason === "boat" ? "Boat launched" : "Beacon rung"}</dt><dd>{end.beacon}</dd></> : null}
-            {end.tidesLeft ? <><dt>{end.tidesLeft} tides to spare</dt><dd>{end.tidesLeftBonus}</dd></> : null}
+            <dt>Bought by ships</dt><dd>{end.ship}</dd>
+            <dt>Bought by the trader</dt><dd>{end.trader}</dd>
+            <dt>Carried by your boat</dt><dd>{end.boat}</dd>
           </dl>
+          <p className={styles.muted}>{left.length ? `Left on the tarp: ${left.join(", ")}.` : "Nothing left on the tarp."}</p>
           <p className={styles.muted}>
             {state.built.length ? `Built: ${state.built.map(itemName).join(", ")}. ` : "Nothing built. "}
             {hungry.length ? `${hungry.length} went to bed hungry.` : ""}
@@ -132,6 +148,7 @@ function Camp({ state, best, dispatch }: Props) {
           <div className={styles.topRow}>
             <p className={styles.tideLabel}>
               <span className={styles.tideNumber}>Tide {state.tide + 1} <span className={styles.of}>of {state.tides.length}</span></span>
+              <span className={styles.sold}>Sold {sold}</span>
               <span className={styles.phase}>{phase(state, elapsed, depth, dark)}</span>
             </p>
             {state.paused && state.time === 0 ? null : (
@@ -147,7 +164,7 @@ function Camp({ state, best, dispatch }: Props) {
             <div className={styles.veil} role="status">
               {state.time === 0 ? (
                 <>
-                  <p><strong>Two of you, twelve tides.</strong> The sea gives the flat back one band at a time: send people out while a band is dry, and build from the workbench, where every plan is in plain sight. End the run by ringing a beacon, launching a boat, or lasting out the twelve tides.</p>
+                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys one of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
                   <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
                 </>
               ) : (
@@ -190,6 +207,8 @@ function Camp({ state, best, dispatch }: Props) {
                   const later = queuing || !option.feasible;
                   const alreadyQueued = later && actor.queued?.band === selected && actor.queued.resource === option.resource;
                   const why = option.blocked.replace(/\.$/, "").toLowerCase();
+                  const price = priceOf(option.resource);
+                  const sells = price === null ? null : `sells for ${price}${option.yield > 1 ? " each" : ""}`;
                   return (
                     <button
                       key={option.resource}
@@ -197,13 +216,14 @@ function Camp({ state, best, dispatch }: Props) {
                       disabled={alreadyQueued}
                       data-tight={tight || undefined}
                       data-later={later || undefined}
-                      aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
+                      aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${sells ? `, ${sells}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
                       onClick={() => dispatch({ type: later ? "queue" : "send", crew: actor.id, band: selected, resource: option.resource })}
                     >
                       <span className={styles.optionName}>{itemName(option.resource)}{option.yield > 1 ? ` ×${option.yield}` : ""}</span>
                       <span className={styles.duration}>
                         {seconds(option.duration)}{alreadyQueued ? " · queued" : queuing ? ` · queue ${actor.name}` : later ? ` · ${why} · queue` : tight ? " · tight" : ""}
                       </span>
+                      {sells ? <span className={styles.price}>{sells}</span> : null}
                     </button>
                   );
                 })}
@@ -231,11 +251,16 @@ function Camp({ state, best, dispatch }: Props) {
                 <span>Food {food} · {state.crew.length} {state.crew.length === 1 ? "eats" : "eat"} at the turn</span>
               </li>
             </ul>
-            {making.length ? (
-              <ul className={styles.producers} aria-label="At the turn">
-                {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
-              </ul>
-            ) : null}
+            <ul className={styles.producers} aria-label="At the turn">
+              {trading.map(row => (
+                <li key={row.id} data-ready={row.items.length > 0 || undefined}>
+                  <strong>{row.label}</strong> · {row.items.length ? `${row.list} · ${row.value}` : "nothing to sell yet"}
+                </li>
+              ))}
+              {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
+              {trading.length === 1 ? <li className={styles.quiet}>No boat or beacon yet: only the trader calls, for one piece.</li> : null}
+              {trade.held.length ? <li className={styles.quiet}>Traders leave your last one of each until the final turn.</li> : null}
+            </ul>
           </section>
 
           <section className={styles.section} aria-labelledby="low-tide-workbench">
@@ -256,19 +281,21 @@ function Camp({ state, best, dispatch }: Props) {
                 </details>
               );
             })}
-            {state.built.includes("beacon") ? (
-              <button type="button" className={styles.primary} onClick={() => dispatch({ type: "ring" })}>Ring the beacon</button>
-            ) : null}
-            {state.built.includes("boat") ? (
-              <button type="button" className={styles.primary} onClick={() => dispatch({ type: "launch" })}>Launch the boat</button>
-            ) : null}
           </section>
 
           <section className={styles.section} aria-label="Stock">
             <h2 className={styles.label}>On the tarp</h2>
             {stock.length ? (
               <ul className={styles.stock} aria-label="Salvage">
-                {stock.map(item => <li key={item}>{itemName(item)} <span className={styles.count}>×{state.inventory[item]}</span></li>)}
+                {stock.map(item => {
+                  const price = priceOf(item);
+                  return (
+                    <li key={item} data-cargo={price !== null || undefined}>
+                      {itemName(item)} <span className={styles.count}>×{state.inventory[item]}</span>
+                      {price !== null ? <span className={styles.tag}>cargo · sells {price}</span> : null}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className={styles.muted}>Nothing yet. Send someone out.</p>

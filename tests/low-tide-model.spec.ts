@@ -7,14 +7,20 @@ import {
   buildOptions,
   canBuild,
   dispatch,
+  floodOffset,
   floodTime,
   forecast,
   isDark,
   jobDuration,
+  jobYield,
   newRun,
+  planTrade,
   producers,
   reach,
+  score,
+  searchTideTable,
   tideChart,
+  tideElapsed,
   tideTable,
   TIDE_MS,
   TIDES_PER_RUN,
@@ -28,6 +34,7 @@ import {
   type State,
 } from "../src/entries/low-tide/model";
 import {
+  BEST_KEY,
   CODEX_KEY,
   hasLegacyRun,
   LEGACY_RUN_KEY,
@@ -36,9 +43,11 @@ import {
   loadRun,
   recordBest,
   retireLegacyRun,
+  RULES_NOTICE,
   RUN_KEY,
   saveCodex,
   saveRun,
+  upgradeRun,
 } from "../src/entries/low-tide/storage";
 
 /** A seeded run whose tide chart satisfies `where`, so tests do not depend on luck. */
@@ -60,10 +69,19 @@ function withBuilt(state: State, built: Built[]): State {
 const send = (state: State, crew: number, band: Band, resource: Resource) => dispatch(state, { type: "send", crew, band, resource });
 const build = (state: State, out: Built) => dispatch(state, { type: "build", out });
 const lastLog = (state: State) => state.log[state.log.length - 1]?.text ?? "";
+/** The most recent "At the turn" line, which is not the last once the next tide's line follows it. */
+const saleLog = (state: State) => [...state.log].reverse().find((entry) => entry.text.startsWith("At the turn"));
+/** A running seed-1 run with `patch` applied; no jobs, so only the turn's own work happens. */
+const at = (patch: Partial<State>): State => ({ ...newRun(1), paused: false, food: 100, ...patch });
+/** Play to the end of the current tide. */
+const turn = (state: State): State => advance(state, TIDE_MS - tideElapsed(state));
 
-test("tide charts are seeded, plannable, start generously, never strand the crew, and always reach the wreck in daylight", () => {
-  for (let seed = 1; seed <= 400; seed++) {
+test("tide charts are seeded, plannable, start generously, never strand the crew, always reach the wreck in daylight, and bare the reef early", () => {
+  let fallbacks = 0;
+  for (let seed = 1; seed <= 1000; seed++) {
+    if (searchTideTable(seed) === null) fallbacks++;
     const tides = tideTable(seed);
+    expect(tides.slice(0, 3).some((depth) => depth >= 3), `seed ${seed}`).toBe(true);
     expect(tides).toEqual(tideTable(seed));
     expect(tides).toHaveLength(TIDES_PER_RUN);
     expect(tides[0]).toBeGreaterThanOrEqual(2);
@@ -76,11 +94,16 @@ test("tide charts are seeded, plannable, start generously, never strand the crew
     for (let i = 1; i < tides.length; i++) expect(Math.abs(tides[i] - tides[i - 1])).toBeLessThanOrEqual(2);
   }
   expect(tideTable(1)).not.toEqual(tideTable(2));
+  // The fallback chart is a safety net, not something a real seed should lean on.
+  expect(fallbacks).toBe(0);
 });
 
 test("a new run starts paused with two fed crew, rations, every blueprint visible, and the whole chart", () => {
   const state = newRun(7);
   expect(state.version).toBe(2);
+  expect(state.sales).toEqual({ trader: 0, boat: 0, ship: 0 });
+  expect(state.turnSales).toEqual([]);
+  expect(score(state)).toBe(0);
   expect(state.paused).toBe(true);
   expect(state.crew).toHaveLength(2);
   expect(state.food).toBe(6);
@@ -245,43 +268,66 @@ test("blueprints are visible with what is missing; building consumes inputs, unl
   expect(next.unlocked).toBe(1);
 });
 
-test("reach lets the crew work past the waterline all tide, slower, and never floods them", () => {
+test("reach opens a band past the waterline until the turn, slower, and the tide still sets how much fits", () => {
+  // The flood table: reach opens a band but it goes under with the outermost bare band, at the turn.
+  expect(floodOffset(2, 2, 1)).toBe(TURN_MS);
+  expect(floodOffset(1, 3, 2)).toBe("never-exposed");
+  expect(floodOffset(1, 2, 2)).toBe(TURN_MS);
+  expect(floodOffset(4, 3, 0)).toBe(TURN_MS);
+  expect(floodOffset(4, 1, 2)).toBe(TIDE_MS);
+  expect(floodOffset(2, 0, 0)).toBeNull();
+
   const base = runWhere((tides) => tides[0] === 2);
   expect(reach(base)).toBe(0);
   expect(availableJobs(base, 0).find((option) => option.resource === "kelp")?.blocked).toBe("Under water this tide.");
 
   const waded = withBuilt(base, ["waders"]);
   expect(reach(waded)).toBe(1);
-  expect(floodTime(waded, 2)).toBeNull();
+  expect(floodTime(waded, 2)).toBe(TURN_MS);
   expect(floodTime(waded, 3)).toBeUndefined();
   const kelp = availableJobs(waded, 0).find((option) => option.resource === "kelp")!;
-  expect(kelp).toMatchObject({ feasible: true, beyond: 1, duration: 30_000 });
+  expect(kelp).toMatchObject({ feasible: true, beyond: 1, duration: 30_000, floodsAt: TURN_MS });
 
+  // Raft and waders at depth 2: the wreck is two bands out at 2x time, and 56 s does not fit before the turn.
   const rafted = withBuilt(base, ["waders", "raft"]);
   expect(reach(rafted)).toBe(2);
-  const brass = availableJobs(rafted, 0).find((option) => option.resource === "brass")!;
-  expect(brass).toMatchObject({ feasible: true, beyond: 2, duration: 56_000 });
-  let out = send(rafted, 0, 3, "brass");
+  const noWinch = availableJobs(rafted, 0).find((option) => option.resource === "brass")!;
+  expect(noWinch).toMatchObject({ feasible: false, blocked: "Would flood first.", beyond: 2, duration: 56_000 });
+  // With the winch it takes 28 s and fits.
+  const winched = withBuilt(base, ["waders", "raft", "winch"]);
+  expect(availableJobs(winched, 0).find((option) => option.resource === "brass")).toMatchObject({ feasible: true, duration: 28_000 });
+  let out = send(winched, 0, 3, "brass");
   expect(lastLog(out)).toContain("on the raft");
-  out = advance(out, 56_000);
+  out = advance(out, 28_000);
   expect(out.inventory.brass).toBe(1);
+  // A reached job carries the turn as its flood time (oil: 30 s base, halved by the winch, doubled on the raft).
+  const oil = send(winched, 0, 3, "oil");
+  expect(oil.jobs[0]).toMatchObject({ beyond: 2, floodsAt: TURN_MS, finishesAt: 30_000 });
+  // Started late, it no longer fits: it waits for the next tide instead.
+  const lateOil = availableJobs(advance(winched, 25_000), 0).find((option) => option.resource === "oil")!;
+  expect(lateOil).toMatchObject({ feasible: false, blocked: "Would flood first.", waits: true });
 
   // Bare ground inside the waterline still floods exactly as before.
   expect(floodTime(rafted, 1)).toBe(TURN_MS);
+  // Depth 4 bare with the winch: three trips fit before the turn.
+  const deep = withBuilt({ ...base, tides: [4, ...base.tides.slice(1)] }, ["winch"]);
+  expect(jobDuration(deep, 0, "brass")).toBe(14_000);
 });
 
-test("structures change the rules: net, sled, winch, lantern, shelter", () => {
+test("structures change the rules: net, sled, winch, lantern, beacon, shelter", () => {
   const base = (() => {
     const run = runWhere((tides) => tides[0] === 3 && tides[3] >= 2);
     return { ...run, tides: [4, ...run.tides.slice(1)] };
   })();
   expect(jobDuration(base, 0, "brass")).toBe(28_000);
-  expect(jobDuration(withBuilt(base, ["winch"]), 0, "brass")).toBe(16_800);
+  expect(jobDuration(withBuilt(base, ["winch"]), 0, "brass")).toBe(14_000);
   expect(jobDuration(withBuilt(base, ["winch"]), 0, "stone")).toBe(18_000);
 
+  // The net no longer multiplies fish jobs, and the sled does not touch food.
+  expect(jobYield(withBuilt(base, ["net", "sled"]), "fish")).toBe(4);
   let netted = send(withBuilt(base, ["net"]), 0, 2, "fish");
   netted = advance(netted, 24_000);
-  expect(netted.food).toBe(6 + 8);
+  expect(netted.food).toBe(6 + 4);
 
   let sledded = send(withBuilt(base, ["sled"]), 0, 0, "stone");
   sledded = advance(sledded, 18_000);
@@ -295,6 +341,11 @@ test("structures change the rules: net, sled, winch, lantern, shelter", () => {
   expect(isDark(3)).toBe(true);
   expect(jobDuration(night, 0, "driftwood")).toBe(28_000);
   expect(jobDuration({ ...night, built: ["lantern"] }, 0, "driftwood")).toBe(14_000);
+  // The beacon keeps the lantern's light even though building it used the lantern up.
+  expect(jobDuration({ ...night, built: ["beacon"] }, 0, "driftwood")).toBe(14_000);
+  const darkReef = { ...night, tides: night.tides.map((depth, i) => (i === 3 ? 3 : depth)) };
+  expect(jobDuration({ ...darkReef, built: [] }, 0, "kelp")).toBe(40_000);
+  expect(jobDuration({ ...darkReef, built: ["beacon"] }, 0, "kelp")).toBe(20_000);
 
   let sheltered = give({ ...base, unlocked: 2 }, { reed: 1, clay: 1 });
   sheltered = build(sheltered, "shelter");
@@ -328,34 +379,109 @@ test("a queued job waits until it can finish, then starts by itself; queue behin
   expect(busy.jobs).toHaveLength(0);
 });
 
-test("ringing a finished beacon ends the run early with the bonus; otherwise the twelfth tide ends it", () => {
+test("the trader takes the most valuable piece at each turn and never the last one of a kind until the final turn", () => {
+  const sold = turn(at({ inventory: { pearl: 2, brass: 3 } }));
+  expect(sold.inventory).toEqual({ pearl: 1, brass: 3 });
+  expect(sold.sales).toEqual({ trader: 20, boat: 0, ship: 0 });
+  expect(sold.turnSales).toEqual([20]);
+  expect(score(sold)).toBe(20);
+  expect(saleLog(sold)).toMatchObject({ text: "At the turn: the trader takes 1 pearl (20).", kind: "gain" });
+
+  // The last one is kept: a brass waiting for its oil is safe.
+  const kept = turn(at({ inventory: { pearl: 1 } }));
+  expect(kept.inventory).toEqual({ pearl: 1 });
+  expect(score(kept)).toBe(0);
+  expect(kept.turnSales).toEqual([0]);
+  expect(saleLog(kept)).toMatchObject({ text: "At the turn: nothing to sell.", kind: "info" });
+
+  // Building stock never sells, whatever the amount.
+  const stock = turn(at({ inventory: { driftwood: 9, kelp: 9, rope: 4, brick: 4, clay: 3 } }));
+  expect(score(stock)).toBe(0);
+  expect(stock.inventory).toEqual({ driftwood: 9, kelp: 9, rope: 4, brick: 4, clay: 3 });
+
+  // On the final turn the last one goes too, and nothing is left over.
+  const final = turn(at({ tide: 11, time: 11 * TIDE_MS, inventory: { pearl: 1 } }));
+  expect(final.ended).toMatchObject({ reason: "tides", score: 20, trader: 20, boat: 0, ship: 0, leftover: {} });
+  expect(lastLog(final)).toBe("The last tide comes in. The traders have had their pick; the sea keeps the rest.");
+});
+
+test("the ship buys one of every kind once the beacon stands, before the trader chooses", () => {
+  const state = at({ built: ["beacon"], inventory: { pearl: 2, brass: 2, iron: 2, oil: 2, salt: 2 } });
+  const plan = planTrade(state);
+  expect(plan.ship).toEqual(["pearl", "brass", "iron", "oil", "salt"]);
+  expect(plan.trader).toEqual([]);
+  expect(plan.total).toBe(62);
+  const sold = turn(state);
+  expect(sold.sales).toEqual({ trader: 0, boat: 0, ship: 62 });
+  expect(sold.inventory).toEqual({ pearl: 1, brass: 1, iron: 1, oil: 1, salt: 1 });
+  expect(saleLog(sold)?.text).toContain("the ship buys pearl, brass, iron, oil, salt (62)");
+
+  // Surplus goes to the trader after the ship has had its one of each.
+  const more = planTrade(at({ built: ["beacon"], inventory: { pearl: 3, brass: 1 } }));
+  expect(more.ship).toEqual(["pearl"]);
+  expect(more.trader).toEqual(["pearl"]);
+  expect(more.held).toEqual(["brass"]);
+});
+
+test("the boat carries the next most valuable pieces after the trader, ties by cargo order", () => {
+  const sold = turn(at({ built: ["boat"], inventory: { pearl: 5, brass: 2 } }));
+  expect(sold.sales).toEqual({ trader: 20, boat: 60, ship: 0 });
+  expect(sold.inventory).toEqual({ pearl: 1, brass: 2 });
+  expect(saleLog(sold)?.text).toBe("At the turn: the trader takes 1 pearl (20); the boat carries 3 pearls (60).");
+
+  const mixed = planTrade(at({ built: ["boat"], inventory: { pearl: 2, brass: 3, iron: 3, oil: 3 } }));
+  expect(mixed.trader).toEqual(["pearl"]);
+  expect(mixed.boat).toEqual(["brass", "brass", "iron"]);
+  expect(mixed.value).toEqual({ ship: 0, trader: 20, boat: 12 + 12 + 10 });
+  expect(planTrade(at({ built: ["boat", "beacon"], inventory: {} }))).toMatchObject({ total: 0, ship: [], trader: [], boat: [] });
+});
+
+test("the run always lasts twelve tides: building the beacon or the boat does not end it, and the score is exactly what was sold", () => {
   let state = runWhere((tides) => tides[0] >= 2);
-  expect(dispatch(state, { type: "ring" }).ended).toBeNull();
-  state = withBuilt(state, ["bellTower", "lantern"]);
-  expect(canBuild(state, "beacon").ok).toBe(true);
+  state = give(withBuilt(state, ["bellTower", "lantern"]), { hull: 1, sail: 1 });
   state = build(state, "beacon");
-  expect(state.built).toEqual(["beacon"]);
-  state = give({ ...state, food: 15 }, { pearl: 1, driftwood: 40 });
-  state = dispatch(state, { type: "ring" });
-  // Only the first six of any one item count, so forty driftwood are worth six; food counts to ten.
-  expect(state.ended).toMatchObject({ reason: "beacon", beacon: 500, tidesLeft: 11, tidesLeftBonus: 440, salvage: 66, structures: 50, foodScore: 20 });
-  expect(state.ended?.score).toBe(66 + 50 + 20 + 500 + 440);
+  state = build(state, "boat");
+  expect(state.built).toEqual(["beacon", "boat"]);
+  expect(state.ended).toBeNull();
+
+  state = give({ ...state, food: 100 }, { pearl: 9, brass: 6, iron: 4, oil: 4, salt: 3 });
+  state = advance(state, 12 * TIDE_MS + 5);
+  expect(state.turnSales).toHaveLength(12);
+  expect(state.time).toBe(12 * TIDE_MS);
+  expect(state.ended?.reason).toBe("tides");
+  const { trader, boat, ship } = state.sales;
+  expect(state.ended?.score).toBe(trader + boat + ship);
+  expect(state.ended?.score).toBe(state.turnSales.reduce((sum, value) => sum + value, 0));
+  expect(state.ended).toMatchObject({ trader, boat, ship });
+  expect(trader).toBeGreaterThan(0);
+  expect(boat).toBeGreaterThan(0);
+  expect(ship).toBeGreaterThan(0);
   expect(advance(state, 10_000)).toBe(state);
   expect(send(state, 0, 0, "driftwood")).toBe(state);
 
-  let full = runWhere(() => true);
-  full = { ...withBuilt(full, ["fishTrap"]), food: 100 };
-  full = advance(full, TIDES_PER_RUN * TIDE_MS + 5);
-  expect(full.ended?.reason).toBe("tides");
-  expect(full.time).toBe(TIDES_PER_RUN * TIDE_MS);
-  expect(full.ended?.structures).toBe(50);
+  // Building stock left on the tarp scores nothing and is not reported as cargo.
+  const none = turn(at({ tide: 11, time: 11 * TIDE_MS, inventory: { driftwood: 3 } }));
+  expect(none.ended).toMatchObject({ score: 0, leftover: {} });
 });
 
-test("three ends: a boat launches with salvage counted double, a saltworks compounds every turn, and builtAt tells the story", () => {
-  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2 && tides[2] >= 2);
-  expect(dispatch(state, { type: "launch" }).ended).toBeNull();
+test("food is a build: the trap holds two, the net two more, and the net needs the trap", () => {
+  const trap = turn(at({ built: ["fishTrap"], food: 6 }));
+  expect(trap.food).toBe(6 + 2 - 2);
+  expect(trap.log.some((entry) => entry.text === "The fish trap holds 2 food.")).toBe(true);
+  expect(producers(at({ built: ["fishTrap"] }))[0].next).toBe("+2 food at the turn");
 
-  // Saltworks needs a kiln standing (not consumed) and then pays out at every turn, uncapped.
+  const netted = turn(at({ built: ["fishTrap", "net"], food: 6 }));
+  expect(netted.food).toBe(6 + 4 - 2);
+  expect(netted.log.some((entry) => entry.text === "The fish trap holds 4 food.")).toBe(true);
+  expect(producers(at({ built: ["fishTrap", "net"] }))[0].next).toBe("+4 food at the turn");
+
+  const open = { ...at({}), unlocked: 2 as const, inventory: { rope: 1, reed: 1 } };
+  expect(canBuild(open, "net")).toMatchObject({ ok: false, why: "Needs a fish trap standing." });
+  expect(canBuild({ ...open, built: ["fishTrap"] }, "net").ok).toBe(true);
+});
+
+test("a saltworks adds a salt at every turn, and the saltworks needs a kiln; builtAt tells the story", () => {
+  let state = runWhere((tides) => tides[0] >= 2 && tides[1] >= 2 && tides[2] >= 2);
   state = give({ ...state, unlocked: 2 }, { clay: 3, kelp: 2, stone: 1, driftwood: 3, rope: 2, reed: 3 });
   expect(canBuild(state, "saltworks").why).toBe("Needs a kiln standing.");
   state = build(state, "kiln");
@@ -365,25 +491,20 @@ test("three ends: a boat launches with salvage counted double, a saltworks compo
   expect(state.inventory.clay).toBeUndefined();
   expect(state.inventory.driftwood).toBe(3);
   state = { ...state, food: 20 };
+  // Two turns: one salt each. The first is kept, the second lets the trader take one.
   state = advance(state, 2 * TIDE_MS);
-  expect(state.inventory.salt).toBe(2);
   expect(state.tide).toBe(2);
+  expect(state.inventory.salt).toBe(1);
+  expect(state.sales.trader).toBe(10);
+  expect(state.turnSales).toEqual([0, 10]);
 
-  // Hull + sail make a boat; launching ends the run with the boat bonus and double salvage.
   state = build(state, "hull");
   state = build(state, "sail");
   expect(state.inventory).toMatchObject({ hull: 1, sail: 1 });
   state = build(state, "boat");
   expect(state.built).toContain("boat");
   expect(state.builtAt.boat).toBe(2);
-  const salvageAlone = { ...state, inventory: { salt: 2, pearl: 1 } };
-  const ended = dispatch(salvageAlone, { type: "launch" });
-  expect(ended.ended).toMatchObject({ reason: "boat", beacon: 300, tidesLeft: 9, tidesLeftBonus: 360, salvage: 2 * (2 * 25 + 60), structures: 150, foodScore: 20 });
-  expect(lastLog(ended)).toContain("The sail fills");
-
-  // Salt is never capped; ordinary salvage still is.
-  const salty = { ...state, inventory: { salt: 10, driftwood: 10 } };
-  expect(dispatch(salty, { type: "launch" }).ended?.salvage).toBe(2 * (250 + 6));
+  expect(state.ended).toBeNull();
 });
 
 test("advance is stable however finely time is sliced", () => {
@@ -443,6 +564,34 @@ test("saves round-trip, reload resumes paused, a first-pass save is retired not 
     expect(loadRun()).toBeNull();
     store.set(RUN_KEY, JSON.stringify({ version: 1 }));
     expect(loadRun()).toBeNull();
+
+    // A run saved before the cargo rules (no ledger) loads, paused, with a zeroed ledger and a notice.
+    const oldShape: Record<string, unknown> & { seed: number } = { ...runWhere(() => true) };
+    delete oldShape.sales;
+    delete oldShape.turnSales;
+    store.set(RUN_KEY, JSON.stringify(oldShape));
+    const upgraded = loadRun()!;
+    expect(upgraded.paused).toBe(true);
+    expect(upgraded.sales).toEqual({ trader: 0, boat: 0, ship: 0 });
+    expect(upgraded.turnSales).toEqual([]);
+    expect(upgraded.notice).toBe(RULES_NOTICE);
+    expect(upgraded.seed).toBe(oldShape.seed);
+
+    // A finished old-rules run is retired, not resumed; a finished new-rules run still loads.
+    const oldEnding = { reason: "beacon", score: 900, salvage: 1, structures: 1, foodScore: 1, beacon: 500, tidesLeft: 3, tidesLeftBonus: 120, builtCount: 4 };
+    store.set(RUN_KEY, JSON.stringify({ ...oldShape, ended: oldEnding }));
+    expect(loadRun()).toBeNull();
+    expect(upgradeRun({ ...oldShape, ended: oldEnding } as unknown as State)).toBeNull();
+    const finished = turn(at({ tide: 11, time: 11 * TIDE_MS, inventory: { pearl: 1 } }));
+    saveRun(finished);
+    expect(loadRun()?.ended).toEqual(finished.ended);
+
+    // Best scores from the old scale are not read.
+    store.clear();
+    store.set("low-tide:best:v2", JSON.stringify({ score: 3000, beacon: true, seed: 1 }));
+    expect(loadBest()).toBeNull();
+    recordBest({ score: 40, beacon: false, seed: 5 });
+    expect(JSON.parse(store.get(BEST_KEY)!).score).toBe(40);
   } finally {
     delete (globalThis as unknown as { window?: unknown }).window;
   }

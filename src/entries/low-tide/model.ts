@@ -9,37 +9,35 @@
 import {
   BAND_NAMES,
   BANDS,
-  BEACON_BONUS,
   BLUEPRINTS,
-  BOAT_BONUS,
+  BOAT_HOLD,
   BUILT_LABELS,
+  CARGO,
+  CARGO_VALUE,
   CREEP_MS,
   FISH_TRAP_FOOD,
-  FOOD_CAP,
-  FOOD_VALUE,
-  MATERIAL_VALUE,
   MAX_CREW,
+  NET_FOOD,
   RESOURCES,
   RESOURCES_BY_BAND,
-  SALVAGE_CAP,
   STARTING_CREW,
   STARTING_FOOD,
-  STRUCTURE_VALUE,
   TIDE_MS,
-  TIDE_REMAINING_BONUS,
   TIDES_PER_RUN,
+  TRADER_HOLD,
   TURN_MS,
-  UNCAPPED,
+  WINCH_FACTOR,
   type Band,
   type Blueprint,
   type Built,
+  type Cargo,
   type Item,
   type Resource,
   type Tier,
 } from "./data";
 
-export { TIDE_MS, TIDES_PER_RUN, TURN_MS, CREEP_MS, BANDS, BAND_NAMES, RESOURCES, RESOURCES_BY_BAND, BLUEPRINTS, BUILT_LABELS, MAX_CREW };
-export type { Band, Built, Item, Resource, Blueprint, Tier };
+export { TIDE_MS, TIDES_PER_RUN, TURN_MS, CREEP_MS, BANDS, BAND_NAMES, RESOURCES, RESOURCES_BY_BAND, BLUEPRINTS, BUILT_LABELS, MAX_CREW, CARGO, CARGO_VALUE, TRADER_HOLD, BOAT_HOLD, NET_FOOD, FISH_TRAP_FOOD };
+export type { Band, Built, Cargo, Item, Resource, Blueprint, Tier };
 
 export type Job = Readonly<{
   id: number;
@@ -49,7 +47,7 @@ export type Job = Readonly<{
   /** Absolute game ms. */
   startedAt: number;
   finishesAt: number;
-  /** Absolute game ms at which this band goes under, or null if it is safe all tide. */
+  /** Absolute game ms at which this band goes under, or null if it is safe all tide (the shingle only). */
   floodsAt: number | null;
   /** How many bands past the waterline this job is (0 = on exposed ground). */
   beyond: 0 | 1 | 2;
@@ -69,15 +67,18 @@ export type Crew = Readonly<{
 export type LogEntry = Readonly<{ time: number; text: string; kind: "info" | "gain" | "loss" | "build" }>;
 
 export type Ending = Readonly<{
-  reason: "tides" | "beacon" | "boat";
+  /** Every run ends when the twelfth tide turns. */
+  reason: "tides";
+  /** trader + boat + ship. */
   score: number;
-  salvage: number;
-  structures: number;
-  foodScore: number;
-  beacon: number;
-  tidesLeft: number;
-  tidesLeftBonus: number;
-  builtCount: number;
+  /** Value sold to the trader over the run. */
+  trader: number;
+  /** Value carried by your boat over the run. */
+  boat: number;
+  /** Value bought by ships over the run. */
+  ship: number;
+  /** Cargo still on the tarp after the last turn, which the sea keeps. */
+  leftover: Partial<Record<Cargo, number>>;
 }>;
 
 export type State = Readonly<{
@@ -96,6 +97,10 @@ export type State = Readonly<{
   inventory: Readonly<Partial<Record<Item, number>>>;
   food: number;
   built: readonly Built[];
+  /** Running total of value sold, by buyer. The score is their sum. */
+  sales: Readonly<{ trader: number; boat: number; ship: number }>;
+  /** Value sold at the end of each finished tide; index = tide. */
+  turnSales: readonly number[];
   /** Tide index on which each thing was first built this run, for the chart and the run's story. */
   builtAt: Readonly<Partial<Record<Built, number>>>;
   /** Highest blueprint tier that may be built. */
@@ -114,8 +119,6 @@ export type Action =
   | { type: "unqueue"; crew: number }
   | { type: "recall"; job: number }
   | { type: "build"; out: Built }
-  | { type: "ring" }
-  | { type: "launch" }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "dismissNotice" }
@@ -145,9 +148,16 @@ function rng(seed: number): () => number {
  * rather than a lottery. Guarantees: the first tide bares at least the mudflat
  * (2 or 3); depth-1 tides never come in a pair; at least two tides reach the
  * wreck, one of them in daylight in the second half, so a beacon is always
- * possible once you know what it needs.
+ * possible once you know what it needs; and one of the first three tides bares
+ * the reef, so pearls and the boat's cargo are never gated to the second half.
  */
 export function tideTable(seed: number): number[] {
+  // Statistically unreachable; keep the type honest with a plannable fallback.
+  return searchTideTable(seed) ?? [2, 3, 4, 4, 3, 2, 1, 2, 3, 4, 3, 2];
+}
+
+/** The seeded search behind `tideTable`; null if no attempt met every guarantee (a test counts these). */
+export function searchTideTable(seed: number): number[] | null {
   const next = rng(seed);
   for (let attempt = 0; attempt < 200; attempt++) {
     const phase = next() * 8;
@@ -164,10 +174,10 @@ export function tideTable(seed: number): number[] {
     }
     const wreckTides = tides.map((depth, i) => (depth === 4 ? i : -1)).filter((i) => i >= 0);
     const smooth = tides.every((depth, i) => i === 0 || Math.abs(depth - tides[i - 1]) <= 2);
-    if (smooth && wreckTides.length >= 2 && wreckTides.some((i) => i >= TIDES_PER_RUN / 2 && !isDark(i))) return tides;
+    const earlyReef = tides.slice(0, 3).some((depth) => depth >= 3);
+    if (smooth && earlyReef && wreckTides.length >= 2 && wreckTides.some((i) => i >= TIDES_PER_RUN / 2 && !isDark(i))) return tides;
   }
-  // Statistically unreachable; keep the type honest with a plannable fallback.
-  return [2, 3, 4, 4, 3, 2, 1, 2, 3, 4, 3, 2];
+  return null;
 }
 
 export function newRun(seed: number = Math.floor(Math.random() * 1_000_000), codex: readonly string[] = [], notice: string | null = null): State {
@@ -186,6 +196,8 @@ export function newRun(seed: number = Math.floor(Math.random() * 1_000_000), cod
     inventory: {},
     food: STARTING_FOOD,
     built: [],
+    sales: { trader: 0, boat: 0, ship: 0 },
+    turnSales: [],
     builtAt: {},
     unlocked: 1,
     codex: [...new Set(codex)].sort(),
@@ -242,15 +254,16 @@ export function tideChart(state: State): TideInfo[] {
 
 /**
  * Game ms within the current tide at which a band goes under, or null if it
- * stays workable all tide. The outermost exposed band turns at `TURN_MS`; the
- * water then climbs one band at a time, reaching the mudflat (band 1) at the
- * end of the tide, so a weak tide that only bares the mudflat also takes it
- * back early. The shingle never floods. Bands past the waterline within the
- * camp's reach are workable all tide.
+ * stays workable all tide (only the shingle). The outermost exposed band turns
+ * at `TURN_MS`; the water then climbs one band at a time, reaching the mudflat
+ * (band 1) at the end of the tide, so a weak tide that only bares the mudflat
+ * also takes it back early. Bands past the waterline within the camp's reach
+ * are workable until the turn, `TURN_MS`, like the outermost bare band: reach
+ * opens a band, but the tide still sets how much time you get in it.
  */
 export function floodOffset(depth: number, band: Band, reachBands: number): number | null | "never-exposed" {
   if (band === 0) return null;
-  if (band >= depth) return band - depth < reachBands ? null : "never-exposed";
+  if (band >= depth) return band - depth < reachBands ? TURN_MS : "never-exposed";
   const outermost = depth - 1;
   if (band === outermost) return TURN_MS;
   const steps = outermost - 1;
@@ -258,7 +271,7 @@ export function floodOffset(depth: number, band: Band, reachBands: number): numb
   return TURN_MS + ((TIDE_MS - TURN_MS) * index) / steps;
 }
 
-/** Absolute game ms at which `band` floods this tide, null if safe this tide, or undefined if not workable this tide. */
+/** Absolute game ms at which `band` floods this tide, null if safe all tide (the shingle), or undefined if not workable this tide. */
 export function floodTime(state: State, band: Band): number | null | undefined {
   const offset = floodOffset(depthOf(state), band, reach(state));
   if (offset === "never-exposed") return undefined;
@@ -272,7 +285,7 @@ export function isExposed(state: State, band: Band): boolean {
   return flood === null || state.time < flood;
 }
 
-/** 0 on bare ground; 1 or 2 if the band is under water but within reach. */
+/** 0 on bare ground; 1 or 2 if the band is under water but within reach (workable until the turn). */
 export function beyondWaterline(state: State, band: Band): 0 | 1 | 2 {
   const depth = depthOf(state);
   if (band < depth) return 0;
@@ -312,8 +325,9 @@ export function isIdle(state: State, crewId: number): boolean {
 export function jobDuration(state: State, crewId: number, resource: Resource): number {
   const info = RESOURCES[resource];
   let ms = info.duration;
-  if (hasBuilt(state, "winch") && info.band === 3) ms *= 0.6;
-  if (isDark(state.tide) && !hasBuilt(state, "lantern")) ms *= 2;
+  if (hasBuilt(state, "winch") && info.band === 3) ms *= WINCH_FACTOR;
+  // The beacon keeps the lantern's light even though building it uses the lantern up.
+  if (isDark(state.tide) && !hasBuilt(state, "lantern") && !hasBuilt(state, "beacon")) ms *= 2;
   const beyond = beyondWaterline(state, info.band);
   if (beyond === 1) ms *= 1.5;
   if (beyond === 2) ms *= 2;
@@ -325,7 +339,6 @@ export function jobDuration(state: State, crewId: number, resource: Resource): n
 export function jobYield(state: State, resource: Resource): number {
   const info = RESOURCES[resource];
   let amount = info.yield;
-  if (resource === "fish" && hasBuilt(state, "net")) amount += 4;
   if (!info.food && hasBuilt(state, "sled")) amount += 1;
   return amount;
 }
@@ -439,7 +452,7 @@ export type Producer = Readonly<{ id: "kiln" | "fishTrap"; label: string; ready:
 /** What the standing structures will do at the next turn of the tide, for anticipation. */
 export function producers(state: State): Producer[] {
   const out: Producer[] = [];
-  if (hasBuilt(state, "fishTrap")) out.push({ id: "fishTrap", label: "Fish trap", ready: true, next: `+${FISH_TRAP_FOOD} food at the turn` });
+  if (hasBuilt(state, "fishTrap")) out.push({ id: "fishTrap", label: "Fish trap", ready: true, next: `+${trapFood(state)} food at the turn` });
   if (hasBuilt(state, "kiln")) {
     const ready = countOf(state, "clay") >= 1 && countOf(state, "driftwood") >= 1;
     out.push({ id: "kiln", label: "Kiln", ready, next: ready ? "fires a brick at the turn" : "needs clay and driftwood to fire" });
@@ -447,14 +460,77 @@ export function producers(state: State): Producer[] {
   return out;
 }
 
-export function salvageValue(state: State): number {
-  let value = 0;
-  for (const [item, count] of Object.entries(state.inventory) as [Item, number][]) {
-    const counted = UNCAPPED.includes(item) ? count : Math.min(count, SALVAGE_CAP);
-    if (item in RESOURCES) value += RESOURCES[item as Resource].value * counted;
-    else if (item in MATERIAL_VALUE) value += MATERIAL_VALUE[item as keyof typeof MATERIAL_VALUE] * counted;
+/** Food the fish trap holds at each turn: the trap alone, plus the net's share once it hangs across the mouth. */
+function trapFood(state: State): number {
+  return FISH_TRAP_FOOD + (hasBuilt(state, "net") ? NET_FOOD : 0);
+}
+
+/** The score so far: everything sold to the trader, your boat and ships. */
+export function score(state: State): number {
+  return state.sales.trader + state.sales.boat + state.sales.ship;
+}
+
+export type TradePlan = Readonly<{
+  ship: Cargo[];
+  trader: Cargo[];
+  boat: Cargo[];
+  value: Readonly<{ ship: number; trader: number; boat: number }>;
+  total: number;
+  /** Cargo kinds a sale would have taken but for the keep-last-one rule (empty on the final turn). */
+  held: Cargo[];
+}>;
+
+/**
+ * What would sell at the next turn of the tide, given the tarp as it is now.
+ * Pure, and the engine's own `trade` applies exactly this, so a UI preview
+ * cannot disagree with the sale. Traders never take the last one of a kind
+ * until the final turn, so a brass waiting for its oil is safe. Order: the
+ * ship (if the beacon stands) buys one of every kind, then the trader takes
+ * the most valuable piece left, then the boat (if it stands) the next
+ * `BOAT_HOLD` most valuable.
+ */
+export function planTrade(state: State): TradePlan {
+  const final = state.tide >= state.tides.length - 1;
+  const keep = final ? 0 : 1;
+  const left: Record<Cargo, number> = { pearl: 0, brass: 0, iron: 0, oil: 0, salt: 0 };
+  const held: Cargo[] = [];
+  for (const kind of CARGO) {
+    const have = state.inventory[kind] ?? 0;
+    left[kind] = Math.max(0, have - keep);
+    if (have > 0 && left[kind] === 0) held.push(kind);
   }
-  return value;
+  const ship: Cargo[] = [];
+  if (hasBuilt(state, "beacon")) {
+    for (const kind of CARGO) {
+      if (left[kind] > 0) {
+        ship.push(kind);
+        left[kind] -= 1;
+      }
+    }
+  }
+  const trader: Cargo[] = [];
+  const boat: Cargo[] = [];
+  const picks = TRADER_HOLD + (hasBuilt(state, "boat") ? BOAT_HOLD : 0);
+  for (let i = 0; i < picks; i++) {
+    let best: Cargo | null = null;
+    for (const kind of CARGO) {
+      if (left[kind] > 0 && (best === null || CARGO_VALUE[kind] > CARGO_VALUE[best])) best = kind;
+    }
+    if (best === null) break;
+    left[best] -= 1;
+    (i < TRADER_HOLD ? trader : boat).push(best);
+  }
+  const worth = (items: readonly Cargo[]) => items.reduce((sum, kind) => sum + CARGO_VALUE[kind], 0);
+  const value = { ship: worth(ship), trader: worth(trader), boat: worth(boat) };
+  return { ship, trader, boat, value, total: value.ship + value.trader + value.boat, held };
+}
+
+/** "2 pearls and 1 brass": cargo grouped by kind in `CARGO` order, for the log and the preview. */
+export function describeCargo(items: readonly Cargo[]): string {
+  const parts = CARGO.map((kind) => [kind, items.filter((item) => item === kind).length] as const)
+    .filter(([, count]) => count > 0)
+    .map(([kind, count]) => `${count} ${itemLabel(kind).toLowerCase()}${kind === "pearl" && count > 1 ? "s" : ""}`);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 
 export function tideLabel(state: State, tide: number = state.tide): string {
@@ -550,18 +626,20 @@ function endTide(s: State): State {
   for (const job of s.jobs) s = loseJob(s, job);
   s = produce(s);
   s = eat(s);
+  s = trade(s);
   const nextTide = s.tide + 1;
   if (nextTide >= s.tides.length) {
-    return finish({ ...s, time: s.tides.length * TIDE_MS }, "tides");
+    return finish({ ...s, time: s.tides.length * TIDE_MS });
   }
   s = { ...s, tide: nextTide, time: nextTide * TIDE_MS };
   return log(s, `The water falls. ${describeDepth(s.tides[nextTide])} ${tideLabel(s)}.`, "info");
 }
 
-/** Structures that work by themselves at the turn: the fish trap and the kiln. */
+/** Structures that work by themselves at the turn: the fish trap, the kiln and the saltworks. */
 function produce(s: State): State {
   if (hasBuilt(s, "fishTrap")) {
-    s = log({ ...s, food: s.food + FISH_TRAP_FOOD }, `The fish trap holds ${FISH_TRAP_FOOD} food.`, "gain");
+    const food = trapFood(s);
+    s = log({ ...s, food: s.food + food }, `The fish trap holds ${food} food.`, "gain");
   }
   if (hasBuilt(s, "kiln") && countOf(s, "clay") >= 1 && countOf(s, "driftwood") >= 1) {
     let inventory = addItem(s.inventory, "clay", -1);
@@ -573,6 +651,21 @@ function produce(s: State): State {
     s = log({ ...s, inventory: addItem(s.inventory, "salt", 1) }, "The saltworks leaves a crust of salt.", "gain");
   }
   return s;
+}
+
+/** The sale at the turn: apply `planTrade`, bank the value, and say what went. */
+function trade(s: State): State {
+  const plan = planTrade(s);
+  let inventory = s.inventory;
+  for (const kind of [...plan.ship, ...plan.trader, ...plan.boat]) inventory = addItem(inventory, kind, -1);
+  const sales = { trader: s.sales.trader + plan.value.trader, boat: s.sales.boat + plan.value.boat, ship: s.sales.ship + plan.value.ship };
+  s = { ...s, inventory, sales, turnSales: [...s.turnSales, plan.total] };
+  if (plan.total === 0) return log(s, "At the turn: nothing to sell.", "info");
+  const parts: string[] = [];
+  if (plan.ship.length > 0) parts.push(`the ship buys ${plan.ship.map((kind) => itemLabel(kind).toLowerCase()).join(", ")} (${plan.value.ship})`);
+  if (plan.trader.length > 0) parts.push(`the trader takes ${describeCargo(plan.trader)} (${plan.value.trader})`);
+  if (plan.boat.length > 0) parts.push(`the boat carries ${describeCargo(plan.boat)} (${plan.value.boat})`);
+  return log(s, `At the turn: ${parts.join("; ")}.`, "gain");
 }
 
 function eat(s: State): State {
@@ -621,32 +714,12 @@ function beginJob(s: State, crewId: number, option: JobOption): State {
   return log(s, `${member?.name ?? "Someone"} heads out to the ${BAND_NAMES[option.band].toLowerCase()}${how} for ${RESOURCES[option.resource].label.toLowerCase()}.`, "info");
 }
 
-function finish(s: State, reason: Ending["reason"]): State {
-  // Salvage counts double when it leaves on the boat.
-  const salvage = salvageValue(s) * (reason === "boat" ? 2 : 1);
-  const structures = s.built.length * STRUCTURE_VALUE;
-  const foodScore = Math.min(s.food, FOOD_CAP) * FOOD_VALUE;
-  const beacon = reason === "beacon" ? BEACON_BONUS : reason === "boat" ? BOAT_BONUS : 0;
-  const tidesLeft = reason === "tides" ? 0 : s.tides.length - 1 - s.tide;
-  const tidesLeftBonus = tidesLeft * TIDE_REMAINING_BONUS;
-  const ending: Ending = {
-    reason,
-    salvage,
-    structures,
-    foodScore,
-    beacon,
-    tidesLeft,
-    tidesLeftBonus,
-    builtCount: s.built.length,
-    score: salvage + structures + foodScore + beacon + tidesLeftBonus,
-  };
+function finish(s: State): State {
+  const leftover: Partial<Record<Cargo, number>> = {};
+  for (const kind of CARGO) if ((s.inventory[kind] ?? 0) > 0) leftover[kind] = s.inventory[kind];
+  const ending: Ending = { reason: "tides", score: score(s), trader: s.sales.trader, boat: s.sales.boat, ship: s.sales.ship, leftover };
   s = { ...s, jobs: [], crew: s.crew.map((member) => ({ ...member, queued: null })), ended: ending };
-  const line = {
-    beacon: "The bell rings out over the water. A ship turns toward the light.",
-    boat: "The sail fills. The flat slides away behind you, salvage and all.",
-    tides: "The last tide comes in. You count what the sea let you keep.",
-  }[reason];
-  return log(s, line, "build");
+  return log(s, "The last tide comes in. The traders have had their pick; the sea keeps the rest.", "build");
 }
 
 // ---------------------------------------------------------------------------
@@ -702,12 +775,6 @@ export function dispatch(state: State, action: Action): State {
     }
     case "build":
       return build(state, action.out);
-    case "ring":
-      if (!hasBuilt(state, "beacon")) return log(state, "There is no beacon to ring.", "info");
-      return finish(state, "beacon");
-    case "launch":
-      if (!hasBuilt(state, "boat")) return log(state, "There is no boat to launch.", "info");
-      return finish(state, "boat");
     default:
       return state;
   }
