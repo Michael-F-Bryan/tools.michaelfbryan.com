@@ -405,6 +405,12 @@ export class PoolRenderer {
     // distinct tone, so the canvas element's own extent stays readable while the camera moves inside it.
     ctx.fillStyle = palette.panel;
     ctx.fillRect(0, 0, layout.width, layout.height);
+    // The panel tone is close to the page in light theme, so shade it like the rock rim of a real pool:
+    // a visible band that is clearly not water and clearly not blank page.
+    ctx.globalAlpha = 0.09;
+    ctx.fillStyle = palette.ink;
+    ctx.fillRect(0, 0, layout.width, layout.height);
+    ctx.globalAlpha = 1;
 
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * layout.originX, dpr * layout.originY);
     if (!this.water || this.waterOwner !== ctx) {
