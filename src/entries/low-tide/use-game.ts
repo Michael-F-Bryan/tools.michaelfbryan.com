@@ -5,7 +5,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { advance, dispatch as apply, hasBuilt, newRun, type Action, type State } from "./model";
 import { hasLegacyRun, hasRetiredRun, loadBest, loadCodex, loadRun, recordBest, RETIRED_NOTICE, retireLegacyRun, saveCodex, saveRun, type Best } from "./storage";
 
-const LEGACY_NOTICE = "The flat has changed since your last visit: blueprints are all visible now, the whole tide chart is shown, and nobody starves. Your earlier run could not be carried over, so a fresh one begins. Your best score is kept.";
+const LEGACY_NOTICE = "Your earlier run could not be carried over, so a fresh one begins. Your best score is kept.";
 
 const TICK_MS = 250;
 

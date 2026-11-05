@@ -1,6 +1,6 @@
 "use client";
 
-import { beyondWaterline, depthOf, floodOffset, floodTime, hasBuilt, isDark, reach, tideElapsed, waterline, BANDS, BAND_NAMES, CREEP_MS, TURN_MS, type Band, type State } from "./model";
+import { beyondWaterline, depthOf, floodOffset, floodTime, hasBuilt, isDark, isExposed, reach, tideElapsed, waterline, BANDS, BAND_NAMES, CREEP_MS, TURN_MS, type Band, type State } from "./model";
 import styles from "./scene.module.css";
 
 /** The flat seen from the shore: the wreck at the top (sea), the shingle at the bottom. */
@@ -232,18 +232,22 @@ export function Scene({ state, figures, selected, onSelect }: {
 
       {/* Tap targets: one per band, stacked over the drawing, in reading order from the sea to the shore. */}
       <div className={styles.targets}>
-        {[...BANDS].reverse().map(band => (
-          <button
-            key={band}
-            type="button"
-            className={styles.target}
-            aria-pressed={selected === band}
-            aria-label={`${BAND_NAMES[band]}: ${describeBand(state, band)}`}
-            onClick={() => onSelect(band)}
-          >
-            <span className={styles.targetName}>{BAND_NAMES[band]}</span>
-          </button>
-        ))}
+        {[...BANDS].reverse().map(band => {
+          const open = isExposed(state, band);
+          return (
+            <button
+              key={band}
+              type="button"
+              className={styles.target}
+              aria-pressed={selected === band}
+              aria-disabled={!open || undefined}
+              aria-label={`${BAND_NAMES[band]}: ${describeBand(state, band)}`}
+              onClick={open ? () => onSelect(band) : undefined}
+            >
+              <span className={styles.targetName}>{BAND_NAMES[band]}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

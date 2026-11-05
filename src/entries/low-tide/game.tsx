@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  availableJobs, buildOptions, depthOf, floodTime, hasBuilt, isDark, itemLabel, planTrade, producers, score, tideElapsed,
+  availableJobs, buildOptions, isDark, isExposed, itemLabel, planTrade, producers, score, tideElapsed,
   BAND_NAMES, BANDS, CARGO, CARGO_VALUE, TIDE_MS,
   type Band, type BuildOption, type Cargo, type Crew, type Item, type State,
 } from "./model";
@@ -72,32 +72,27 @@ function Camp({ state, best, dispatch }: Props) {
   }, [state.ended]);
 
   const elapsed = tideElapsed(state);
-  const depth = depthOf(state);
   const dark = isDark(state.tide);
   const idle = state.crew.filter(member => !state.jobs.some(job => job.crew === member.id));
   // Who a tap sends: a free, fed person first; otherwise whoever is back soonest gets the job queued.
   const actor = idle.find(member => member.fed) ?? idle[0] ?? soonestBack(state);
   const queuing = !idle.length;
   const options = actor ? availableJobs(state, actor.id) : [];
-  const workable = (band: Band) => {
-    const flood = floodTime(state, band);
-    return flood !== undefined && (flood === null || state.time < flood);
-  };
-  const deepest = [...BANDS].reverse().find(workable) ?? 0;
-  const selected: Band = picked !== null && workable(picked) ? picked : deepest;
+  const deepest = [...BANDS].reverse().find(band => isExposed(state, band)) ?? 0;
+  const selected: Band = picked !== null && isExposed(state, picked) ? picked : deepest;
   const food = state.food;
   const hungry = state.crew.filter(member => !member.fed);
   const stock = (Object.keys(state.inventory) as Item[]).filter(item => (state.inventory[item] ?? 0) > 0).sort();
   const plans = buildOptions(state);
-  const buildable = plans.filter(plan => plan.ok).length;
   const making = producers(state);
   const trade = planTrade(state);
   const sold = score(state);
   const trading = [
-    { id: "ship", label: "Ship", stands: hasBuilt(state, "beacon"), items: trade.ship, value: trade.value.ship, list: cargoList(trade.ship) },
-    { id: "trader", label: "Trader", stands: true, items: trade.trader, value: trade.value.trader, list: cargoList(trade.trader) },
-    { id: "boat", label: "Boat", stands: hasBuilt(state, "boat"), items: trade.boat, value: trade.value.boat, list: cargoList(trade.boat) },
-  ].filter(row => row.stands);
+    { id: "ship", label: "Ship", items: trade.ship, value: trade.value.ship },
+    { id: "trader", label: "Trader", items: trade.trader, value: trade.value.trader },
+    { id: "boat", label: "Boat", items: trade.boat, value: trade.value.boat },
+  ].filter(row => row.items.length > 0);
+  const turnEvents = trading.length + making.length + trade.held.length;
 
   const figures: Figure[] = state.crew.map(member => {
     const job = state.jobs.find(j => j.crew === member.id);
@@ -117,7 +112,6 @@ function Camp({ state, best, dispatch }: Props) {
     return (
       <div className={styles.game}>
         <section className={styles.ending} aria-labelledby="low-tide-ending">
-          <p className={styles.label}>The twelfth tide is in</p>
           <h2 id="low-tide-ending" ref={endingRef} tabIndex={-1}>Twelve tides worked</h2>
           <p className={styles.score}>
             <span>Score</span> <strong>{end.score}</strong>
@@ -128,13 +122,10 @@ function Camp({ state, best, dispatch }: Props) {
             <dt>Bought by the trader</dt><dd>{end.trader}</dd>
             <dt>Carried by your boat</dt><dd>{end.boat}</dd>
           </dl>
-          <p className={styles.muted}>{left.length ? `Left on the tarp: ${left.join(", ")}.` : "Nothing left on the tarp."}</p>
-          <p className={styles.muted}>
-            {state.built.length ? `Built: ${state.built.map(itemName).join(", ")}. ` : "Nothing built. "}
-            {hungry.length ? `${hungry.length} went to bed hungry.` : ""}
-          </p>
+          {left.length ? <p className={styles.muted}>Left on the tarp: {left.join(", ")}.</p> : null}
+          {state.built.length ? <p className={styles.muted}>Built: {state.built.map(itemName).join(", ")}.</p> : null}
+          {hungry.length ? <p className={styles.muted}>{hungry.length} went to bed hungry.</p> : null}
           <button type="button" className={styles.primary} onClick={() => dispatch({ type: "newRun" })}>Work the flat again</button>
-          <p className={styles.footnote}>Nothing leaves your browser.</p>
         </section>
       </div>
     );
@@ -155,7 +146,7 @@ function Camp({ state, best, dispatch }: Props) {
             <p className={styles.tideLabel}>
               <span className={styles.tideNumber}>Tide {state.tide + 1} <span className={styles.of}>of {state.tides.length}</span></span>
               <span className={styles.sold}>Sold {sold}</span>
-              <span className={styles.phase}>{phase(state, elapsed, depth, dark)}</span>
+              <span className={styles.phase}>{dark ? "Dark · " : ""}{clock(TIDE_MS - elapsed)} left</span>
             </p>
             {state.paused && state.time === 0 ? null : (
               <button type="button" className={styles.pause} aria-pressed={state.paused} onClick={() => dispatch({ type: state.paused ? "resume" : "pause" })}>
@@ -167,16 +158,13 @@ function Camp({ state, best, dispatch }: Props) {
           <div className={styles.sceneBox}>
           <Scene state={state} figures={figures} selected={selected} onSelect={setPicked} />
           {state.paused ? (
-            <div className={styles.veil} role="status">
-              {state.time === 0 ? (
-                <>
-                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys up to two of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
-                  <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
-                </>
-              ) : (
-                <p><strong>Paused.</strong> The water waits for you.</p>
-              )}
-            </div>
+            state.time === 0 ? (
+              <div className={styles.veil}>
+                <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin</button>
+              </div>
+            ) : (
+              <div className={styles.veil} role="status"><p><strong>Paused</strong></p></div>
+            )
           ) : null}
           </div>
         </div>
@@ -222,7 +210,7 @@ function Camp({ state, best, dispatch }: Props) {
                       disabled={alreadyQueued}
                       data-tight={tight || undefined}
                       data-later={later || undefined}
-                      aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${sells ? `, ${sells}` : ""}${later && !queuing ? `. ${option.blocked} Starts when it can.` : ""}`}
+                      aria-label={`${later ? "Queue" : "Send"} ${actor.name} for ${itemName(option.resource)}, ${seconds(option.duration)}${option.yield > 1 ? `, brings ${option.yield}` : ""}${sells ? `, ${sells}` : ""}${later && !queuing ? `. ${option.blocked}` : ""}`}
                       onClick={() => dispatch({ type: later ? "queue" : "send", crew: actor.id, band: selected, resource: option.resource })}
                     >
                       <span className={styles.optionName}>{itemName(option.resource)}{option.yield > 1 ? ` ×${option.yield}` : ""}</span>
@@ -235,10 +223,9 @@ function Camp({ state, best, dispatch }: Props) {
                 })}
               </div>
             ) : null}
-            <p className={styles.hint}>Tap another band in the picture to send people there.</p>
           </section>
 
-          <section className={styles.section} aria-label="Crew and the turn">
+          <section className={styles.section} aria-label="Crew">
             <ul className={styles.crew} aria-label="Crew">
               {state.crew.map(member => {
                 const job = state.jobs.find(j => j.crew === member.id);
@@ -257,20 +244,21 @@ function Camp({ state, best, dispatch }: Props) {
                 <span>Food {food} · {state.crew.length} {state.crew.length === 1 ? "eats" : "eat"} at the turn</span>
               </li>
             </ul>
-            <ul className={styles.producers} aria-label="At the turn">
-              {trading.map(row => (
-                <li key={row.id} data-ready={row.items.length > 0 || undefined}>
-                  <strong>{row.label}</strong> · {row.items.length ? `${row.list} · ${row.value}` : "nothing to sell yet"}
-                </li>
-              ))}
-              {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
-              {trading.length === 1 ? <li className={styles.quiet}>No boat or beacon yet: only the trader calls, for one piece.</li> : null}
-              {trade.held.length ? <li className={styles.quiet}>Traders leave your last {joinKinds(trade.held)} for the workbench until the final turn.</li> : null}
-            </ul>
           </section>
 
+          {turnEvents ? (
+            <section className={styles.section} aria-labelledby="low-tide-turn">
+              <h2 id="low-tide-turn" className={styles.label}>At the turn</h2>
+              <ul className={styles.producers} aria-labelledby="low-tide-turn">
+                {trading.map(row => <li key={row.id} data-ready><strong>{row.label}</strong> · {cargoList(row.items)} · {row.value}</li>)}
+                {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
+                {trade.held.length ? <li className={styles.quiet}>Traders leave your last {joinKinds(trade.held)} for the workbench until the final turn.</li> : null}
+              </ul>
+            </section>
+          ) : null}
+
           <section className={styles.section} aria-labelledby="low-tide-workbench">
-            <h2 id="low-tide-workbench" className={styles.label}>Workbench <span>{buildable ? `${buildable} ready to build` : "gather what the plans need"}</span></h2>
+            <h2 id="low-tide-workbench" className={styles.label}>Workbench</h2>
             {([1, 2, 3] as const).map(tier => {
               const rows = plans.filter(plan => plan.blueprint.tier === tier);
               const locked = rows.every(plan => plan.locked);
@@ -282,17 +270,17 @@ function Camp({ state, best, dispatch }: Props) {
               if (!locked) return <div key={tier}>{list}</div>;
               return (
                 <details key={tier} className={styles.tierGroup}>
-                  <summary>Tier {tier} · {rows.map(plan => plan.blueprint.label.toLowerCase()).join(", ")} · build something from tier {tier - 1} first</summary>
+                  <summary>Tier {tier} · {rows.map(plan => plan.blueprint.label.toLowerCase()).join(", ")} · needs a tier {tier - 1} structure</summary>
                   {list}
                 </details>
               );
             })}
           </section>
 
-          <section className={styles.section}>
-            <h2 className={styles.label}>On the tarp</h2>
-            {stock.length ? (
-              <ul className={styles.stock} aria-label="On the tarp">
+          {stock.length ? (
+            <section className={styles.section} aria-labelledby="low-tide-tarp">
+              <h2 id="low-tide-tarp" className={styles.label}>On the tarp</h2>
+              <ul className={styles.stock} aria-labelledby="low-tide-tarp">
                 {stock.map(item => {
                   const price = priceOf(item);
                   return (
@@ -303,22 +291,21 @@ function Camp({ state, best, dispatch }: Props) {
                   );
                 })}
               </ul>
-            ) : (
-              <p className={styles.muted}>Nothing yet. Send someone out.</p>
-            )}
-          </section>
+            </section>
+          ) : null}
 
-          <section className={styles.section} aria-label="Log">
-            <div className={styles.log} role="log" aria-label="The tides so far">
-              {(showLog ? state.log : state.log.slice(-3)).map((entry, index) => (
-                <p key={`${entry.time}-${index}`} data-kind={entry.kind}><span className={styles.stamp}>T{Math.min(state.tides.length, Math.floor(entry.time / TIDE_MS) + 1)}</span>{entry.text}</p>
-              ))}
-            </div>
-            {state.log.length > 3 ? (
-              <button type="button" className={styles.linkish} aria-expanded={showLog} onClick={() => setShowLog(open => !open)}>{showLog ? "Fewer lines" : "Whole log"}</button>
-            ) : null}
-            <p className={styles.footnote}>Game time runs only while this page is open and unpaused. Nothing you do here leaves your browser.</p>
-          </section>
+          {state.log.length ? (
+            <section className={styles.section} aria-label="Log">
+              <div className={styles.log} role="log" aria-label="The tides so far">
+                {(showLog ? state.log : state.log.slice(-3)).map((entry, index) => (
+                  <p key={`${entry.time}-${index}`} data-kind={entry.kind}><span className={styles.stamp}>T{Math.min(state.tides.length, Math.floor(entry.time / TIDE_MS) + 1)}</span>{entry.text}</p>
+                ))}
+              </div>
+              {state.log.length > 3 ? (
+                <button type="button" className={styles.linkish} aria-expanded={showLog} onClick={() => setShowLog(open => !open)}>{showLog ? "Fewer lines" : "Whole log"}</button>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       </div>
     </div>
@@ -360,12 +347,4 @@ function soonestBack(state: State): Crew | undefined {
   const pool = unqueued.length ? unqueued : state.jobs;
   const job = [...pool].sort((a, b) => a.finishesAt - b.finishesAt)[0];
   return job ? state.crew.find(member => member.id === job.crew) : undefined;
-}
-
-function phase(state: State, elapsed: number, depth: number, dark: boolean): string {
-  const where = depth > 1 ? `out to the ${BAND_NAMES[(depth - 1) as Band].toLowerCase()}` : "barely off the shingle";
-  const left = TIDE_MS - elapsed;
-  const turn = floodTime(state, (depth - 1) as Band);
-  if (typeof turn === "number" && state.time >= turn) return `Rising · turns in ${clock(left)}`;
-  return `${dark ? "Dark, water" : "Water"} ${where} · ${clock(left)} left`;
 }

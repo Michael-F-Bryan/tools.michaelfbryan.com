@@ -206,7 +206,7 @@ export function newRun(seed: number = Math.floor(Math.random() * 1_000_000), cod
     ended: null,
     notice,
   };
-  return log(state, `Low water. ${describeDepth(tides[0])} ${tideLabel(state, 0)}.`, "info");
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ export function canBuild(state: State, out: Built): BuildCheck {
   if (state.ended) why = "The run is over.";
   else if (out === "shelter" && state.crew.length >= MAX_CREW) why = "There's no one else out here to shelter.";
   else if (blueprint.structure && out !== "shelter" && (hasBuilt(state, out) || spentInto(state, out))) why = "Already standing.";
-  else if (blueprint.tier > state.unlocked) why = `Build something from tier ${blueprint.tier - 1} first.`;
+  else if (blueprint.tier > state.unlocked) why = `Needs a tier ${blueprint.tier - 1} structure.`;
   else if (blueprint.requires && !hasBuilt(state, blueprint.requires)) why = `Needs a ${BUILT_LABELS[blueprint.requires].toLowerCase()} standing.`;
   else if (missing.length > 0) why = `Needs ${describeItems(missing)}.`;
   return { ok: why === "", missing, why };
@@ -453,10 +453,10 @@ export type Producer = Readonly<{ id: "kiln" | "fishTrap"; label: string; ready:
 /** What the standing structures will do at the next turn of the tide, for anticipation. */
 export function producers(state: State): Producer[] {
   const out: Producer[] = [];
-  if (hasBuilt(state, "fishTrap")) out.push({ id: "fishTrap", label: "Fish trap", ready: true, next: `+${trapFood(state)} food at the turn` });
+  if (hasBuilt(state, "fishTrap")) out.push({ id: "fishTrap", label: "Fish trap", ready: true, next: `+${trapFood(state)} food` });
   if (hasBuilt(state, "kiln")) {
     const ready = countOf(state, "clay") >= 1 && countOf(state, "driftwood") >= 1;
-    out.push({ id: "kiln", label: "Kiln", ready, next: ready ? "fires a brick at the turn" : "needs clay and driftwood to fire" });
+    out.push({ id: "kiln", label: "Kiln", ready, next: ready ? "fires a brick" : "needs clay and driftwood" });
   }
   return out;
 }
@@ -553,14 +553,6 @@ export function describeCargo(items: readonly Cargo[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 
-export function tideLabel(state: State, tide: number = state.tide): string {
-  return `Tide ${tide + 1} of ${state.tides.length}${isDark(tide) ? ", dark" : ""}`;
-}
-
-export function describeDepth(depth: number): string {
-  return ["Nothing but shingle.", "Only the shingle shows.", "The mudflat is bare.", "The reef is out.", "Even the wreck is dry."][depth] ?? "";
-}
-
 export function itemLabel(item: Item): string {
   return item in RESOURCES ? RESOURCES[item as Resource].label : BUILT_LABELS[item as Built];
 }
@@ -651,8 +643,7 @@ function endTide(s: State): State {
   if (nextTide >= s.tides.length) {
     return finish({ ...s, time: s.tides.length * TIDE_MS });
   }
-  s = { ...s, tide: nextTide, time: nextTide * TIDE_MS };
-  return log(s, `The water falls. ${describeDepth(s.tides[nextTide])} ${tideLabel(s)}.`, "info");
+  return { ...s, tide: nextTide, time: nextTide * TIDE_MS };
 }
 
 /** Structures that work by themselves at the turn: the fish trap, the kiln and the saltworks. */
@@ -718,7 +709,6 @@ function startQueued(s: State): State {
 }
 
 function beginJob(s: State, crewId: number, option: JobOption): State {
-  const member = crewOf(s, crewId);
   const job: Job = {
     id: s.nextJobId,
     crew: crewId,
@@ -729,9 +719,7 @@ function beginJob(s: State, crewId: number, option: JobOption): State {
     floodsAt: option.floodsAt ?? null,
     beyond: option.beyond,
   };
-  s = { ...s, jobs: [...s.jobs, job], nextJobId: s.nextJobId + 1 };
-  const how = option.beyond === 2 ? " on the raft" : option.beyond === 1 ? " in the shallows" : "";
-  return log(s, `${member?.name ?? "Someone"} heads out to the ${BAND_NAMES[option.band].toLowerCase()}${how} for ${RESOURCES[option.resource].label.toLowerCase()}.`, "info");
+  return { ...s, jobs: [...s.jobs, job], nextJobId: s.nextJobId + 1 };
 }
 
 function finish(s: State): State {
@@ -775,14 +763,11 @@ export function dispatch(state: State, action: Action): State {
     case "queue": {
       const member = crewOf(state, action.crew);
       if (!member || !RESOURCES_BY_BAND[action.band].includes(action.resource)) return state;
-      let s: State = {
+      const s: State = {
         ...state,
         crew: state.crew.map((other) => (other.id === action.crew ? { ...other, queued: { band: action.band, resource: action.resource } } : other)),
       };
-      const started = startQueued(s);
-      if (started !== s) return started;
-      s = log(s, `${member.name} will go to the ${BAND_NAMES[action.band].toLowerCase()} for ${RESOURCES[action.resource].label.toLowerCase()} as soon as the water allows.`, "info");
-      return s;
+      return startQueued(s);
     }
     case "unqueue":
       return { ...state, crew: state.crew.map((member) => (member.id === action.crew ? { ...member, queued: null } : member)) };
@@ -823,7 +808,7 @@ function build(state: State, out: Built): State {
     const id = s.crew.length;
     s = { ...s, crew: [...s.crew, { id, name: CREW_NAMES[id] ?? `Crew ${id + 1}`, fed: true, queued: null }] };
   }
-  s = log(s, `${blueprint.label}: ${blueprint.flavour}`, "build");
+  s = log(s, `Built ${blueprint.label.toLowerCase()}.`, "build");
   return startQueued(s);
 }
 

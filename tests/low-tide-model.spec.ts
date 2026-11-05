@@ -175,7 +175,6 @@ test("a job that cannot finish in time is held and starts by itself when the wat
   state = send(state, 0, 1, "clams");
   expect(state.jobs).toHaveLength(0);
   expect(state.crew[0].queued).toEqual({ band: 1, resource: "clams" });
-  expect(lastLog(state)).toContain("as soon as the water allows");
   state = advance(state, TIDE_MS - (TURN_MS - 10_000));
   expect(state.tide).toBe(1);
   expect(state.jobs).toHaveLength(1);
@@ -240,7 +239,7 @@ test("blueprints are visible with what is missing; building consumes inputs, unl
   let state = runWhere(() => true);
   const waders = canBuild(state, "waders");
   expect(waders).toEqual({ ok: false, missing: ["reed", "driftwood"], why: "Needs reeds, driftwood." });
-  expect(canBuild(state, "net").why).toBe("Build something from tier 1 first.");
+  expect(canBuild(state, "net").why).toBe("Needs a tier 1 structure.");
   expect(canBuild(give(state, { driftwood: 1 }), "sled")).toEqual({ ok: false, missing: ["driftwood"], why: "Needs driftwood." });
 
   state = give(state, { reed: 2, driftwood: 3, kelp: 1 });
@@ -250,7 +249,7 @@ test("blueprints are visible with what is missing; building consumes inputs, unl
   expect(state.inventory).toEqual({ reed: 1, driftwood: 2, kelp: 1 });
   expect(state.unlocked).toBe(2);
   expect(state.codex).toEqual(["waders"]);
-  expect(lastLog(state)).toContain("Reed wrapped over driftwood soles");
+  expect(lastLog(state)).toBe("Built waders.");
 
   // A material does not unlock a tier; a second pair of waders is refused.
   state = build(state, "rope");
@@ -305,7 +304,6 @@ test("reach opens a band past the waterline until the turn, slower, and the tide
   const winched = withBuilt(base, ["waders", "raft", "winch"]);
   expect(availableJobs(winched, 0).find((option) => option.resource === "brass")).toMatchObject({ feasible: true, duration: 24_000 });
   let out = send(winched, 0, 3, "brass");
-  expect(lastLog(out)).toContain("on the raft");
   out = advance(out, 24_000);
   expect(out.inventory.brass).toBe(1);
   // A reached job carries the turn as its flood time (oil: 26 s base, halved by the winch, doubled on the raft).
@@ -499,12 +497,12 @@ test("food is a build: the trap holds two, the net two more, and the net needs t
   const trap = turn(at({ built: ["fishTrap"], food: 6 }));
   expect(trap.food).toBe(6 + 2 - 2);
   expect(trap.log.some((entry) => entry.text === "The fish trap holds 2 food.")).toBe(true);
-  expect(producers(at({ built: ["fishTrap"] }))[0].next).toBe("+2 food at the turn");
+  expect(producers(at({ built: ["fishTrap"] }))[0].next).toBe("+2 food");
 
   const netted = turn(at({ built: ["fishTrap", "net"], food: 6 }));
   expect(netted.food).toBe(6 + 4 - 2);
   expect(netted.log.some((entry) => entry.text === "The fish trap holds 4 food.")).toBe(true);
-  expect(producers(at({ built: ["fishTrap", "net"] }))[0].next).toBe("+4 food at the turn");
+  expect(producers(at({ built: ["fishTrap", "net"] }))[0].next).toBe("+4 food");
 
   const open = { ...at({}), unlocked: 2 as const, inventory: { rope: 1, reed: 1 } };
   expect(canBuild(open, "net")).toMatchObject({ ok: false, why: "Needs a fish trap standing." });

@@ -106,7 +106,6 @@ export type Blueprint = Readonly<{
   structure: boolean;
   label: string;
   effect: string;
-  flavour: string;
 }>;
 
 /**
@@ -122,7 +121,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Waders",
     effect: "Work one band past the waterline until the tide turns, at 1.5× time.",
-    flavour: "Reed wrapped over driftwood soles. The water is no longer the edge.",
   },
   {
     out: "fishTrap",
@@ -131,7 +129,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Fish trap",
     effect: "+2 food at every turn of the tide.",
-    flavour: "A reed fence on a stone footing. The tide feeds you now.",
   },
   {
     out: "kiln",
@@ -140,7 +137,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Kiln",
     effect: "At each turn, fires one brick from one clay and one driftwood.",
-    flavour: "Stone walls packed with clay. Light it and it hums.",
   },
   {
     out: "sled",
@@ -149,7 +145,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Sled",
     effect: "Every job that is not food brings back one more.",
-    flavour: "Two planks and a rope of your own hair. It drags.",
   },
   {
     out: "rope",
@@ -157,8 +152,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { kelp: 1, reed: 1 },
     structure: false,
     label: "Rope",
-    effect: "A material. Nets, rafts and winches all start here.",
-    flavour: "Kelp twisted round reed holds. Rope.",
+    effect: "A material.",
   },
   {
     out: "net",
@@ -167,8 +161,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     requires: "fishTrap",
     structure: true,
     label: "Net",
-    effect: "Needs a fish trap. The trap holds 2 more food at every turn: enough for four.",
-    flavour: "Rope knotted across the trap mouth. It catches what the reed fence missed.",
+    effect: "Needs a fish trap. The trap holds 2 more food at every turn.",
   },
   {
     out: "raft",
@@ -177,7 +170,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Raft",
     effect: "One more band past the waterline (two with waders, at 2× time), until the tide turns.",
-    flavour: "Driftwood lashed with rope. It floats. Just.",
   },
   {
     out: "shelter",
@@ -186,7 +178,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Shelter",
     effect: "One more crew member joins you. Build another for a fourth. They eat too.",
-    flavour: "Reed thatch on a clay footing. Someone was waiting for a roof.",
   },
   {
     out: "winch",
@@ -195,7 +186,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Winch",
     effect: "Wreck jobs take half the time.",
-    flavour: "An iron drum and a rope. The wreck gives things up faster.",
   },
   {
     out: "lantern",
@@ -204,7 +194,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Lantern",
     effect: "Dark tides no longer slow your crew.",
-    flavour: "Brass cupped round a wick of oil. The night tide is yours.",
   },
   {
     out: "hull",
@@ -212,8 +201,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { driftwood: 3, rope: 1 },
     structure: false,
     label: "Hull",
-    effect: "Half of a boat. Add a sail.",
-    flavour: "Three planks and a rope, caulked with mud. It holds water out, mostly.",
+    effect: "Half of a boat.",
   },
   {
     out: "sail",
@@ -221,8 +209,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { reed: 3, rope: 1 },
     structure: false,
     label: "Sail",
-    effect: "Half of a boat. Add a hull.",
-    flavour: "Reed matting on a rope edge. It catches wind you cannot feel.",
+    effect: "Half of a boat.",
   },
   {
     out: "saltworks",
@@ -232,7 +219,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Saltworks",
     effect: "Needs a kiln. One salt at every turn: cargo worth 10.",
-    flavour: "Clay pans by the kiln, kelp ash in the brine. White crust by morning.",
   },
   {
     out: "boat",
@@ -241,7 +227,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Boat",
     effect: "At every turn, carries the next three most valuable pieces of cargo to market after the trader's pick.",
-    flavour: "Hull and sail. Now you go to the market instead of waiting for it.",
   },
   {
     out: "bellTower",
@@ -249,8 +234,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { brick: 2, stone: 1 },
     structure: true,
     label: "Bell tower",
-    effect: "Half of a beacon. Add a lantern.",
-    flavour: "Brick on stone, higher than the wreck. It wants a light.",
+    effect: "Half of a beacon.",
   },
   {
     out: "beacon",
@@ -259,7 +243,6 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     structure: true,
     label: "Beacon",
     effect: "At every turn, a ship calls and buys up to two of every kind of cargo. Its light keeps dark tides from slowing you.",
-    flavour: "The lantern goes up the tower. From the sea, this is a harbour now.",
   },
 ];
 
