@@ -424,7 +424,7 @@ export function canBuild(state: State, out: Built): BuildCheck {
   let why = "";
   if (state.ended) why = "The run is over.";
   else if (out === "shelter" && state.crew.length >= MAX_CREW) why = "There's no one else out here to shelter.";
-  else if (blueprint.structure && out !== "shelter" && hasBuilt(state, out)) why = "Already standing.";
+  else if (blueprint.structure && out !== "shelter" && (hasBuilt(state, out) || spentInto(state, out))) why = "Already standing.";
   else if (blueprint.tier > state.unlocked) why = `Build something from tier ${blueprint.tier - 1} first.`;
   else if (blueprint.requires && !hasBuilt(state, blueprint.requires)) why = `Needs a ${BUILT_LABELS[blueprint.requires].toLowerCase()} standing.`;
   else if (missing.length > 0) why = `Needs ${describeItems(missing)}.`;
@@ -443,7 +443,7 @@ export function buildOptions(state: State): BuildOption[] {
       missing: check.missing,
       why: check.why,
       locked: blueprint.tier > state.unlocked,
-      standing: blueprint.out === "shelter" ? state.crew.length >= MAX_CREW : blueprint.structure && hasBuilt(state, blueprint.out),
+      standing: blueprint.out === "shelter" ? state.crew.length >= MAX_CREW : blueprint.structure && (hasBuilt(state, blueprint.out) || spentInto(state, blueprint.out)),
     };
   });
 }
@@ -536,9 +536,13 @@ function neededByWorkbench(state: State, kind: Cargo): boolean {
   return BLUEPRINTS.some((blueprint) => {
     if (!blueprint.inputs[kind]) return false;
     if (!blueprint.structure) return true;
-    const spent = BLUEPRINTS.some((other) => other.inputs[blueprint.out] && hasBuilt(state, other.out));
-    return !hasBuilt(state, blueprint.out) && !spent;
+    return !hasBuilt(state, blueprint.out) && !spentInto(state, blueprint.out);
   });
+}
+
+/** True once `out` has been used up in a standing structure (the lantern goes up the beacon), so it still counts as done. */
+export function spentInto(state: State, out: Built): boolean {
+  return BLUEPRINTS.some((other) => other.inputs[out] && hasBuilt(state, other.out));
 }
 
 /** "2 pearls and 1 brass": cargo grouped by kind in `CARGO` order, for the log and the preview. */

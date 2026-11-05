@@ -170,7 +170,7 @@ function Camp({ state, best, dispatch }: Props) {
             <div className={styles.veil} role="status">
               {state.time === 0 ? (
                 <>
-                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys two of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
+                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys up to two of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
                   <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
                 </>
               ) : (
@@ -238,7 +238,7 @@ function Camp({ state, best, dispatch }: Props) {
             <p className={styles.hint}>Tap another band in the picture to send people there.</p>
           </section>
 
-          <section className={styles.section} aria-label="Crew">
+          <section className={styles.section} aria-label="Crew and the turn">
             <ul className={styles.crew} aria-label="Crew">
               {state.crew.map(member => {
                 const job = state.jobs.find(j => j.crew === member.id);
@@ -289,10 +289,10 @@ function Camp({ state, best, dispatch }: Props) {
             })}
           </section>
 
-          <section className={styles.section} aria-label="Stock">
+          <section className={styles.section}>
             <h2 className={styles.label}>On the tarp</h2>
             {stock.length ? (
-              <ul className={styles.stock} aria-label="Salvage">
+              <ul className={styles.stock} aria-label="On the tarp">
                 {stock.map(item => {
                   const price = priceOf(item);
                   return (

@@ -240,7 +240,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { hull: 1, sail: 1 },
     structure: true,
     label: "Boat",
-    effect: "At every turn, carries your three most valuable pieces of cargo to market.",
+    effect: "At every turn, carries the next three most valuable pieces of cargo to market after the trader's pick.",
     flavour: "Hull and sail. Now you go to the market instead of waiting for it.",
   },
   {
@@ -258,7 +258,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { bellTower: 1, lantern: 1 },
     structure: true,
     label: "Beacon",
-    effect: "At every turn, a ship calls and buys two of every kind of cargo. Its light keeps dark tides from slowing you.",
+    effect: "At every turn, a ship calls and buys up to two of every kind of cargo. Its light keeps dark tides from slowing you.",
     flavour: "The lantern goes up the tower. From the sea, this is a harbour now.",
   },
 ];

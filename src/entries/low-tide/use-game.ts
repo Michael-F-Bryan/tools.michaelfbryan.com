@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import { advance, dispatch as apply, hasBuilt, newRun, type Action, type State } from "./model";
-import { hasLegacyRun, loadBest, loadCodex, loadRun, recordBest, retireLegacyRun, saveCodex, saveRun, type Best } from "./storage";
+import { hasLegacyRun, hasRetiredRun, loadBest, loadCodex, loadRun, recordBest, RETIRED_NOTICE, retireLegacyRun, saveCodex, saveRun, type Best } from "./storage";
 
 const LEGACY_NOTICE = "The flat has changed since your last visit: blueprints are all visible now, the whole tide chart is shown, and nobody starves. Your earlier run could not be carried over, so a fresh one begins. Your best score is kept.";
 
@@ -29,7 +29,8 @@ function initialise(): Snapshot {
     state = saved;
   } else {
     const legacy = hasLegacyRun();
-    state = newRun(Number.isNaN(seed) ? undefined : seed, loadCodex(), legacy ? LEGACY_NOTICE : null);
+    const notice = legacy ? LEGACY_NOTICE : !saved && hasRetiredRun() ? RETIRED_NOTICE : null;
+    state = newRun(Number.isNaN(seed) ? undefined : seed, loadCodex(), notice);
     if (legacy) retireLegacyRun();
   }
   return { state, best: loadBest() };

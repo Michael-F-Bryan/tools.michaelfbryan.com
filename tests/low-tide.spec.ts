@@ -1,7 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 
-import { BLUEPRINTS, advance, isDark, newRun, planTrade, tideTable, type Built, type State } from "../src/entries/low-tide/model";
+import { BLUEPRINTS, RESOURCES_BY_BAND, advance, isDark, newRun, planTrade, tideTable, type Band, type Built, type State } from "../src/entries/low-tide/model";
 
 /** Seed 1's whole chart: [2, 4, 4, 4, 4, 2, 1, 2, 1, 3, 4, 4], dark on tides 4, 8 and 12. */
 const SEED = 1;
@@ -15,7 +15,7 @@ const game = (page: Page) => page.locator("div").filter({ has: chart(page) }).la
 const crew = (page: Page) => page.getByRole("list", { name: "Crew" });
 const chart = (page: Page) => page.getByRole("list", { name: "Tide chart" });
 const log = (page: Page) => page.getByRole("log", { name: "The tides so far" });
-const salvage = (page: Page) => page.getByRole("list", { name: "Salvage" });
+const salvage = (page: Page) => page.getByRole("list", { name: "On the tarp" });
 const turnList = (page: Page) => page.getByRole("list", { name: "At the turn" });
 const sold = (page: Page) => page.getByText(/^Sold \d+$/);
 const working = (page: Page) => page.getByRole("list", { name: /^Working on/ });
@@ -90,7 +90,7 @@ test("the catalogue opens the game at the first tide with the whole chart, a fre
   // Nothing moves until the player says so, and the veil says how points are earned.
   const veil = page.getByRole("status").filter({ hasText: "Two of you" });
   await expect(veil).toContainText("Two of you, twelve tides.");
-  await expect(veil).toContainText("at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys two of every kind");
+  await expect(veil).toContainText("at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys up to two of every kind");
   await expect(veil).toContainText("the sea only bares the reef and the wreck when the tide is low");
   await expect(veil).not.toContainText(/\b(ring|launch)\b/i);
   // The score starts at nothing, and the turn panel already says what the trader alone will do.
@@ -522,4 +522,71 @@ test("a run saved before the cargo rules loads paused with the rules notice and 
   await page.reload();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
   await expect(page.getByText("Low Tide's rules changed")).toHaveCount(0);
+});
+
+test("a fourth crew member fits inside the picture, ring and name, on every band", async ({ page }, info) => {
+  const crew = ["Wren", "Sol", "Ada", "Finn"].map((name, id) => ({ id, name, fed: true, queued: null }));
+  const base = runAt(1, { crew, built: ["shelter"] as Built[], unlocked: 2, food: 20 });
+  const jobsOn = (bands: Band[]) =>
+    bands.map((band, id) => ({ id, crew: id, band, resource: RESOURCES_BY_BAND[band][0], startedAt: base.time - 4_000, finishesAt: base.time + 6_000, floodsAt: band === 0 ? null : base.time + 40_000, beyond: 0 as const }));
+  const layouts: [string, Partial<State>][] = [
+    ["all idle on the shingle", {}],
+    ["one on each band", { jobs: jobsOn([0, 1, 2, 3]), nextJobId: 4 }],
+    ["all on the wreck", { jobs: jobsOn([3, 3, 3, 3]), nextJobId: 4 }],
+    ["all working the shingle", { jobs: jobsOn([0, 0, 0, 0]), nextJobId: 4 }],
+  ];
+  for (const [layout, patch] of layouts) {
+    await openWith(page, { ...base, ...patch });
+    await expect(page.getByText(/^Food \d+ · 4 eat at the turn$/)).toBeVisible();
+    const box = await scene(page).boundingBox();
+    const figures = page.locator('svg g[class*="person"]');
+    await expect(figures, layout).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
+      const rect = (await figures.nth(i).boundingBox())!;
+      expect(rect.x, `${layout}: figure ${i} left edge`).toBeGreaterThanOrEqual(box!.x);
+      expect(rect.x + rect.width, `${layout}: figure ${i} right edge`).toBeLessThanOrEqual(box!.x + box!.width);
+      expect(rect.y, `${layout}: figure ${i} top`).toBeGreaterThanOrEqual(box!.y);
+      expect(rect.y + rect.height, `${layout}: figure ${i} bottom`).toBeLessThanOrEqual(box!.y + box!.height);
+    }
+    // Four distinct places, so nobody stands on anyone else.
+    const lefts = await figures.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("transform")));
+    expect(new Set(lefts).size, layout).toBe(4);
+  }
+  await shot(page, info, "four-crew");
+  expect(await noOverflow(page)).toBe(true);
+});
+
+test("the wade and raft outline lasts only until the turn", async ({ page }) => {
+  // Tide 6 of seed 1 bares two bands; with waders the third is within reach until the turn.
+  await openWith(page, runAt(5, { built: ["waders"], unlocked: 2, food: 20, time: 5 * TIDE_MS + 1_000 }));
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByText(/^WADE/)).toBeVisible();
+  await page.clock.runFor(52_000);
+  await expect(tideLabel(page, 6)).toBeVisible();
+  await expect(page.getByText(/^WADE|^RAFT/)).toHaveCount(0);
+});
+
+test("a finished run saved under the old rules is retired with a notice, and the codex is kept", async ({ page }) => {
+  const oldEnding = { reason: "beacon", score: 900, salvage: 1, structures: 1, foodScore: 1, beacon: 500, tidesLeft: 3, tidesLeftBonus: 120, builtCount: 4 };
+  await page.clock.install();
+  await page.goto(`/low-tide?seed=${SEED}`);
+  await expect(page.getByRole("heading", { name: "Low Tide", exact: true })).toBeVisible();
+  await page.evaluate(([run, codex]) => {
+    localStorage.setItem("low-tide:run:v2", run);
+    localStorage.setItem("low-tide:codex:v1", codex);
+  }, [JSON.stringify({ ...runAt(11, {}), ended: oldEnding }), JSON.stringify(["waders"])]);
+  await page.reload();
+  const notice = page.getByRole("status").filter({ hasText: "had already finished under the old rules" });
+  await expect(notice).toContainText("so a fresh one begins. Your codex is kept.");
+  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(tideLabel(page, 1)).toBeVisible();
+  await notice.getByRole("button", { name: "Dismiss" }).click();
+  await expect(notice).toHaveCount(0);
+
+  // A finished save with no record of what the sea kept would break the end screen, so it is retired too.
+  const broken = { ...runAt(11, {}), sales: { trader: 1, boat: 0, ship: 0 }, turnSales: [], ended: { reason: "tides", score: 1, trader: 1, boat: 0, ship: 0 } };
+  await page.evaluate((run) => localStorage.setItem("low-tide:run:v2", run), JSON.stringify(broken));
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(page.getByText("had already finished under the old rules")).toBeVisible();
 });

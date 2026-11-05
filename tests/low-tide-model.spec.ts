@@ -37,6 +37,7 @@ import {
   BEST_KEY,
   CODEX_KEY,
   hasLegacyRun,
+  hasRetiredRun,
   LEGACY_RUN_KEY,
   loadBest,
   loadCodex,
@@ -612,6 +613,19 @@ test("saves round-trip, reload resumes paused, a first-pass save is retired not 
     store.set(RUN_KEY, JSON.stringify({ ...oldShape, ended: oldEnding }));
     expect(loadRun()).toBeNull();
     expect(upgradeRun({ ...oldShape, ended: oldEnding } as unknown as State)).toBeNull();
+    expect(hasRetiredRun()).toBe(true);
+    // A finished save without its leftover would crash the end screen: it is retired too.
+    const noLeftover = { ...oldShape, sales: { trader: 1, boat: 0, ship: 0 }, turnSales: [], ended: { reason: "tides", score: 1, trader: 1, boat: 0, ship: 0 } };
+    expect(upgradeRun(noLeftover as unknown as State)).toBeNull();
+    store.set(RUN_KEY, "{not json");
+    expect(hasRetiredRun()).toBe(false);
+    store.set(RUN_KEY, JSON.stringify({ ...oldShape, ended: null }));
+    expect(hasRetiredRun()).toBe(false);
+
+    // Upgrading mid-run lines the ledger up with the tide, and keeps a notice the player has not dismissed.
+    const midRun = { ...oldShape, tide: 3, notice: "An earlier notice." };
+    expect(upgradeRun(midRun as unknown as State)).toMatchObject({ turnSales: [0, 0, 0], notice: "An earlier notice." });
+    expect(upgradeRun({ ...midRun, notice: null } as unknown as State)).toMatchObject({ notice: RULES_NOTICE });
     const finished = turn(at({ tide: 11, time: 11 * TIDE_MS, inventory: { pearl: 1 } }));
     saveRun(finished);
     expect(loadRun()?.ended).toEqual(finished.ended);
@@ -625,4 +639,20 @@ test("saves round-trip, reload resumes paused, a first-pass save is retired not 
   } finally {
     delete (globalThis as unknown as { window?: unknown }).window;
   }
+});
+
+test("a structure spent into the beacon still counts as standing, so its blueprint cannot be built again", () => {
+  const stocked = at({ unlocked: 3, built: ["bellTower", "beacon"], inventory: { brass: 1, oil: 1 } });
+  // The lantern went up the tower: building another would burn a brass and an oil for nothing.
+  const check = canBuild(stocked, "lantern");
+  expect(check.ok).toBe(false);
+  expect(check.why).toBe("Already standing.");
+  expect(buildOptions(stocked).find((option) => option.blueprint.out === "lantern")).toMatchObject({ ok: false, standing: true });
+  expect(buildOptions(stocked).find((option) => option.blueprint.out === "bellTower")).toMatchObject({ ok: false, standing: true });
+  expect(build(stocked, "lantern").inventory).toEqual({ brass: 1, oil: 1 });
+
+  // Before the beacon, the lantern is still buildable and not standing.
+  const before = at({ unlocked: 3, built: ["bellTower"], inventory: { brass: 1, oil: 1 } });
+  expect(canBuild(before, "lantern").ok).toBe(true);
+  expect(buildOptions(before).find((option) => option.blueprint.out === "lantern")?.standing).toBe(false);
 });
