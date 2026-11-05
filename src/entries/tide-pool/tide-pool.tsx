@@ -81,9 +81,9 @@ const ENVIRONMENT_CONTROLS: readonly {
   format: (value: number) => string;
 }[] = [
   { key: "foodRate", label: "Food", hint: "supply", min: 0, max: 3, step: 0.1, format: (v) => v.toFixed(1) },
-  // Capped near what a good swimmer can hold (mean evolved speeds are ~7–15 u/s), so full strength
-  // sorts swimmers from drifters instead of sweeping everyone into a wall heap.
-  { key: "currentStrength", label: "Current", hint: "drifts food and bodies", min: 0, max: 8, step: 0.5, format: (v) => v.toFixed(1) },
+  // Capped below typical evolved swimming speeds (~7–11 u/s mean, many bodies slower), so full strength
+  // sorts swimmers from drifters instead of sweeping everyone into a wall heap (40, 16 and 8 all did).
+  { key: "currentStrength", label: "Current", hint: "drifts food and bodies", min: 0, max: 4, step: 0.25, format: (v) => v.toFixed(2) },
   { key: "temperature", label: "Temperature", hint: "faster metabolism", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
   { key: "viscosity", label: "Water thickness", hint: "swimming costs more", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
 ];

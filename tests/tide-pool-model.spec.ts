@@ -554,3 +554,26 @@ test("torpor: a starving organism pays half the basal drain, and still starves e
   for (let i = 0; i < Math.round(3600 / DT) && world.organisms.some(o => o.id === id); i++) world.step();
   expect(world.organisms.some(o => o.id === id)).toBe(false);
 });
+
+test("background tide swirl exists at slider 0, has no net drift, and is exactly zero when tideSwirl is 0", () => {
+  const saved = TUNING.tideSwirl;
+  try {
+    TUNING.tideSwirl = 1.5;
+    const world = new World(5, { currentStrength: 0 }, stubForager);
+    let sx = 0, sy = 0, peak = 0, n = 0;
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 30; j++) {
+        const f = world.flowAt({ x: ((i + 0.5) * POOL_WIDTH) / 40, y: ((j + 0.5) * POOL_HEIGHT) / 30 });
+        sx += f.x; sy += f.y; n++;
+        peak = Math.max(peak, Math.hypot(f.x, f.y));
+      }
+    }
+    expect(peak).toBeGreaterThan(0.5);
+    expect(Math.hypot(sx / n, sy / n)).toBeLessThan(0.05 * peak);
+    TUNING.tideSwirl = 0;
+    const still = new World(5, { currentStrength: 0 }, stubForager);
+    for (const p of [{ x: 100, y: 100 }, { x: 500, y: 300 }]) expect(still.flowAt(p)).toEqual({ x: 0, y: 0 });
+  } finally {
+    TUNING.tideSwirl = saved;
+  }
+});
