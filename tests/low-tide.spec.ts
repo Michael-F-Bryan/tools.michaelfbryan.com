@@ -37,7 +37,7 @@ async function open(page: Page, query = `?seed=${SEED}`) {
   await page.clock.install();
   await page.goto(`/low-tide${query}`);
   await expect(page.getByRole("heading", { name: "Low Tide", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Begin at low water" }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
 }
 
@@ -87,17 +87,16 @@ test("the catalogue opens the game at the first tide with the whole chart, a fre
   await expect(plan(page, 3, "Beacon")).toContainText("bell tower 0/1");
   await expect(plan(page, 3, "Beacon")).toContainText("lantern 0/1");
 
-  // Nothing moves until the player says so, and the veil says how points are earned.
-  const veil = page.getByRole("status").filter({ hasText: "Two of you" });
-  await expect(veil).toContainText("Two of you, twelve tides.");
-  await expect(veil).toContainText("at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys up to two of every kind");
-  await expect(veil).toContainText("the sea only bares the reef and the wreck when the tide is low");
-  await expect(veil).not.toContainText(/\b(ring|launch)\b/i);
-  // The score starts at nothing, and the turn panel already says what the trader alone will do.
+  // Nothing moves until the player says so; with nothing gathered, there is no empty tarp, turn or log to narrate.
   await expect(sold(page)).toHaveText("Sold 0");
-  await expect(turnList(page).getByRole("listitem")).toHaveText(["Trader · nothing to sell yet", "No boat or beacon yet: only the trader calls, for one piece."]);
+  await expect(turnList(page)).toHaveCount(0);
+  await expect(salvage(page)).toHaveCount(0);
+  await expect(log(page)).toHaveCount(0);
+  for (const gone of [/Two of you/, /Tap another band/, /No boat or beacon yet/, /nothing to sell yet/, /Nothing yet/, /gather what the plans need/, /Nothing you do here/, /Game time runs only/]) {
+    await expect(page.getByText(gone)).toHaveCount(0);
+  }
   await expect(page.getByRole("button", { name: /^(Ring|Launch)/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Begin" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^(Pause|Resume)$/ })).toHaveCount(0);
   expect(await noOverflow(page)).toBe(true);
@@ -107,10 +106,9 @@ test("the catalogue opens the game at the first tide with the whole chart, a fre
   await page.evaluate(() => scrollTo(0, 0));
   await shot(page, info, "opening-veil");
 
-  await page.getByRole("button", { name: "Begin at low water" }).click();
-  await expect(veil).toHaveCount(0);
+  await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Begin" })).toHaveCount(0);
 });
 
 test("a job takes real time to finish, and its yield lands on the tarp", async ({ page }) => {
@@ -146,7 +144,6 @@ test("the workbench: Build waits for its materials, then waders stand, tier 2 op
   await expect(salvage(page)).toContainText("driftwood ×1");
   await expect(waders).toContainText("reeds 1/1");
   await expect(waders).toContainText("driftwood 1/1");
-  await expect(page.getByText("1 ready to build")).toBeVisible();
   await expect(build).toBeEnabled();
   await expect(build).toHaveAccessibleName("Build waders");
   await build.scrollIntoViewIfNeeded();
@@ -156,7 +153,7 @@ test("the workbench: Build waits for its materials, then waders stand, tier 2 op
   await expect(waders).toContainText("built");
   await expect(waders.getByRole("button")).toHaveCount(0);
   await expect(salvage(page)).toHaveCount(0);
-  await expect(log(page)).toContainText(/Waders: /);
+  await expect(log(page)).toContainText("Built waders.");
   // Building something from tier 1 opens tier 2: its group is no longer folded away and its plans are in plain view.
   await expect(tierGroup(page, 2)).toHaveCount(0);
   await expect(page.getByRole("list", { name: "Tier 2 blueprints" }).getByRole("listitem")).toHaveCount(BLUEPRINTS.filter((blueprint) => blueprint.tier === 2).length);
@@ -185,7 +182,7 @@ test("pausing freezes the water, and a reload comes back paused at the same mome
   await page.reload();
   await expect(page.getByRole("heading", { name: "Low Tide", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Begin" })).toHaveCount(0);
   await expect(tideLabel(page, 1)).toBeVisible();
   await page.clock.runFor(30_000);
   expect(await waterline(page)).toBe(waterlineBefore);
@@ -300,12 +297,13 @@ test("a dark tide darkens the scene and the header", async ({ page }) => {
   await expect(scene(page)).toHaveAttribute("data-dark", "true");
   await expect(page.locator("[data-night]")).toHaveAttribute("data-night", "true");
   await expect(chart(page).locator('[aria-current="step"]')).toContainText(/in the dark/);
-  await expect(page.getByText(/^Dark, water/)).toBeVisible();
+  await expect(page.getByText(/^Dark · \d:\d\d left$/)).toBeVisible();
 });
 
 test("narrow phones keep everything reachable without horizontal overflow or tiny targets", async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await open(page);
+  await openWith(page, runAt(0, { log: Array.from({ length: 5 }, (_, i) => ({ time: i * 100, text: `Log line ${i}`, kind: "info" as const })) }));
+  await page.getByRole("button", { name: "Resume" }).click();
   // Put every kind of control on screen: crew out, a queued job, an open tier and the long log.
   await job(page, "Mudflat", "reeds").click();
   await pickBand(page, "Shingle");
@@ -313,7 +311,9 @@ test("narrow phones keep everything reachable without horizontal overflow or tin
   await job(page, "Shingle", "stone").click();
   await expect(crew(page).getByRole("button", { name: /^then stone/ })).toBeVisible();
   await tierGroup(page, 2).locator("summary").click();
-  await page.getByRole("button", { name: "Whole log" }).click();
+  // At the very bottom of the page this sits under the dev server's overlay badge, which production does not have.
+  await page.getByRole("button", { name: "Whole log" }).press("Enter");
+  await expect(page.getByRole("button", { name: "Fewer lines" })).toBeVisible();
   await page.evaluate(() => scrollTo(0, 0));
   await shot(page, info, "crew-out");
 
@@ -388,13 +388,13 @@ test("the twelfth tide ends the run, the best score is remembered, and a new run
   const ending = page.getByRole("heading", { level: 2, name: "Twelve tides worked" });
   await expect(ending).toBeVisible();
   await expect(ending).toBeFocused();
-  await expect(page.getByText("The twelfth tide is in")).toBeVisible();
   const rows = page.locator("dl");
   await expect(rows.locator('dt:text-is("Bought by ships") + dd')).toHaveText("0");
   await expect(rows.locator('dt:text-is("Bought by the trader") + dd')).toHaveText("40");
   await expect(rows.locator('dt:text-is("Carried by your boat") + dd')).toHaveText("0");
   await expect(page.locator("p").filter({ hasText: /^Score/ })).toContainText("40");
-  await expect(page.getByText("Nothing left on the tarp.")).toBeVisible();
+  await expect(page.getByText(/tarp/i)).toHaveCount(0);
+  await expect(page.getByText(/^Built:/)).toHaveCount(0);
   await expect(page.getByText("your best so far")).toBeVisible();
   const best = await page.evaluate(() => JSON.parse(localStorage.getItem("low-tide:best:v3")!));
   expect(best).toMatchObject({ score: 40, beacon: false, boats: 0, runs: 1 });
@@ -405,7 +405,7 @@ test("the twelfth tide ends the run, the best score is remembered, and a new run
   await expect(tideLabel(page, 1)).toBeVisible();
   await expect(salvage(page)).toHaveCount(0);
   await expect(sold(page)).toHaveText("Sold 0");
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Begin" })).toBeVisible();
 
   // A second, emptier run (a saved one, one second from the last tide's end) ends below the stored best and says so.
   await page.evaluate((json) => localStorage.setItem("low-tide:run:v2", json), JSON.stringify(runAt(11, { time: 12 * TIDE_MS - 1_000, food: 0 })));
@@ -422,6 +422,39 @@ test("the twelfth tide ends the run, the best score is remembered, and a new run
 // The states below are saved v2 runs (localStorage "low-tide:run:v2") rather than hours of building through the UI:
 // the model spec covers the build chain and the sale rules; these cover what the screen shows of them.
 const ENGINES = { built: ["waders", "beacon", "boat"] as Built[], unlocked: 3 as const, food: 20 };
+
+test("the picture's band chips pick the jobs: the chosen one is pressed, and bands the water has cannot be chosen", async ({ page }, info) => {
+  await open(page);
+  const band = (name: string) => page.getByRole("button", { name: new RegExp(`^${name}:`) });
+  const jobs = (name: string) => page.getByRole("region", { name: `${name} jobs` });
+  await expect(band("Mudflat")).toHaveAttribute("aria-pressed", "true");
+  await expect(jobs("Mudflat")).toBeVisible();
+  await expect(band("Reef")).toHaveAttribute("aria-disabled", "true");
+  await expect(band("Wreck")).toHaveAttribute("aria-disabled", "true");
+  await expect(band("Shingle")).not.toHaveAttribute("aria-disabled", "true");
+  await shot(page, info, "band-chips");
+
+  // Playwright will not click an aria-disabled control unless forced; a real tap still lands on it.
+  await band("Reef").click({ force: true });
+  await expect(band("Reef")).toHaveAttribute("aria-pressed", "false");
+  await expect(jobs("Mudflat")).toBeVisible();
+
+  await band("Shingle").click();
+  await expect(band("Shingle")).toHaveAttribute("aria-pressed", "true");
+  await expect(band("Mudflat")).toHaveAttribute("aria-pressed", "false");
+  await expect(jobs("Shingle").getByRole("button", { name: /for driftwood\b/ })).toBeVisible();
+});
+
+test("with only the trader, the turn shows one piece going and names what is held back", async ({ page }) => {
+  await openWith(page, runAt(2, { food: 20, inventory: { pearl: 2, iron: 1 } }));
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "At the turn" })).toBeVisible();
+  await expect(turnList(page).getByRole("listitem")).toHaveText(["Trader · pearl · 20", "Traders leave your last iron for the workbench until the final turn."]);
+  await page.clock.runFor(TIDE_MS - 1_000 + 500);
+  await expect(sold(page)).toHaveText("Sold 20");
+  await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×1" })).toBeVisible();
+  await expect(salvage(page).getByRole("listitem").filter({ hasText: "iron ×1" })).toBeVisible();
+});
 
 test("cargo shows what it sells for, and the At-the-turn panel previews each engine's sale, which then happens at the turn without ending the run", async ({ page }, info) => {
   const state = runAt(2, { ...ENGINES, inventory: { pearl: 6, brass: 2, iron: 1, oil: 2, kelp: 3, driftwood: 1 }, sales: { trader: 30, boat: 0, ship: 0 } });
@@ -440,7 +473,6 @@ test("cargo shows what it sells for, and the At-the-turn panel previews each eng
     "Boat · 3 pearls · 60",
     "Traders leave your last iron for the workbench until the final turn.",
   ]);
-  await expect(page.getByText("No boat or beacon yet")).toHaveCount(0);
   await expect(sold(page)).toHaveText("Sold 30");
 
   // Cargo is marked on the tarp, building stock is not; the reef's pearl job shows its price.
@@ -487,7 +519,6 @@ test("the end screen shows the three sales, the total, and what the sea kept", a
 
   const ending = page.getByRole("heading", { level: 2, name: "Twelve tides worked" });
   await expect(ending).toBeFocused();
-  await expect(page.getByText("The twelfth tide is in")).toBeVisible();
   const rows = page.locator("dl");
   await expect(rows.locator("dt")).toHaveText(["Bought by ships", "Bought by the trader", "Carried by your boat"]);
   await expect(rows.locator('dt:text-is("Bought by ships") + dd')).toHaveText("124");
@@ -516,7 +547,7 @@ test("a run saved before the cargo rules loads paused with the rules notice and 
   await expect(notice).toContainText("traders now buy your cargo at every turn, and the run always lasts twelve tides. Your run carries on from here.");
   await expect(sold(page)).toHaveText("Sold 0");
   // Its standing beacon and boat are engines already.
-  await expect(turnList(page).getByRole("listitem")).toHaveText(["Ship · pearl · 20", "Trader · nothing to sell yet", "Boat · nothing to sell yet"]);
+  await expect(turnList(page).getByRole("listitem")).toHaveText(["Ship · pearl · 20"]);
   await notice.getByRole("button", { name: "Dismiss" }).click();
   await expect(notice).toHaveCount(0);
   await page.reload();
@@ -577,8 +608,9 @@ test("a finished run saved under the old rules is retired with a notice, and the
   }, [JSON.stringify({ ...runAt(11, {}), ended: oldEnding }), JSON.stringify(["waders"])]);
   await page.reload();
   const notice = page.getByRole("status").filter({ hasText: "had already finished under the old rules" });
-  await expect(notice).toContainText("so a fresh one begins. Your codex is kept.");
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(notice).toContainText("so a fresh one begins.");
+  await expect(notice).not.toContainText("codex");
+  await expect(page.getByRole("button", { name: "Begin" })).toBeVisible();
   await expect(tideLabel(page, 1)).toBeVisible();
   await notice.getByRole("button", { name: "Dismiss" }).click();
   await expect(notice).toHaveCount(0);
@@ -587,6 +619,6 @@ test("a finished run saved under the old rules is retired with a notice, and the
   const broken = { ...runAt(11, {}), sales: { trader: 1, boat: 0, ship: 0 }, turnSales: [], ended: { reason: "tides", score: 1, trader: 1, boat: 0, ship: 0 } };
   await page.evaluate((run) => localStorage.setItem("low-tide:run:v2", run), JSON.stringify(broken));
   await page.reload();
-  await expect(page.getByRole("button", { name: "Begin at low water" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Begin" })).toBeVisible();
   await expect(page.getByText("had already finished under the old rules")).toBeVisible();
 });

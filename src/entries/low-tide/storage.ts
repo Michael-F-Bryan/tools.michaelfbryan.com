@@ -63,7 +63,7 @@ export function hasRetiredRun(): boolean {
   }
 }
 
-export const RETIRED_NOTICE = "Your earlier run had already finished under the old rules, so a fresh one begins. Your codex is kept.";
+export const RETIRED_NOTICE = "Your earlier run had already finished under the old rules, so a fresh one begins.";
 
 export const RULES_NOTICE = "Low Tide's rules changed: traders now buy your cargo at every turn, and the run always lasts twelve tides. Your run carries on from here.";
 
