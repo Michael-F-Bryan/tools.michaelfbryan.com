@@ -528,3 +528,29 @@ test("random founders include mirrored pairs, and 2,000 chained mutations with t
   }
   expect(biggest).toBeLessThanOrEqual(MAX_PARTS);
 });
+
+test("torpor: a starving organism pays half the basal drain, and still starves eventually", () => {
+  const idle: StepOrganism = org => {
+    org.age += DT;
+    return { work: 0 };
+  };
+  const world = new World(5, { foodRate: 0 }, idle);
+  world.food.length = 0;
+  const [fed, starving] = world.organisms;
+  fed.energy = fed.capacity * 0.6;
+  starving.energy = starving.capacity * 0.2;
+  // Compare per-unit-mass basal drain; sensors are billed identically so only the basal share may differ.
+  const fed0 = fed.energy;
+  const starving0 = starving.energy;
+  world.step();
+  expect(fed.torpid).toBe(false);
+  expect(starving.torpid).toBe(true);
+  const fedDrain = (fed0 - fed.energy) / fed.mass;
+  const starvingDrain = (starving0 - starving.energy) / starving.mass;
+  expect(fedDrain).toBeGreaterThan(0);
+  expect(starvingDrain).toBeGreaterThan(0);
+  expect(starvingDrain).toBeLessThan(fedDrain * 0.75);
+  const id = starving.id;
+  for (let i = 0; i < Math.round(3600 / DT) && world.organisms.some(o => o.id === id); i++) world.step();
+  expect(world.organisms.some(o => o.id === id)).toBe(false);
+});

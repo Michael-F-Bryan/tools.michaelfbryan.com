@@ -116,6 +116,8 @@ export type Organism = {
   /** Energy in joules-ish; dies at 0. `capacity` is derived from body mass. */
   energy: number;
   capacity: number;
+  /** True while starving (energy below the torpor threshold) and the basal drain is depressed; set each step. */
+  torpid?: boolean;
   /** Total segment area, used as mass. */
   mass: number;
   /** Last frame's sensor readings, one per sensor in `parts` order. */

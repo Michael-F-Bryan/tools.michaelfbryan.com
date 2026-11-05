@@ -80,6 +80,14 @@ export const TUNING = {
   capacityPerMass: 0.08,
   /** Basal energy drain per second per unit mass (× temperature). Raise to make starvation faster. */
   basalPerMass: 0.0008,
+  /**
+   * Torpor: below this fraction of capacity an organism is starving and its BASAL drain is multiplied by `torporFactor`.
+   * Metabolic depression under food deprivation is ordinary invertebrate physiology. Swimming work and sensor upkeep are
+   * billed as before, so a thrashing starver still pays. It is not a rescue: with no food the pool still dies, only later.
+   * Set torporFactor 1 to disable.
+   */
+  torporBelow: 0.25,
+  torporFactor: 0.5,
   /** Energy per unit of joint work reported by physics (× temperature). Raise to make swimming costlier. */
   workCost: 0.02,
   /** Energy per second each sensor costs (× temperature) plus a share per unit of stalk length, so reach has a price. */
@@ -639,7 +647,10 @@ export class World implements WorldLike {
     const T = this.env.temperature;
     const work = Number.isFinite(cost.work) ? cost.work : 0;
     const crowd = 1 + TUNING.crowdCost * (this.crowding.get(org.id) ?? 0);
-    const drain = (TUNING.basalPerMass * org.mass * crowd + sensorUpkeepFor(org.genome)) * DT + work * TUNING.workCost;
+    const torpid = org.energy < org.capacity * TUNING.torporBelow;
+    org.torpid = torpid;
+    const basal = TUNING.basalPerMass * org.mass * crowd * (torpid ? TUNING.torporFactor : 1);
+    const drain = (basal + sensorUpkeepFor(org.genome)) * DT + work * TUNING.workCost;
     org.energy -= drain * T;
     this.eat(org);
 
