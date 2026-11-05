@@ -61,10 +61,13 @@ export type PartGene = {
    */
   feather: number;
   /**
-   * Sensorimotor weights, aligned with the organism's sensors in `parts` order,
-   * plus a trailing bias weight (length = sensorCount + 1). Amplitude multiplier =
-   * clamp(1 + Σ w_i · s_i, 0, 2); `freqWeights` likewise scale frequency. Mutation
-   * keeps these aligned when sensors are added or removed.
+   * Sensorimotor weights over the inputs [s_1..s_n, ds_1..ds_n, 1], where n is the
+   * organism's sensor count in `parts` order, s_i the scent reading, ds_i its rate of
+   * change (reading minus a short running average, scaled, in [-1, 1]) and the final
+   * input a constant bias. So length = 2·sensorCount + 1: indices [0, n) weight the
+   * readings, [n, 2n) the rates, index 2n is the bias. Amplitude multiplier =
+   * clamp(1 + Σ w_k · input_k, 0, 2); `freqWeights` likewise scale frequency.
+   * Mutation keeps these aligned when sensors are added or removed.
    */
   ampWeights: number[];
   freqWeights: number[];
@@ -117,6 +120,11 @@ export type Organism = {
   mass: number;
   /** Last frame's sensor readings, one per sensor in `parts` order. */
   senses: number[];
+  /**
+   * Rate-of-change input per sensor (see `PartGene.ampWeights`), written by the
+   * controller each step. Optional: absent until the first step.
+   */
+  senseRates?: number[];
   /** Per-part world poses computed by `stepOrganism`; aligned with `genome.parts`. */
   poses: PartPose[];
   /** Food eaten and children produced so far, for inspection. */
@@ -163,7 +171,13 @@ export type Water = {
 
 /** Energy spent this step, reported by the engine so ecology can bill it. */
 export type StepCost = {
-  /** Work done by joints (sum |Δangle| · area), before temperature scaling. */
+  /**
+   * Energy the body dissipated into the water this step, before temperature scaling:
+   * Σ F_drag · u over every drag sample point (u = water velocity relative to that
+   * point of the body) times dt, divided by `PHYSICS.workUnit`. Always >= 0. A resting
+   * body, or one carried along by the current, reports ~0; fast swimming and thrashing
+   * (including whipping the head) both cost.
+   */
   work: number;
 };
 
@@ -218,6 +232,11 @@ export type Stats = {
   meanSpeed: number;
   /** Meals per organism-minute over the last minute of world time. */
   foragingRate: number;
+  /** Lineage with the most living members (-1 if the pool is empty) and its share of the population, 0..1. */
+  dominantLineage: number;
+  dominantShare: number;
+  /** True once the population has fallen to zero (nothing is ever respawned). */
+  extinct: boolean;
 };
 
 /** Read-only view the renderer and UI consume each frame. */

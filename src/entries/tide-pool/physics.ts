@@ -42,13 +42,16 @@ export const PHYSICS = {
   endOnWidth: 0.5,
   /** Background damping (1/s) applied to velocity and spin. */
   linearDamping: 0.2,
-  angularDamping: 0.5,
+  angularDamping: 1.0,
   maxSpeed: 160,
-  maxSpin: 8,
+  /** Rad/s: a whole swimmer turning more than about half a revolution per second is not plausible at this scale. */
+  maxSpin: 3,
   /** Wall spring (1/s^2 per unit penetration), margin from the wall, outward velocity bleed (1/s). */
   wallSpring: 300,
   wallMargin: 6,
   wallBleed: 8,
+  /** `StepCost.work` is dissipated drag energy divided by this, to keep tuning numbers readable. */
+  workUnit: 1e6,
   trailInterval: 0.1,
   trailLength: 40,
 } as const;
@@ -114,11 +117,6 @@ export const stepOrganism: StepOrganism = (organism, water, dt) => {
   //    difference is purely joint-driven motion. Work is billed from the same delta.
   const next = computePoses(genome, pos, organism.heading, angles, nextPoses);
   poseCentroid(genome, next, comNext);
-  let work = 0;
-  for (let i = 1; i < n; i++) {
-    const part = parts[i];
-    work += Math.abs(next[i].jointAngle - prev[i].jointAngle) * Math.max(0, part.length) * Math.max(0, part.width);
-  }
 
   // 4. Drag forces and torques about the centre of mass.
   const visc = Math.max(0.05, finiteOr(water.env.viscosity, 1));
@@ -134,6 +132,7 @@ export const stepOrganism: StepOrganism = (organism, water, dt) => {
   let inertia = 0.1 * mass;
   let dragK = 0; // diagonal Jacobian d|F|/d|u|, used to keep the update stable
   let spinK = 0;
+  let dissipated = 0; // sum of F_drag . u over every sample point: power the body puts into the water
 
   for (let i = 0; i < n; i++) {
     const part = parts[i];
@@ -176,6 +175,9 @@ export const stepOrganism: StepOrganism = (organism, water, dt) => {
       const kt = tangentArea * (normalLinear + normalQuadratic * Math.abs(ut));
       const fn = kn * un;
       const ft = kt * ut;
+      // Drag force G = fn*n + ft*t and relative velocity u = un*n + ut*t, so the power the
+      // body spends against the water at this point is G.u = kn*un^2 + kt*ut^2 >= 0.
+      dissipated += fn * un + ft * ut;
       const gx = -ty * fn + tx * ft;
       const gy = tx * fn + ty * ft;
       fx += gx;
@@ -287,5 +289,8 @@ export const stepOrganism: StepOrganism = (organism, water, dt) => {
     if (organism.trail.length > PHYSICS.trailLength) organism.trail.shift();
   }
 
+  // Energy dissipated into the water this step (power x dt). A resting body, or one carried
+  // along by the current, dissipates nothing; thrashing and fast swimming both pay.
+  const work = (dissipated * dt) / PHYSICS.workUnit;
   return { work: Number.isFinite(work) ? work : 0 };
 };

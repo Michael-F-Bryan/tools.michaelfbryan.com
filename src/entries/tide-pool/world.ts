@@ -40,36 +40,46 @@ export const TUNING = {
   capacityBase: 30,
   capacityPerMass: 0.08,
   /** Basal energy drain per second per unit mass (× temperature). Raise to make starvation faster. */
-  basalPerMass: 0.0011,
+  basalPerMass: 0.0008,
   /** Energy per unit of joint work reported by physics (× temperature). Raise to make swimming costlier. */
-  workCost: 0.0001,
-  /** Energy per second each sensor costs (× temperature), so sensing must earn its keep. */
-  sensorUpkeep: 0.01,
+  workCost: 0.02,
+  /** Energy per second each sensor costs (× temperature) plus a share per unit of stalk length, so reach has a price. */
+  sensorUpkeep: 0.012,
+  sensorUpkeepPerLength: 0.0007,
+  /**
+   * Crowding: organisms whose mouths are within `crowdRadius` share oxygen and
+   * grazing ground, so every neighbour (up to `crowdCap`) adds `crowdCost` of the
+   * basal drain. Neighbour counts refresh every `crowdEverySteps` steps.
+   */
+  crowdRadius: 30,
+  crowdCost: 0.04,
+  crowdCap: 8,
+  crowdEverySteps: 10,
   /** Seeded organisms start with this fraction of capacity. */
-  startEnergy: 0.7,
+  startEnergy: 0.6,
 
   // --- Food ----------------------------------------------------------------
   /** Energy in one food particle (±foodJitter). Larger = easier living, bigger population. */
-  foodEnergy: 26,
+  foodEnergy: 34,
   foodJitter: 0.2,
   /** Particles already floating when a pool is created, so the first minute is not a famine. */
   initialFood: 90,
   /** Uneaten food dissolves after this many seconds, keeping the pool from silting up. */
-  foodLifetime: 150,
+  foodLifetime: 300,
   /** Share of new food that appears near a patch rather than uniformly. */
-  patchShare: 0.65,
+  patchShare: 0.85,
   /** Number of drifting rich patches, their radius range, and wander speed (units/s). */
-  patchCount: 3,
-  patchRadius: [90, 140] as const,
+  patchCount: 4,
+  patchRadius: [60, 90] as const,
   patchSpeed: 3,
   /** Distance from the wall that food and spawns keep. */
   margin: 8,
 
   // --- Reproduction and death ----------------------------------------------
   /** Fraction of the parent's capacity lost to the act of dividing. */
-  birthCost: 0.06,
+  birthCost: 0.12,
   /** Seconds of life before an organism may divide (prevents instant re-division). */
-  matureAge: 8,
+  matureAge: 20,
   /** Typical lifespan in world seconds, scaled by mass: bigger bodies live a little longer. */
   maxAge: 240,
   maxAgeMassBias: 0.25,
@@ -95,6 +105,13 @@ const HISTORY_CAP = 600;
 const EVENT_CAP = 60;
 const FOOD_HASH_CELL = 20;
 const STEPS_PER_SECOND = Math.round(1 / DT);
+
+/** Energy per second the organism's sensors cost at temperature 1. */
+export function sensorUpkeepFor(genome: Genome): number {
+  let total = 0;
+  for (const p of genome.parts) if (p.kind === "sensor") total += TUNING.sensorUpkeep + TUNING.sensorUpkeepPerLength * p.length;
+  return total;
+}
 
 export function capacityFor(mass: number): number {
   return TUNING.capacityBase + TUNING.capacityPerMass * mass;
@@ -134,6 +151,7 @@ export class World implements WorldLike {
   private readonly patchHeading: number[] = [];
   private readonly lineageRecords = new Map<number, LineageRecord>();
   private readonly pendingBirths: Organism[] = [];
+  private readonly crowding = new Map<number, number>();
   private stepCount = 0;
   private births = 0;
   private deaths = 0;
@@ -255,6 +273,7 @@ export class World implements WorldLike {
     this.moveFood();
     this.updateScent();
     this.hashFood();
+    if (this.stepCount % TUNING.crowdEverySteps === 1) this.countCrowding();
 
     const list = this.organisms;
     let write = 0;
@@ -499,7 +518,8 @@ export class World implements WorldLike {
     this.keepInside(org);
     const T = this.env.temperature;
     const work = Number.isFinite(cost.work) ? cost.work : 0;
-    const drain = (TUNING.basalPerMass * org.mass + TUNING.sensorUpkeep * org.senses.length) * DT + work * TUNING.workCost;
+    const crowd = 1 + TUNING.crowdCost * (this.crowding.get(org.id) ?? 0);
+    const drain = (TUNING.basalPerMass * org.mass * crowd + sensorUpkeepFor(org.genome)) * DT + work * TUNING.workCost;
     org.energy -= drain * T;
     this.eat(org);
 
@@ -520,6 +540,24 @@ export class World implements WorldLike {
     else if (p.x > this.width - m) { p.x = this.width - m; org.velocity.x = Math.min(0, org.velocity.x); }
     if (p.y < m) { p.y = m; org.velocity.y = Math.max(0, org.velocity.y); }
     else if (p.y > this.height - m) { p.y = this.height - m; org.velocity.y = Math.min(0, org.velocity.y); }
+  }
+
+  /** Neighbours within `crowdRadius` for every organism (capped), by mouth position. */
+  private countCrowding(): void {
+    const list = this.organisms;
+    const r2 = TUNING.crowdRadius * TUNING.crowdRadius;
+    this.crowding.clear();
+    for (let i = 0; i < list.length; i++) {
+      let near = 0;
+      const a = list[i].position;
+      for (let j = 0; j < list.length && near < TUNING.crowdCap; j++) {
+        if (j === i) continue;
+        const dx = list[j].position.x - a.x;
+        const dy = list[j].position.y - a.y;
+        if (dx * dx + dy * dy <= r2) near++;
+      }
+      this.crowding.set(list[i].id, near);
+    }
   }
 
   private eat(org: Organism): void {
@@ -647,6 +685,14 @@ export class World implements WorldLike {
       popSeconds += this.popBuckets[i];
     }
     const n = this.organisms.length;
+    let dominantLineage = -1;
+    let dominantCount = 0;
+    for (const r of this.lineageRecords.values()) {
+      if (r.count > dominantCount || (r.count === dominantCount && r.id < dominantLineage)) {
+        dominantCount = r.count;
+        dominantLineage = r.id;
+      }
+    }
     return {
       time: this.time,
       population: n,
@@ -656,6 +702,9 @@ export class World implements WorldLike {
       deaths: this.deaths,
       meanSpeed: n > 0 ? speed / n : 0,
       foragingRate: popSeconds > 0 ? (meals / popSeconds) * 60 : 0,
+      dominantLineage: n > 0 ? dominantLineage : -1,
+      dominantShare: n > 0 ? dominantCount / n : 0,
+      extinct: n === 0,
     };
   }
 

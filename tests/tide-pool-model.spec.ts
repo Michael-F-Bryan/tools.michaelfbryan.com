@@ -32,7 +32,9 @@ const stubForager: StepOrganism = (org, water, dt) => {
   org.velocity.y = Math.sin(org.heading) * 18 + flow.y;
   org.position.x += org.velocity.x * dt;
   org.position.y += org.velocity.y * dt;
-  return { work: 8 };
+  // Billed like a real swimmer at ~18 u/s: about 1-2x basal drain (~0.4 J/s), i.e. work * workCost * 60.
+  // (Real physics reports dissipated drag power, see PHYSICS.workUnit; the old 8 would cost ~10 J/s, 35x basal.)
+  return { work: 0.3 };
 };
 
 function hasNaN(world: World): boolean {
