@@ -24,6 +24,7 @@
 
 .dock { position: absolute; left: calc(var(--pool-x, 0px) + 8px); right: calc(var(--pool-x, 0px) + 8px); bottom: calc(var(--pool-y, 0px) + 8px); display: flex; flex-direction: column; align-items: stretch; gap: 8px; max-height: calc(100% - var(--pool-y, 0px) * 2 - 16px); pointer-events: none; }
 .dock > * { pointer-events: auto; }
+.dock { z-index: 2; }
 
 .environment, .inspector { border: 1px solid var(--rule); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--ink); font-size: 13px; }
 .environment { display: grid; gap: 2px; padding: 6px 12px; width: 100%; max-width: 24rem; }
@@ -32,13 +33,14 @@
 .slider input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .slider output { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.inspector { width: 100%; padding: 8px 12px 10px; overflow-y: auto; }
-.inspector header { display: flex; align-items: center; gap: 6px; }
+.inspector { display: flex; flex-direction: column; width: 100%; min-height: 0; padding: 8px 12px 10px; overflow: hidden; }
+.inspector header { display: flex; flex: none; align-items: center; gap: 6px; }
+.close { flex: none; min-width: 44px; min-height: 44px; }
 .swatch[data-twin] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink); }
 .inspector header .swatch { margin-right: 2px; }
 .inspector h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 700; }
 .inspector h2 small { color: var(--text-muted); font-size: 12px; font-weight: 400; }
-.inspectorBody { display: flex; gap: 12px; margin-top: 6px; }
+.inspectorBody { display: flex; flex: 1 1 auto; min-height: 0; gap: 12px; margin-top: 6px; overflow-y: auto; }
 .glyph { flex: none; width: 96px; height: 96px; border: 1px solid var(--rule-subtle); background: var(--panel); }
 .details { flex: 1; min-width: 0; }
 .description { margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }

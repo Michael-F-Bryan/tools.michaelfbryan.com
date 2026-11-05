@@ -21,6 +21,7 @@ import {
   type Vec2,
   type WorldEvent,
   type WorldLike,
+  type FoodPatch,
 } from "./types";
 
 /**
@@ -114,12 +115,14 @@ export const TUNING = {
   patchCount: 4,
   patchRadius: [60, 90] as const,
   patchSpeed: 3,
-  /** A patch relocates after this many meals were taken inside its radius, or after patchLife seconds. */
-  patchGrazedMeals: 40,
-  patchLife: 90,
-  /** Relocation keeps this far from walls and at least patchHop units from the old spot (existing food stays put). */
+  /** Each meal taken inside a patch removes this much of its stock (0..1); spawn weight is proportional to stock. */
+  patchGrazePerMeal: 0.04,
+  /** Logistic regrowth rate (1/s) of stock: slow, so a grazed-down patch takes minutes to come back. */
+  patchRecovery: 0.02,
+  /** Stock never falls below this, since logistic regrowth cannot restart from exactly zero. */
+  patchMinStock: 0.03,
+  /** Keep patches this far from the walls when seeding. */
   patchMargin: 80,
-  patchHop: 250,
   /** Distance from the wall that food and spawns keep. */
   margin: 8,
 
@@ -195,7 +198,6 @@ type LineageRecord = {
   totalMeals: number;
 };
 
-type Patch = { position: Vec2; radius: number; /** Seconds since it last settled. */ age: number; /** Meals taken inside its radius since it settled. */ grazed: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -207,7 +209,7 @@ export class World implements WorldLike {
   readonly history: Stats[] = [];
   readonly events: WorldEvent[] = [];
   /** Slowly drifting rich areas, exposed so the renderer can hint at them. */
-  readonly patches: Patch[] = [];
+  readonly patches: FoodPatch[] = [];
   env: Environment;
   time = 0;
   stats: Stats;
@@ -382,7 +384,7 @@ export class World implements WorldLike {
       this.patches.push({
         position: { x: this.rng.range(TUNING.patchMargin, this.width - TUNING.patchMargin), y: this.rng.range(TUNING.patchMargin, this.height - TUNING.patchMargin) },
         radius: this.rng.range(minR, maxR),
-        age: this.rng.range(0, TUNING.patchLife * 0.5), // staggered so patches do not all renew together
+        stock: 1,
         grazed: 0,
       });
       this.patchHeading.push(this.rng.range(0, Math.PI * 2));
@@ -457,36 +459,32 @@ export class World implements WorldLike {
     while (n-- > 0 && this.food.length < MAX_FOOD) this.spawnOneFood();
   }
 
+  /** Choose a patch with probability proportional to its remaining stock. */
+  private pickPatchByStock(): FoodPatch {
+    let total = 0;
+    for (const p of this.patches) total += p.stock;
+    let r = this.rng.float() * total;
+    for (const p of this.patches) {
+      r -= p.stock;
+      if (r <= 0) return p;
+    }
+    return this.patches[this.patches.length - 1];
+  }
+
   /** One particle: mostly clustered around a patch, otherwise scattered uniformly. */
   private spawnOneFood(): void {
     if (this.rng.chance(TUNING.patchShare) && this.patches.length > 0) {
-      const patch = this.rng.pick(this.patches);
+      const patch = this.pickPatchByStock();
       this.addFood(patch.position.x + this.rng.gaussian() * patch.radius * 0.5, patch.position.y + this.rng.gaussian() * patch.radius * 0.5);
     } else {
       this.addFood(this.rng.range(0, this.width), this.rng.range(0, this.height));
     }
   }
 
-  /** Move a grazed-down patch somewhere fresh; its scent follows as new food spawns there. */
-  private relocatePatch(patch: Patch): void {
-    const m = TUNING.patchMargin;
-    let x = patch.position.x;
-    let y = patch.position.y;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      x = this.rng.range(m, this.width - m);
-      y = this.rng.range(m, this.height - m);
-      if (Math.hypot(x - patch.position.x, y - patch.position.y) >= TUNING.patchHop) break;
-    }
-    patch.position.x = x;
-    patch.position.y = y;
-    patch.age = 0;
-    patch.grazed = 0;
-  }
-
   private driftPatches(): void {
     this.patches.forEach((patch, i) => {
-      patch.age += DT;
-      if (patch.grazed >= TUNING.patchGrazedMeals || patch.age >= TUNING.patchLife) this.relocatePatch(patch);
+      // Slow logistic regrowth of the food stock; grazing (see consume) takes it back down.
+      patch.stock = Math.min(1, Math.max(TUNING.patchMinStock, patch.stock + TUNING.patchRecovery * patch.stock * (1 - patch.stock) * DT));
       this.patchHeading[i] += this.rng.gaussian() * 0.4 * Math.sqrt(DT);
       const next = {
         x: patch.position.x + Math.cos(this.patchHeading[i]) * TUNING.patchSpeed * DT,
@@ -770,7 +768,10 @@ export class World implements WorldLike {
     org.energy = Math.min(org.capacity, org.energy + f.energy);
     org.meals++;
     for (const patch of this.patches) {
-      if (Math.hypot(f.position.x - patch.position.x, f.position.y - patch.position.y) <= patch.radius) patch.grazed++;
+      if (Math.hypot(f.position.x - patch.position.x, f.position.y - patch.position.y) <= patch.radius) {
+        patch.grazed++;
+        patch.stock = Math.max(TUNING.patchMinStock, patch.stock - TUNING.patchGrazePerMeal);
+      }
     }
     this.mealBuckets[this.windowBucket()]++;
     const record = this.lineageRecords.get(org.lineage);

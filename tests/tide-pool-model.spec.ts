@@ -339,3 +339,65 @@ function assertBounded(world: World): void {
     expect(o.energy).toBeLessThanOrEqual(o.capacity + 1e-9);
   }
 }
+
+/** Reach into the private ecology hooks so stock dynamics can be driven without organisms. */
+type PatchHooks = {
+  consume(org: Organism, i: number): void;
+  driftPatches(): void;
+  pickPatchByStock(): unknown;
+  spawnFood(): void;
+};
+const hooks = (world: World) => world as unknown as PatchHooks;
+
+/** Take one meal from inside patch 0. */
+function graze(world: World) {
+  world.food.length = 0;
+  world.dropFood({ ...world.patches[0].position }, 1);
+  hooks(world).consume(world.organisms[0], 0);
+}
+
+test("grazing a patch drains its stock and its share of new food", () => {
+  const world = new World(3);
+  const share = (n = 4000) => {
+    let hits = 0;
+    for (let i = 0; i < n; i++) if (hooks(world).pickPatchByStock() === world.patches[0]) hits++;
+    return hits / n;
+  };
+  const before = share();
+  for (let i = 0; i < 20; i++) graze(world);
+  expect(world.patches[0].stock).toBeLessThan(0.3);
+  expect(world.patches[0].stock).toBeGreaterThanOrEqual(TUNING.patchMinStock);
+  expect(share()).toBeLessThan(before * 0.5);
+});
+
+test("a grazed patch recovers much more slowly than it depletes", () => {
+  const world = new World(4);
+  const patch = world.patches[0];
+  let down = 0;
+  while (patch.stock > 0.1 && down < 3600) {
+    graze(world); // one meal per simulated second
+    for (let k = 0; k < Math.round(1 / DT); k++) hooks(world).driftPatches();
+    down++;
+  }
+  expect(patch.stock).toBeLessThanOrEqual(0.1);
+  let up = 0;
+  while (patch.stock < 0.5 && up < 3600) {
+    for (let k = 0; k < Math.round(1 / DT); k++) hooks(world).driftPatches();
+    up++;
+  }
+  expect(up).toBeGreaterThan(down * 3);
+  expect(up).toBeLessThan(600);
+});
+
+test("an exhausted patch does not stop other patches from supplying food", () => {
+  const world = new World(5);
+  world.patches[0].stock = TUNING.patchMinStock;
+  const others = world.patches.slice(1);
+  let picks0 = 0;
+  for (let i = 0; i < 3000; i++) if (hooks(world).pickPatchByStock() === world.patches[0]) picks0++;
+  expect(picks0 / 3000).toBeLessThan(0.05);
+  world.food.length = 0;
+  for (let i = 0; i < 600; i++) hooks(world).spawnFood();
+  expect(world.food.length).toBeGreaterThan(0);
+  expect(others.every(p => p.stock === 1)).toBe(true);
+});

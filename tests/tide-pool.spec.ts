@@ -119,24 +119,59 @@ test("clicking open water drops food", async ({ page }) => {
   expect(dropped).toBe(true);
 });
 
-test("Inspect opens the Inspector, lineages select members and Close dismisses it", async ({ page }) => {
+test("Inspect opens the Inspector, lineages select members and Close dismisses it for good", async ({ page }, info) => {
   await page.goto("/tide-pool");
   await expect.poll(async () => Number(await stat(page, "population").textContent())).toBeGreaterThan(0);
   const inspector = page.getByRole("region", { name: "Inspector" });
+  const canvas = canvasOf(page);
   await expect(inspector).toHaveCount(0);
+  const before = (await canvas.boundingBox())!;
   await page.getByRole("button", { name: "Inspect", exact: true }).click();
   await expect(inspector).toBeVisible();
   await expect(inspector).toContainText(/generation/i);
   await expect(inspector).toContainText(/meals/i);
   await expect(inspector.getByRole("img", { name: "Anatomy" })).toBeVisible();
   for (const label of ["Speed", "Meals/min", "Parent lineage", "Offspring"]) await expect(inspector).toContainText(label);
-  await inspector.getByRole("button", { name: "Close", exact: true }).click();
+  const close = inspector.getByRole("button", { name: "Close", exact: true });
+  const closeBox = (await close.boundingBox())!;
+  expect(closeBox.width).toBeGreaterThanOrEqual(44);
+  expect(closeBox.height).toBeGreaterThanOrEqual(44);
+  // Nothing may cover the Close button.
+  expect(await close.evaluate((el) => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })).toBe(true);
+  await close.click();
+  await expect(inspector).toHaveCount(0);
+  // Staying closed across several readout ticks, with the canvas exactly as large as before.
+  await page.waitForTimeout(1000);
+  await expect(inspector).toHaveCount(0);
+  expect(await canvas.boundingBox()).toEqual(before);
+
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  await expect(inspector).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(inspector).toHaveCount(0);
 
   const chip = page.getByRole("group", { name: "Lineages" }).getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 5000 });
   await chip.click();
   await expect(inspector).toBeVisible();
+
+  // With an organism selected, a tap on open water deselects instead of dropping food; the next tap drops food.
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const box = (await canvas.boundingBox())!;
+  const spots = [{ x: 300, y: 40 }, { x: 660, y: 40 }, { x: 300, y: 560 }, { x: 660, y: 560 }, { x: 480, y: 300 }, { x: 120, y: 300 }].map((w) => canvasPoint(box, w));
+  const foodBefore = Number(await stat(page, "food").textContent());
+  let closed = false;
+  for (const spot of spots) {
+    if (info.project.name === "mobile-chromium") await page.touchscreen.tap(box.x + spot.x, box.y + spot.y);
+    else await page.mouse.click(box.x + spot.x, box.y + spot.y);
+    if ((await inspector.count()) === 0) {
+      closed = true;
+      break;
+    }
+  }
+  expect(closed).toBe(true);
+  expect(Number(await stat(page, "food").textContent())).toBeLessThanOrEqual(foodBefore);
+  expect(await canvas.boundingBox()).toEqual(before);
 });
 
 test("lineage chips show counts, lead with the largest and use distinct colours", async ({ page }) => {
