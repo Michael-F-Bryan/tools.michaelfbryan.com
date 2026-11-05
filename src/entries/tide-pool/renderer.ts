@@ -93,15 +93,15 @@ const LINEAGE_PALETTE: readonly Swatch[] = [
   [216, 74, 44, 80, 66], // azure
   [30, 92, 44, 92, 58], // orange
   [270, 56, 48, 68, 70], // violet
-  [132, 62, 32, 56, 52], // green
+  [132, 62, 32, 62, 54], // green
   [330, 72, 56, 82, 72], // pink
-  [168, 90, 27, 62, 42], // teal
+  [172, 90, 27, 70, 48], // teal
   [50, 94, 38, 96, 56], // gold
-  [18, 50, 28, 46, 44], // rust brown
+  [18, 50, 28, 62, 54], // rust brown
   [84, 74, 34, 66, 56], // lime
-  [214, 22, 38, 26, 62], // slate
-  [296, 64, 40, 70, 62], // fuchsia
-  [40, 12, 42, 10, 62], // stone
+  [244, 22, 38, 80, 72], // slate (light) / indigo (dark)
+  [296, 64, 40, 74, 66], // fuchsia
+  [150, 12, 42, 74, 62], // stone (light) / mint (dark)
   [192, 100, 36, 92, 56], // cyan
 ];
 export const LINEAGE_PALETTE_SIZE = LINEAGE_PALETTE.length;
@@ -203,7 +203,7 @@ function makeColours(slot: number, genomeHue: number, dark: boolean): OrganismCo
   const sat = dark ? satDark : satLight;
   return {
     fill: swatchHsl(slot, shade, dark),
-    outline: `hsl(${h},${sat}%,${dark ? 22 : 17}%)`,
+    outline: `hsl(${h},${sat}%,${dark ? 32 : 17}%)`,
     fin: swatchHsl(slot, shade, dark, dark ? 4 : 8, 0.66),
     finEdge: `hsla(${h},${sat}%,${dark ? 82 : 24}%,0.85)`,
     stalk: `hsl(${h},${Math.min(sat, 35)}%,${dark ? 80 : 26}%)`,
