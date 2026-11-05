@@ -51,6 +51,20 @@ export function loadRun(): State | null {
   }
 }
 
+/** True if the stored run is well formed but was retired by `upgradeRun` (finished under the old rules), so `loadRun` gave null. */
+export function hasRetiredRun(): boolean {
+  try {
+    const raw = storage()?.getItem(RUN_KEY);
+    if (!raw) return false;
+    const parsed: unknown = JSON.parse(raw);
+    return isState(parsed) && upgradeRun(parsed) === null;
+  } catch {
+    return false;
+  }
+}
+
+export const RETIRED_NOTICE = "Your earlier run had already finished under the old rules, so a fresh one begins. Your codex is kept.";
+
 export const RULES_NOTICE = "Low Tide's rules changed: traders now buy your cargo at every turn, and the run always lasts twelve tides. Your run carries on from here.";
 
 /**
@@ -60,13 +74,14 @@ export const RULES_NOTICE = "Low Tide's rules changed: traders now buy your carg
  * retired (null) so a new one starts; the codex is kept. Pure, so it is tested without a `localStorage`.
  */
 export function upgradeRun(saved: State): State | null {
-  const record = saved as unknown as { ended?: { trader?: unknown } | null; sales?: unknown; turnSales?: unknown };
-  if (record.ended && typeof record.ended.trader !== "number") return null;
+  const record = saved as unknown as { ended?: { trader?: unknown; leftover?: unknown } | null; sales?: unknown; turnSales?: unknown };
+  if (record.ended && (typeof record.ended.trader !== "number" || typeof record.ended.leftover !== "object" || record.ended.leftover === null)) return null;
   const hasSales = typeof record.sales === "object" && record.sales !== null;
   const sales = hasSales ? (record.sales as State["sales"]) : { trader: 0, boat: 0, ship: 0 };
-  const turnSales = Array.isArray(record.turnSales) ? (record.turnSales as number[]) : [];
+  // `turnSales[i]` is the sale at turn i, so a run upgraded at tide k starts with k zeros.
+  const turnSales = Array.isArray(record.turnSales) ? (record.turnSales as number[]) : Array<number>(Math.max(0, saved.tide)).fill(0);
   if (hasSales && Array.isArray(record.turnSales)) return saved;
-  return { ...saved, sales, turnSales, ...(hasSales ? {} : { notice: RULES_NOTICE }) };
+  return { ...saved, sales, turnSales, ...(hasSales ? {} : { notice: saved.notice ?? RULES_NOTICE }) };
 }
 
 export function clearRun(): void {

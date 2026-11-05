@@ -196,7 +196,7 @@ export function Scene({ state, figures, selected, onSelect }: {
         ) : null}
 
         {/* Bands under water but within reach (waders, raft): outlined, so wading is a visible option. */}
-        {BANDS.filter(band => band >= depth && beyondWaterline(state, band) <= reach(state)).map(band => (
+        {BANDS.filter(band => elapsed < TURN_MS && band >= depth && beyondWaterline(state, band) <= reach(state)).map(band => (
           <g key={band}>
             <rect x="3" y={bandTop(band) + 3} width={SCENE_W - 6} height={BAND_H - 6} className={styles.reachableUnder} />
             <rect x="3" y={bandTop(band) + 3} width={SCENE_W - 6} height={BAND_H - 6} className={styles.reachable} />
@@ -276,8 +276,10 @@ function Camp({ state, lit }: { state: State; lit: boolean }) {
 }
 
 function Person({ figure, index }: { figure: Figure; index: number }) {
-  const x = 40 + ((index * 73) % 220) + (figure.band === 0 ? 100 : 0);
-  const y = bandTop(figure.band) + BAND_H * 0.55;
+  // One slot per crew member, so all four fit: spread over the flat, and on the shingle stay clear of the tower (x 318-342).
+  const x = figure.band === 0 ? 140 + index * 48 : 40 + index * 73;
+  // On the shingle, sit a little higher so the name stays above the bottom edge of the picture.
+  const y = bandTop(figure.band) + BAND_H * 0.55 - (figure.band === 0 ? 9 : 0);
   const r = 13;
   const circumference = 2 * Math.PI * r;
   return (
