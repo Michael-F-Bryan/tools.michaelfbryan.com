@@ -263,8 +263,12 @@ function strokeBoost(scale: number): number {
   return Math.min(1.6, Math.max(1, 0.9 / scale));
 }
 
-/** Real milliseconds the meal bloom lasts (it is timed by the wall clock, so 4× or 16× do not shorten it). */
-const MEAL_FLASH_MS = 1000;
+/** Real milliseconds the meal bloom, and the ring left where the particle was, last (wall clock: 4× or 16× do not shorten them). */
+const MEAL_FLASH_MS = 2000;
+/** Real milliseconds the eater's mouth keeps a soft "fed" glow. */
+const MEAL_GLOW_MS = 3000;
+/** Real milliseconds the eaten particle takes to slide into the mouth. */
+const MEAL_SLIDE_MS = 450;
 /** The bloom grows to this multiple of the mouth radius, but never less than this many screen pixels across its radius. */
 const MEAL_BLOOM_RADII = 2.5;
 const MEAL_BLOOM_MIN_PX = 14;
@@ -397,7 +401,9 @@ export class PoolRenderer {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = palette.paper;
+    // Everything outside the pool (letterbox, and the overscan while Follow centres a subject near an edge) is a
+    // distinct tone, so the canvas element's own extent stays readable while the camera moves inside it.
+    ctx.fillStyle = palette.panel;
     ctx.fillRect(0, 0, layout.width, layout.height);
 
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * layout.originX, dpr * layout.originY);
@@ -446,7 +452,7 @@ export class PoolRenderer {
 
     ctx.globalAlpha = 1;
     ctx.strokeStyle = palette.rule;
-    ctx.lineWidth = 1 / scale;
+    ctx.lineWidth = 1.5 / scale;
     ctx.strokeRect(0, 0, POOL_WIDTH, POOL_HEIGHT);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
@@ -518,15 +524,38 @@ export class PoolRenderer {
     let kept = 0;
     for (let i = 0; i < flashes.length; i++) {
       const flash = flashes[i];
-      const t = (now - flash.at) / MEAL_FLASH_MS;
-      if (t >= 1) continue;
+      const age = now - flash.at;
+      if (age >= MEAL_GLOW_MS) continue;
       flashes[kept++] = flash;
+      const t = age / MEAL_FLASH_MS;
       const mouth = flash.organism.poses[0]?.base;
-      if (!mouth) continue;
-      const e = 1 - (1 - t) * (1 - t);
       const mouthR = this.mouthRadius(flash.organism);
-      const peak = Math.max(mouthR * MEAL_BLOOM_RADII, MEAL_BLOOM_MIN_PX / this.scale);
+      if (mouth) {
+        // "Fed" glow: a soft disc on the mouth that fades over three seconds.
+        const g = 1 - age / MEAL_GLOW_MS;
+        const glowR = Math.max(mouthR * 2.2, 9 / this.scale);
+        const glow = ctx.createRadialGradient(mouth.x, mouth.y, 0, mouth.x, mouth.y, glowR);
+        glow.addColorStop(0, accent);
+        glow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = 0.5 * g * g;
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(mouth.x, mouth.y, glowR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (flash.hasFood && t < 1) {
+        // A small ring marks where the particle was.
+        ctx.strokeStyle = this.palette.food;
+        ctx.globalAlpha = 0.85 * (1 - t);
+        ctx.lineWidth = 1.4 / this.scale;
+        ctx.beginPath();
+        ctx.arc(flash.fx, flash.fy, 3.4 + 2.2 * t, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (!mouth || t >= 1) continue;
+      const e = 1 - (1 - t) * (1 - t);
       const from = mouthR + 3.4 * boost;
+      const peak = Math.max(mouthR * MEAL_BLOOM_RADII, MEAL_BLOOM_MIN_PX / this.scale);
       ctx.strokeStyle = accent;
       // Hold at full strength for the first third, then fade: bloom = meal eaten (the arc means food is held).
       ctx.globalAlpha = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
@@ -534,11 +563,13 @@ export class PoolRenderer {
       ctx.beginPath();
       ctx.arc(mouth.x, mouth.y, from + (Math.max(peak, from) - from) * e, 0, Math.PI * 2);
       ctx.stroke();
-      if (flash.hasFood) {
-        ctx.globalAlpha = 1 - t * 0.6;
+      const slide = Math.min(1, age / MEAL_SLIDE_MS);
+      if (flash.hasFood && slide < 1) {
+        const se = 1 - (1 - slide) * (1 - slide);
+        ctx.globalAlpha = 1 - slide * 0.6;
         ctx.fillStyle = this.palette.food;
         ctx.beginPath();
-        ctx.arc(flash.fx + (mouth.x - flash.fx) * e, flash.fy + (mouth.y - flash.fy) * e, Math.max(0.2, 2.6 * (1 - e)) * boost, 0, Math.PI * 2);
+        ctx.arc(flash.fx + (mouth.x - flash.fx) * se, flash.fy + (mouth.y - flash.fy) * se, Math.max(0.2, 2.6 * (1 - se)) * boost, 0, Math.PI * 2);
         ctx.fill();
       }
     }

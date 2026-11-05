@@ -272,6 +272,34 @@ test("Follow keeps the subject centred in the visible canvas, clear of the Inspe
   }
 });
 
+test("Follow never moves or resizes the canvas element: only the camera inside it changes", async ({ page }) => {
+  await page.goto("/tide-pool");
+  await expect.poll(async () => Number(await stat(page, "population").textContent())).toBeGreaterThan(0);
+  const canvas = canvasOf(page);
+  const rect = async () => (await canvas.boundingBox())!;
+  const initial = await rect();
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  const inspector = page.getByRole("region", { name: "Inspector" });
+  await expect(inspector).toBeVisible();
+  const inspecting = await rect();
+  const follow = inspector.getByRole("button", { name: "Follow", exact: true });
+  await follow.click();
+  await expect(follow).toHaveAttribute("aria-pressed", "true");
+  const same = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => {
+    expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(a.height - b.height)).toBeLessThanOrEqual(1);
+  };
+  same(inspecting, initial);
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(500);
+    same(await rect(), initial);
+  }
+  expect(await overflows(page)).toBe(false);
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+});
+
 test("dragging pans a cropped pool without dropping food", async ({ page }, info) => {
   test.skip(info.project.name !== "mobile-chromium", "Only narrow viewports crop the pool.");
   await page.goto("/tide-pool");

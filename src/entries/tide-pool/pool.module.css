@@ -38,7 +38,9 @@
 .inspector header { display: flex; flex: none; align-items: center; gap: 6px; }
 .close { flex: none; min-width: 44px; min-height: 44px; }
 .swatch[data-twin] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink); }
-.inspector header .swatch { margin-right: 2px; }
+.inspector header .facts dd.meals[data-fed] { color: var(--accent); font-weight: 700; animation: fed 2s ease-out; }
+@keyframes fed { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } to { background: transparent; } }
+.swatch { margin-right: 2px; }
 .inspector h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 700; }
 .inspector h2 small { color: var(--text-muted); font-size: 12px; font-weight: 400; }
 .inspectorBody { display: flex; flex: 1 1 auto; min-height: 0; gap: 12px; margin-top: 6px; overflow-y: auto; }
@@ -109,4 +111,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .energy span { transition: none; }
+  .facts dd.meals[data-fed] { animation: none; background: color-mix(in srgb, var(--accent) 18%, transparent); }
 }
