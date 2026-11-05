@@ -1,44 +1,41 @@
 export default function Preview() {
   return (
     <svg viewBox="0 0 320 180" fill="none" aria-hidden="true">
-      {/* Water, drawn back to the reef; the wreck's ribs stand out of it. */}
-      <rect width="320" height="180" fill="var(--accent)" opacity=".22" />
-      <g stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" opacity=".7">
-        <path d="M18 40 Q34 32 50 40" />
-        <path d="M130 28 Q146 20 162 28" />
-        <path d="M236 50 Q252 42 268 50" />
-        <path d="M70 66 Q86 58 102 66" />
+      {/* Terraces from the wreck (top) to the shingle (bottom), as in the game's scene. */}
+      <rect width="320" height="45" fill="#5a5d72" opacity=".75" />
+      <rect y="45" width="320" height="45" fill="#5f8572" opacity=".8" />
+      <rect y="90" width="320" height="45" fill="#8a7657" opacity=".85" />
+      <rect y="135" width="320" height="45" fill="#b7a98a" opacity=".9" />
+      <g fill="var(--ink)" opacity=".25">
+        {Array.from({ length: 22 }, (_, i) => <ellipse key={i} cx={8 + (i % 11) * 30 + (i > 10 ? 15 : 0)} cy={i > 10 ? 168 : 150} rx="4" ry="2.5" />)}
       </g>
-      <g stroke="var(--ink)" strokeWidth="4" strokeLinecap="round">
-        <path d="M196 72 L190 30" />
-        <path d="M212 74 L218 24" />
-        <path d="M228 72 L230 44" />
+      {/* Water back to the reef, with the wreck's ribs standing out of it. */}
+      <rect width="320" height="90" fill="#2d6cdf" opacity=".55" />
+      <g stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity=".6">
+        <path d="M10 30 Q22 24 34 30 T58 30" />
+        <path d="M120 62 Q132 56 144 62 T168 62" />
+        <path d="M250 24 Q262 18 274 24 T298 24" />
+        <path d="M0 89 Q15 83 30 89 T60 89 T90 89 T120 89 T150 89 T180 89 T210 89 T240 89 T270 89 T300 89 T330 89" />
       </g>
-      {/* Three bands of exposed flat, shore at the bottom. */}
-      <path d="M0 78 C50 70 100 86 160 78 S270 70 320 78 V180 H0 Z" fill="var(--paper)" />
-      <path d="M0 78 C50 70 100 86 160 78 S270 70 320 78 V112 C270 104 220 120 160 112 S50 104 0 112 Z" fill="var(--rule-subtle)" opacity=".5" />
-      <path d="M0 112 C50 104 100 120 160 112 S270 104 320 112 V146 C270 138 220 154 160 146 S50 138 0 146 Z" fill="var(--rule-subtle)" opacity=".8" />
-      <path d="M0 146 C50 138 100 154 160 146 S270 138 320 146 V180 H0 Z" fill="var(--rule)" opacity=".55" />
-      {/* Two crew out on the flat. */}
-      <g fill="var(--ink)">
-        <circle cx="104" cy="92" r="7" />
-        <rect x="98" y="99" width="12" height="20" rx="2" />
-        <circle cx="212" cy="126" r="7" />
-        <rect x="206" y="133" width="12" height="20" rx="2" />
+      <g stroke="#2a211b" strokeWidth="3.5" strokeLinecap="round">
+        <path d="M212 44 L208 14" />
+        <path d="M226 46 L226 8" />
+        <path d="M242 44 L248 12" />
       </g>
-      {/* The half-built tower on the shingle, with its lantern. */}
-      <g stroke="var(--ink)" strokeWidth="4" strokeLinejoin="round">
-        <path d="M34 176 V120 H62 V176" />
-        <path d="M34 140 H62 M34 158 H62" />
+      {/* Two crew on the mudflat, one with a progress ring. */}
+      <g>
+        <circle cx="96" cy="112" r="12" fill="var(--paper)" opacity=".6" />
+        <circle cx="96" cy="112" r="12" stroke="var(--accent)" strokeWidth="3" strokeDasharray="50 26" transform="rotate(-90 96 112)" />
+        <circle cx="96" cy="107" r="3.5" fill="var(--ink)" />
+        <rect x="93" y="110" width="6" height="10" rx="1.5" fill="var(--ink)" />
+        <circle cx="206" cy="107" r="3.5" fill="var(--ink)" />
+        <rect x="203" y="110" width="6" height="10" rx="1.5" fill="var(--ink)" />
       </g>
-      <path d="M38 120 L48 100 L58 120 Z" fill="var(--accent)" />
-      <circle cx="48" cy="110" r="22" fill="var(--accent)" opacity=".25" />
-      {/* The forecast: the next three tides as depth bars. */}
-      <g fill="var(--ink)">
-        <rect x="258" y="100" width="12" height="36" />
-        <rect x="276" y="112" width="12" height="24" />
-        <rect x="294" y="124" width="12" height="12" />
-      </g>
+      {/* The hut and a lit beacon on the shingle. */}
+      <path d="M22 174 V158 L36 148 L50 158 V174 Z" fill="#8d6b4a" stroke="#2a211b" strokeWidth="1.5" />
+      <path d="M270 176 L272 140 L290 140 L292 176 Z" fill="#b05a3c" stroke="#2a211b" strokeWidth="1.5" />
+      <path d="M275 140 L281 128 L287 140 Z" fill="#ffb547" />
+      <circle cx="281" cy="136" r="16" fill="#ffb547" opacity=".3" />
     </svg>
   );
 }

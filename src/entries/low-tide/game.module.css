@@ -11,6 +11,7 @@
 
 /* Header: tide, time, chart, progress. */
 .top { display: grid; gap: 6px; padding: 8px 16px 6px; background: var(--paper); }
+.top > * { max-width: 44rem; }
 .topRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 16px; background: var(--paper); }
 .tideLabel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; }
 .tideNumber { font-size: 18px; font-weight: 700; letter-spacing: var(--tracking-title); }
@@ -25,7 +26,8 @@
 .stage { display: grid; grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr); flex: 1 1 0; min-height: 0; }
 .sceneWrap { position: relative; align-self: start; display: grid; }
 .sceneBox { position: relative; }
-.veil { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; padding: 20px; background: color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter: blur(2px); text-align: center; }
+.veil { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; padding: 20px; background: color-mix(in srgb, var(--paper) 55%, transparent); text-align: center; }
+.veil p { padding: 10px 14px; background: color-mix(in srgb, var(--paper) 85%, transparent); }
 .veil p { max-width: 30rem; margin: 0; font-size: 15px; line-height: 1.5; }
 .veil .primary { justify-self: center; }
 
@@ -47,7 +49,7 @@
 
 .working { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .working li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.recall { min-height: 36px; padding: 4px 10px; border: 1px solid var(--rule-subtle); background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.recall { min-height: 44px; padding: 4px 10px; border: 1px solid var(--rule-subtle); background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .recall:hover { border-color: var(--accent); color: var(--accent); }
 
 .crew { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
@@ -56,7 +58,7 @@
 .crew li[data-hungry] { border-color: var(--warn); color: var(--warn); }
 .food { border-style: dashed !important; color: var(--text-secondary); }
 .food[data-low] { color: var(--warn); border-color: var(--warn) !important; }
-.unqueue { min-height: 32px; padding: 2px 8px; border: 1px dashed var(--rule); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.unqueue { min-height: 44px; padding: 2px 8px; border: 1px dashed var(--rule); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .unqueue:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Workbench. */
@@ -72,7 +74,7 @@
 .need[data-have] .count { color: var(--success); }
 .why { font-style: italic; }
 .count { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-muted); }
-.build { min-height: 40px; padding: 6px 14px; border: 1px solid var(--accent); background: var(--accent); color: var(--paper); font-size: 13px; font-weight: 600; cursor: pointer; }
+.build { min-height: 44px; padding: 6px 14px; border: 1px solid var(--accent); background: var(--accent); color: var(--paper); font-size: 13px; font-weight: 600; cursor: pointer; }
 .build:disabled { border-color: var(--rule-subtle); background: transparent; color: var(--text-muted); cursor: default; }
 .standing { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono, monospace); }
 

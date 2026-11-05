@@ -16,6 +16,8 @@ function itemName(item: Item) {
   return itemLabel(item).toLowerCase();
 }
 
+const ENDING_LABEL = { beacon: "The beacon is lit", boat: "The boat is away", tides: "The twelfth tide is in" } as const;
+
 function clock(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -90,18 +92,19 @@ function Camp({ state, best, dispatch }: Props) {
     return (
       <div className={styles.game}>
         <section className={styles.ending} aria-labelledby="low-tide-ending">
-          <p className={styles.label}>{end.reason === "beacon" ? "The beacon is lit" : "The twelfth tide is in"}</p>
+          <p className={styles.label}>{ENDING_LABEL[end.reason]}</p>
           <h2 id="low-tide-ending" ref={endingRef} tabIndex={-1}>
-            {end.reason === "beacon" ? `A harbour, on tide ${state.tide + 1}` : "The flat is under water"}
+            {end.reason === "beacon" ? `A harbour, on tide ${state.tide + 1}` : end.reason === "boat" ? `Under sail, on tide ${state.tide + 1}` : "The flat is under water"}
           </h2>
           <p className={styles.score}>
             <span>Score</span> <strong>{end.score}</strong>
             {best ? <span className={styles.best}>{best.score > end.score ? `best on this browser ${best.score}` : best.score === end.score && end.score > 0 ? "your best so far" : ""}</span> : null}
           </p>
           <dl className={styles.breakdown}>
-            <dt>Salvage on the tarp</dt><dd>{end.salvage}</dd>
+            <dt>{end.reason === "boat" ? "Salvage aboard, counted double" : "Salvage on the tarp"}</dt><dd>{end.salvage}</dd>
             <dt>{state.built.length} structures standing</dt><dd>{end.structures}</dd>
-            {end.beacon ? <><dt>Beacon</dt><dd>{end.beacon}</dd></> : null}
+            {end.foodScore ? <><dt>Food in store</dt><dd>{end.foodScore}</dd></> : null}
+            {end.beacon ? <><dt>{end.reason === "boat" ? "Boat launched" : "Beacon rung"}</dt><dd>{end.beacon}</dd></> : null}
             {end.tidesLeft ? <><dt>{end.tidesLeft} tides to spare</dt><dd>{end.tidesLeftBonus}</dd></> : null}
           </dl>
           <p className={styles.muted}>
@@ -131,9 +134,11 @@ function Camp({ state, best, dispatch }: Props) {
               <span className={styles.tideNumber}>Tide {state.tide + 1} <span className={styles.of}>of {state.tides.length}</span></span>
               <span className={styles.phase}>{phase(state, elapsed, depth, dark)}</span>
             </p>
-            <button type="button" className={styles.pause} aria-pressed={state.paused} onClick={() => dispatch({ type: state.paused ? "resume" : "pause" })}>
-              {state.paused ? (state.time === 0 ? "Start" : "Resume") : "Pause"}
-            </button>
+            {state.paused && state.time === 0 ? null : (
+              <button type="button" className={styles.pause} aria-pressed={state.paused} onClick={() => dispatch({ type: state.paused ? "resume" : "pause" })}>
+                {state.paused ? "Resume" : "Pause"}
+              </button>
+            )}
           </div>
           <div className={styles.progress} aria-hidden="true"><span style={{ width: `${(elapsed / TIDE_MS) * 100}%` }} /></div>
           <div className={styles.sceneBox}>
@@ -142,7 +147,7 @@ function Camp({ state, best, dispatch }: Props) {
             <div className={styles.veil} role="status">
               {state.time === 0 ? (
                 <>
-                  <p><strong>Two of you, twelve tides.</strong> The sea gives the flat back a little at a time: send people out while a band is dry, and build from what they carry home. A beacon on the shingle, lit before the last tide, is the prize.</p>
+                  <p><strong>Two of you, twelve tides.</strong> The sea gives the flat back one band at a time: send people out while a band is dry, and build from the workbench, where every plan is in plain sight. End the run by ringing a beacon, launching a boat, or lasting out the twelve tides.</p>
                   <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
                 </>
               ) : (
@@ -253,6 +258,9 @@ function Camp({ state, best, dispatch }: Props) {
             })}
             {state.built.includes("beacon") ? (
               <button type="button" className={styles.primary} onClick={() => dispatch({ type: "ring" })}>Ring the beacon</button>
+            ) : null}
+            {state.built.includes("boat") ? (
+              <button type="button" className={styles.primary} onClick={() => dispatch({ type: "launch" })}>Launch the boat</button>
             ) : null}
           </section>
 

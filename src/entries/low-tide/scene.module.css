@@ -15,7 +15,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 3 / 2;
-  max-height: 46svh;
+  max-height: 70svh;
   overflow: hidden;
   background: var(--sea-deep);
   user-select: none;
@@ -79,4 +79,10 @@
 @media (prefers-reduced-motion: reduce) {
   .water, .person .ring { transition: none; }
   .waves, .scene[data-rising] .foam { animation: none; }
+}
+
+.reachable { fill: none; stroke: var(--foam); stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .8; }
+.reachLabel { fill: var(--paper); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 700; letter-spacing: .06em; paint-order: stroke; stroke: color-mix(in srgb, var(--ink) 60%, transparent); stroke-width: 3px; }
+@media (max-width: 820px) {
+  .scene { max-height: 46svh; }
 }
