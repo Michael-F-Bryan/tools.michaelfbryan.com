@@ -105,6 +105,19 @@ export const TUNING = {
   /** Energy in one food particle (±foodJitter). Larger = easier living, bigger population. */
   foodEnergy: 34,
   foodJitter: 0.2,
+  /**
+   * Meal granularity. Particle energy is foodEnergy / foodGrain and every spawn count (scattered, patch,
+   * initial, dropped) is multiplied by foodGrain, so the total energy flux and the foodRate slider semantics
+   * are unchanged; only the meals get smaller and more numerous. Patch grazing per meal scales by 1/foodGrain
+   * too (grazing per unit energy is constant).
+   */
+  /*
+   * Measured seeds 400-419, 12 min (extinct / min pop <= 10 / patch cycling / samples at the 240 food cap):
+   *   foodGrain 1: 2 / 2 / 15 / 2 of 230.   foodGrain 2: 2 / 4 / 10 / 39 of 234.
+   * Grain 2 saturates MAX_FOOD (240), which throttles spawning and stops patches from reading as grazed, and its
+   * extinct pools died with the map full of food. Finer meals did not fix the sessile-drifter collapse, so grain stays 1.
+   */
+  foodGrain: 1,
   /** Particles already floating when a pool is created, so the first minute is not a famine. */
   initialFood: 90,
   /** Uneaten food dissolves after this many seconds, keeping the pool from silting up. */
@@ -268,7 +281,7 @@ export class World implements WorldLike {
     this.swirlY = new Float32Array(this.scent.cols * this.scent.rows);
     this.refreshSwirl();
     this.seedPatches();
-    for (let i = 0; i < TUNING.initialFood; i++) this.spawnOneFood();
+    for (let i = 0; i < TUNING.initialFood * TUNING.foodGrain; i++) this.spawnOneFood();
     for (let i = 0; i < SEED_POPULATION; i++) this.seedOrganism();
     this.stats = this.computeStats();
     this.history.push(this.stats);
@@ -288,7 +301,7 @@ export class World implements WorldLike {
   }
 
   dropFood(point: Vec2, count = 6): void {
-    for (let i = 0; i < count && this.food.length < MAX_FOOD; i++) {
+    for (let i = 0; i < count * TUNING.foodGrain && this.food.length < MAX_FOOD; i++) {
       const angle = this.rng.range(0, Math.PI * 2);
       const dist = Math.sqrt(this.rng.float()) * 22;
       this.addFood(point.x + Math.cos(angle) * dist, point.y + Math.sin(angle) * dist);
@@ -459,7 +472,7 @@ export class World implements WorldLike {
     this.food.push({
       id: this.nextFoodId++,
       position: { x: clamp(x, m, this.width - m), y: clamp(y, m, this.height - m) },
-      energy: TUNING.foodEnergy * jitter,
+      energy: (TUNING.foodEnergy / TUNING.foodGrain) * jitter,
       age: 0,
     });
   }
@@ -478,12 +491,12 @@ export class World implements WorldLike {
   private spawnFood(): void {
     const n = this.patches.length;
     const share = n > 0 ? TUNING.patchShare : 0;
-    const scattered = this.stochasticCount(this.env.foodRate * (1 - share) * DT);
+    const scattered = this.stochasticCount(this.env.foodRate * TUNING.foodGrain * (1 - share) * DT);
     for (let i = 0; i < scattered && this.food.length < MAX_FOOD; i++) {
       this.addFood(this.rng.range(0, this.width), this.rng.range(0, this.height));
     }
     for (const patch of this.patches) {
-      const count = this.stochasticCount((this.env.foodRate * share * DT * patch.stock) / n);
+      const count = this.stochasticCount((this.env.foodRate * TUNING.foodGrain * share * DT * patch.stock) / n);
       for (let i = 0; i < count && this.food.length < MAX_FOOD; i++) {
         this.addFood(patch.position.x + this.rng.gaussian() * patch.radius * 0.5, patch.position.y + this.rng.gaussian() * patch.radius * 0.5);
       }
@@ -789,7 +802,7 @@ export class World implements WorldLike {
     for (const patch of this.patches) {
       if (Math.hypot(f.position.x - patch.position.x, f.position.y - patch.position.y) <= patch.radius) {
         patch.grazed++;
-        patch.stock = Math.max(TUNING.patchMinStock, patch.stock - TUNING.patchGrazePerMeal);
+        patch.stock = Math.max(TUNING.patchMinStock, patch.stock - TUNING.patchGrazePerMeal / TUNING.foodGrain);
       }
     }
     this.mealBuckets[this.windowBucket()]++;

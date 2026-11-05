@@ -261,7 +261,9 @@ const SCENT_ROWS = 30;
 const SCENT_REFRESH_MS = 180;
 const SELECTED_TRAIL_POINTS = 140;
 const FOLLOW_TRAIL_POINTS = 420;
-const DEATH_MS = 800;
+/** Birth and death marks last this many REAL milliseconds, whatever the simulation speed. */
+const DEATH_MS = 700;
+const BIRTH_MS = 700;
 const MAX_DEATH_MARKS = 40;
 const TRAIL_STEP = 2.5;
 
@@ -290,6 +292,9 @@ export class PoolRenderer {
   private deathsHandled = new Set<number>();
   private deaths: DeathMark[] = [];
   private eventWorld: WorldView | null = null;
+  private bornAt = new Map<number, number>();
+  private following = false;
+  private frameNow = 0;
   private frameStamp = 0;
 
   setPalette(palette: Palette) {
@@ -343,6 +348,7 @@ export class PoolRenderer {
 
   /** Records the selected organism's path so the followed trail outlasts the engine's. */
   private trackSelected(world: WorldView, organism: Organism | undefined, following: boolean) {
+    this.following = following;
     if (!organism || !organism.poses.length) {
       this.trailOwner = -1;
       this.trail.length = 0;
@@ -365,6 +371,7 @@ export class PoolRenderer {
     const palette = this.palette;
     const { dpr, scale } = layout;
     this.boost = strokeBoost(scale);
+    this.frameNow = now;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
@@ -429,31 +436,31 @@ export class PoolRenderer {
     ctx.drawImage(this.scentCanvas, 0, 0, POOL_WIDTH, POOL_HEIGHT);
   }
 
+  /** A soft meadow disc per patch: warm and bright when full, almost gone when grazed down, with a faint dashed ring left behind. */
   private drawPatches(ctx: CanvasRenderingContext2D, world: WorldView) {
     const patches = (world as { patches?: readonly Patch[] }).patches;
     if (!patches?.length) return;
-    const rgb = this.palette.dark ? "190,255,210" : "20,90,60";
-    ctx.lineWidth = 1.2;
+    const dark = this.palette.dark;
+    const rgb = dark ? "175,235,140" : "95,140,40";
+    const ring = dark ? "190,255,210" : "20,90,60";
     for (const patch of patches) {
       const stock = Math.min(1, Math.max(0, patch.stock ?? 1));
       const { x, y } = patch.position;
-      // Full stock: soft inner glow and clear ring. Depleted: faint dashed ring, no glow.
-      if (stock > 0.25) {
-        const glow = ctx.createRadialGradient(x, y, 0, x, y, patch.radius);
-        glow.addColorStop(0, `rgba(${rgb},${(0.1 * stock).toFixed(3)})`);
-        glow.addColorStop(1, `rgba(${rgb},0)`);
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(x, y, patch.radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.setLineDash(stock > 0.5 ? [] : [3, 6 - 3 * stock]);
-      ctx.strokeStyle = `rgba(${rgb},${(0.05 + 0.2 * stock).toFixed(3)})`;
+      const peak = (dark ? 0.06 : 0.05) + (dark ? 0.44 : 0.4) * stock * stock;
+      const disc = ctx.createRadialGradient(x, y, 0, x, y, patch.radius);
+      disc.addColorStop(0, `rgba(${rgb},${peak.toFixed(3)})`);
+      disc.addColorStop(0.6, `rgba(${rgb},${(peak * 0.65).toFixed(3)})`);
+      disc.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = disc;
       ctx.beginPath();
       ctx.arc(x, y, patch.radius, 0, Math.PI * 2);
-      // The inner ring shrinks with stock, so a grazed-down patch reads as a hollow shell.
-      ctx.moveTo(x + patch.radius * 0.55 * stock, y);
-      ctx.arc(x, y, patch.radius * 0.55 * stock, 0, Math.PI * 2);
+      ctx.fill();
+      // Full: a steady ring. Grazed down: only a faint dashed outline marks the empty ground.
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash(stock > 0.6 ? [] : [3, 7 - 4 * stock]);
+      ctx.strokeStyle = `rgba(${ring},${(0.12 + 0.2 * stock).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, patch.radius, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -515,13 +522,14 @@ export class PoolRenderer {
     ctx.strokeStyle = this.coloursFor(organism).fill;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    const follow = this.following;
     const bands = 28;
     const per = Math.max(1, Math.ceil((count - 1) / bands));
     for (let i = 0; i < count - 1; i += per) {
       const end = Math.min(count - 1, i + per);
       const along = end / count;
-      ctx.globalAlpha = 0.08 + 0.72 * along;
-      ctx.lineWidth = (0.5 + 2.6 * along) * this.boost;
+      ctx.globalAlpha = Math.min(1, (follow ? 0.16 : 0.08) + (follow ? 0.84 : 0.72) * along);
+      ctx.lineWidth = (0.6 + (follow ? 3.6 : 2.6) * along) * this.boost;
       ctx.beginPath();
       ctx.moveTo(trail[i].x, trail[i].y);
       for (let j = i + 1; j <= end; j++) ctx.lineTo(trail[j].x, trail[j].y);
@@ -537,6 +545,7 @@ export class PoolRenderer {
       this.lastSeen.clear();
       this.deathsHandled.clear();
       this.deaths.length = 0;
+      this.bornAt.clear();
     }
     const stamp = ++this.frameStamp;
     for (let i = 0; i < organisms.length; i++) {
@@ -580,17 +589,19 @@ export class PoolRenderer {
       if (t < 0) continue;
       const fade = 1 - t;
       const colour = swatchHsl(mark.slot, mark.shade, this.palette.dark);
-      ctx.globalAlpha = (mark.starved ? 0.7 : 0.45) * fade * fade;
+      ctx.globalAlpha = (mark.starved ? 0.9 : 0.6) * fade;
       if (mark.starved) {
         ctx.strokeStyle = colour;
-        ctx.lineWidth = 1.6 * this.boost;
+        ctx.lineWidth = 1.8 * this.boost;
+        ctx.setLineDash([3, 3]);
         ctx.beginPath();
-        ctx.arc(mark.x, mark.y, 4 + t * 12, 0, Math.PI * 2);
+        ctx.arc(mark.x, mark.y, 6 + t * 14, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.setLineDash([]);
       } else {
         ctx.fillStyle = colour;
         ctx.beginPath();
-        ctx.arc(mark.x, mark.y, (3 + t * 3) * this.boost, 0, Math.PI * 2);
+        ctx.arc(mark.x, mark.y, (4 + t * 4) * this.boost, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -606,16 +617,25 @@ export class PoolRenderer {
     const alpha = Math.max(0.4, Math.min(1, fraction * 1.1));
     paintBody(ctx, organism.genome.parts, poses, organism.senses, colours, this.palette, this.boost, alpha, outlineExtra);
 
-    if (organism.age < 1) {
-      const root = poses[0];
-      const t = organism.age;
-      ctx.globalAlpha = (1 - t) * 0.8;
-      ctx.strokeStyle = colours.fill;
-      ctx.lineWidth = 2 * this.boost;
-      ctx.beginPath();
-      ctx.arc(root.base.x, root.base.y, 8 + t * 28, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    // Newborn pulse: timed in real milliseconds from first sight so it reads at any speed.
+    let start = this.bornAt.get(organism.id);
+    if (start === undefined && organism.age < 1) {
+      start = this.frameNow;
+      this.bornAt.set(organism.id, start);
+      if (this.bornAt.size > 400) for (const [id, at] of this.bornAt) if (this.frameNow - at > BIRTH_MS) this.bornAt.delete(id);
+    }
+    if (start !== undefined) {
+      const t = (this.frameNow - start) / BIRTH_MS;
+      if (t >= 0 && t < 1) {
+        const root = poses[0];
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.strokeStyle = colours.fill;
+        ctx.lineWidth = 2.2 * this.boost;
+        ctx.beginPath();
+        ctx.arc(root.base.x, root.base.y, 8 + t * 28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
