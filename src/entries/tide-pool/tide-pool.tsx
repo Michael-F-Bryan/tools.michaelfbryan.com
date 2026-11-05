@@ -185,6 +185,9 @@ function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefine
     if (pool.length) break;
   }
   if (!pool.length) return fallback;
+  // Sensing is what a viewer is meant to watch: among the qualifying candidates, those with a sensor go first.
+  const sensing = pool.filter((c) => c.organism.genome.parts.some((p) => p.kind === "sensor"));
+  if (sensing.length) pool = sensing;
   // Youngest pools compare travel alone; otherwise the meal rate leads and travel (the trail covers the same window for all) breaks ties.
   const key = (c: Candidate) => (anyMature ? c.rate : 0);
   pool.sort((a, b) => key(b) - key(a) || b.speed - a.speed || b.organism.energy - a.organism.energy || a.organism.id - b.organism.id);
@@ -877,6 +880,19 @@ export function TidePool() {
                       <strong className={styles.died}> · {inspected.cause === "age" ? "died (old age)" : inspected.cause === "starved" ? "died (starved)" : "died"}</strong>
                     )}
                   </p>
+                  {inspected.organism.senses.length ? (
+                    <div className={styles.senses} role="group" aria-label="Senses">
+                      <span className={styles.sensesLabel}>Senses</span>
+                      {inspected.organism.senses.map((reading, index) => {
+                        const value = Math.max(0, Math.min(1, reading || 0));
+                        return (
+                          <span key={index} className={styles.sense} role="meter" aria-label={`Sensor ${index + 1}`} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Number(value.toFixed(2))}>
+                            <span style={{ width: `${value * 100}%` }} />
+                          </span>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   <div
                     className={styles.energy}
                     role="meter"
@@ -910,6 +926,12 @@ export function TidePool() {
                       <dt>Meals</dt>
                       <dd key={fedAt} className={styles.meals} data-fed={fedAt > 0 ? "" : undefined}>{inspected.meals}</dd>
                     </div>
+                    {inspected.organism.senses.length ? null : (
+                      <div>
+                        <dt>Senses</dt>
+                        <dd>no sensors</dd>
+                      </div>
+                    )}
                     <div>
                       <dt>Offspring</dt>
                       <dd>{inspected.offspring}</dd>

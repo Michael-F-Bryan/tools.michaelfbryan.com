@@ -288,6 +288,16 @@ const TRAIL_STEP = 2.5;
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value);
 
+/** Follow-mode scent overlay: a coarse grid over the visible area, one `scentAt` per cell per frame. */
+const SENSE_COLS = 40;
+const SENSE_ROWS = 24;
+/** Concentrations at which a thin isoline is drawn (the tint carries the rest). */
+const SENSE_LEVELS = [0.15, 0.5] as const;
+/** Segment endpoints (edge indices 0 top, 1 right, 2 bottom, 3 left) per marching-squares case. */
+const SENSE_SEGMENTS: readonly (readonly number[])[] = [
+  [], [3, 0], [0, 1], [3, 1], [1, 2], [3, 0, 1, 2], [0, 2], [3, 2], [3, 2], [0, 2], [0, 1, 3, 2], [1, 2], [3, 1], [0, 1], [3, 0], [],
+];
+
 /**
  * Draws a `WorldView`. Holds only scratch caches (scent texture, colour strings,
  * the selected organism's own longer trail); the world itself is never mutated.
@@ -321,6 +331,14 @@ export class PoolRenderer {
   private lastFood = new Map<number, Vec2>();
   private mealFlashes: MealFlash[] = [];
   private foragingWorld: WorldView | null = null;
+  private senseCanvas: HTMLCanvasElement | null = null;
+  private senseContext: CanvasRenderingContext2D | null = null;
+  private senseImage: ImageData | null = null;
+  private senseField = new Float32Array(SENSE_COLS * SENSE_ROWS);
+  private senseFade = 0;
+  private senseStamp = 0;
+  /** Smoothed milliseconds the scent overlay took per frame (0 while hidden). */
+  overlayMs = 0;
 
   setPalette(palette: Palette) {
     this.palette = palette;
@@ -369,6 +387,126 @@ export class PoolRenderer {
       }
     }
     this.scentContext.putImageData(image, 0, 0);
+  }
+
+  /** Eases the Follow-only sensing layers in and out in real time, independent of simulation speed. */
+  private stepSenseFade(on: boolean, now: number) {
+    const dt = this.senseStamp ? Math.min(250, Math.max(0, now - this.senseStamp)) : 0;
+    this.senseStamp = now;
+    this.senseFade += ((on ? 1 : 0) - this.senseFade) * (1 - Math.exp(-dt / 220));
+    if (!on && this.senseFade < 0.01) {
+      this.senseFade = 0;
+      this.overlayMs = 0;
+    }
+  }
+
+  /**
+   * The scent concentration over the visible area, straight from `world.scentAt`: a soft tint (alpha follows the
+   * concentration) with two thin isolines. Nothing is inferred; it is the field the followed animal's sensors sample.
+   */
+  private drawSenseField(ctx: CanvasRenderingContext2D, world: WorldView, layout: Layout) {
+    const fade = this.senseFade;
+    if (fade <= 0) return;
+    const started = performance.now();
+    if (!this.senseCanvas) {
+      this.senseCanvas = document.createElement("canvas");
+      this.senseCanvas.width = SENSE_COLS;
+      this.senseCanvas.height = SENSE_ROWS;
+      this.senseContext = this.senseCanvas.getContext("2d");
+      this.senseImage = this.senseContext?.createImageData(SENSE_COLS, SENSE_ROWS) ?? null;
+    }
+    const image = this.senseImage;
+    if (!image || !this.senseContext || !this.senseCanvas) return;
+    const scale = layout.scale;
+    const x0 = -layout.originX / scale, y0 = -layout.originY / scale;
+    const w = layout.width / scale, h = layout.height / scale;
+    const [r, g, b] = this.palette.scent;
+    const field = this.senseField;
+    const data = image.data;
+    const point = this.point;
+    const peak = this.palette.dark ? 135 : 115;
+    for (let row = 0; row < SENSE_ROWS; row++) {
+      point.y = y0 + ((row + 0.5) / SENSE_ROWS) * h;
+      for (let col = 0; col < SENSE_COLS; col++) {
+        point.x = x0 + ((col + 0.5) / SENSE_COLS) * w;
+        const inside = point.x >= 0 && point.x <= POOL_WIDTH && point.y >= 0 && point.y <= POOL_HEIGHT;
+        const strength = inside ? clamp01(world.scentAt(point)) : 0;
+        const k = row * SENSE_COLS + col;
+        field[k] = strength;
+        data[k * 4] = r;
+        data[k * 4 + 1] = g;
+        data[k * 4 + 2] = b;
+        data[k * 4 + 3] = Math.min(255, 20 * Math.sign(strength) + Math.pow(strength, 0.7) * peak * 0.95) * fade;
+      }
+    }
+    this.senseContext.putImageData(image, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = 1;
+    ctx.drawImage(this.senseCanvas, x0, y0, w, h);
+
+    // Isolines: marching squares over the sampled centres, one stroked path per level.
+    const dx = w / SENSE_COLS, dy = h / SENSE_ROWS;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = `rgb(${r},${g},${b})`;
+    for (let level = 0; level < SENSE_LEVELS.length; level++) {
+      const threshold = SENSE_LEVELS[level];
+      ctx.globalAlpha = fade * (level === 0 ? 0.4 : 0.7);
+      ctx.lineWidth = (level === 0 ? 1 : 1.4) / scale;
+      ctx.beginPath();
+      for (let row = 0; row < SENSE_ROWS - 1; row++) {
+        for (let col = 0; col < SENSE_COLS - 1; col++) {
+          const k = row * SENSE_COLS + col;
+          const a = field[k], bb = field[k + 1], c = field[k + SENSE_COLS + 1], d = field[k + SENSE_COLS];
+          const code = (a >= threshold ? 1 : 0) | (bb >= threshold ? 2 : 0) | (c >= threshold ? 4 : 0) | (d >= threshold ? 8 : 0);
+          const segments = SENSE_SEGMENTS[code];
+          if (!segments.length) continue;
+          const cx = x0 + (col + 0.5) * dx, cy = y0 + (row + 0.5) * dy;
+          for (let s = 0; s < segments.length; s += 2) {
+            for (let end = 0; end < 2; end++) {
+              const edge = segments[s + end];
+              let x: number, y: number;
+              if (edge === 0) { x = cx + dx * ((threshold - a) / (bb - a)); y = cy; }
+              else if (edge === 2) { x = cx + dx * ((threshold - d) / (c - d)); y = cy + dy; }
+              else if (edge === 3) { x = cx; y = cy + dy * ((threshold - a) / (d - a)); }
+              else { x = cx + dx; y = cy + dy * ((threshold - bb) / (c - bb)); }
+              if (end === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+          }
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    this.overlayMs += (performance.now() - started - this.overlayMs) * 0.1;
+  }
+
+  /** Each sensor tip of the followed animal as a disc whose size and brightness are its `senses` reading, nothing more. */
+  private drawSenseTips(ctx: CanvasRenderingContext2D, organism: Organism) {
+    const fade = this.senseFade;
+    if (fade <= 0.01) return;
+    const parts = organism.genome.parts;
+    const colours = this.coloursFor(organism);
+    let index = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].kind !== "sensor") continue;
+      const reading = clamp01(organism.senses[index++] ?? 0);
+      const pose = organism.poses[i];
+      if (!pose) continue;
+      ctx.globalAlpha = fade * (0.18 + 0.72 * reading);
+      ctx.fillStyle = colours.sensor;
+      ctx.beginPath();
+      ctx.arc(pose.tip.x, pose.tip.y, (2.6 + reading * 4.4) * this.boost, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = fade * 0.6;
+      ctx.strokeStyle = colours.outline;
+      ctx.lineWidth = 0.8 * this.boost;
+      ctx.beginPath();
+      ctx.arc(pose.tip.x, pose.tip.y, (2.6 + reading * 4.4) * this.boost, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** Records the selected organism's path so the followed trail outlasts the engine's. */
@@ -470,11 +608,15 @@ export class PoolRenderer {
       if (organism.id === ui.hoverId) hovered = organism;
     }
     this.trackSelected(world, selected, Boolean(ui.following));
+    const sensing = Boolean(ui.following && selected && selected.poses.length && selected.genome.parts.some((p) => p.kind === "sensor"));
+    this.stepSenseFade(sensing, now);
+    this.drawSenseField(ctx, world, layout);
     if (selected) this.drawSelectedTrail(ctx, selected);
     this.drawDeaths(ctx, now);
     for (let i = 0; i < organisms.length; i++) if (organisms[i] !== selected) this.drawOrganism(ctx, organisms[i], 0);
     if (selected) {
       this.drawOrganism(ctx, selected, 1.6);
+      this.drawSenseTips(ctx, selected);
       this.drawSelection(ctx, selected, scale);
     }
     this.drawForaging(ctx, world, organisms, now);

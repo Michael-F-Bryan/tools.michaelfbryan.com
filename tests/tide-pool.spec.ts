@@ -230,6 +230,14 @@ test("the Inspector animates the anatomy and Follow zooms the camera onto the or
   await follow.click();
   await expect(follow).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => canvasPixels(page), { timeout: 5000 }).not.toBe(before);
+  // Sensing is visible in the Inspector: one live bar per sensor, or an explicit "no sensors" fact (skip when sensorless).
+  if (/no sensors/.test(await inspector.innerText())) {
+    test.info().annotations.push({ type: "note", description: "followed subject has no sensors; Senses row skipped" });
+  } else {
+    const row = inspector.getByRole("group", { name: "Senses" });
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("meter").first()).toHaveAttribute("aria-valuenow", /^\d(\.\d+)?$/);
+  }
   await follow.click();
   await expect(follow).toHaveAttribute("aria-pressed", "false");
   await follow.click();
