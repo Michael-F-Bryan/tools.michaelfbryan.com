@@ -20,6 +20,7 @@ import {
   NET_FOOD,
   RESOURCES,
   RESOURCES_BY_BAND,
+  SHIP_EACH,
   STARTING_CREW,
   STARTING_FOOD,
   TIDE_MS,
@@ -36,7 +37,7 @@ import {
   type Tier,
 } from "./data";
 
-export { TIDE_MS, TIDES_PER_RUN, TURN_MS, CREEP_MS, BANDS, BAND_NAMES, RESOURCES, RESOURCES_BY_BAND, BLUEPRINTS, BUILT_LABELS, MAX_CREW, CARGO, CARGO_VALUE, TRADER_HOLD, BOAT_HOLD, NET_FOOD, FISH_TRAP_FOOD };
+export { TIDE_MS, TIDES_PER_RUN, TURN_MS, CREEP_MS, BANDS, BAND_NAMES, RESOURCES, RESOURCES_BY_BAND, BLUEPRINTS, BUILT_LABELS, MAX_CREW, CARGO, CARGO_VALUE, TRADER_HOLD, BOAT_HOLD, SHIP_EACH, NET_FOOD, FISH_TRAP_FOOD };
 export type { Band, Built, Cargo, Item, Resource, Blueprint, Tier };
 
 export type Job = Readonly<{
@@ -487,7 +488,7 @@ export type TradePlan = Readonly<{
  * one of each kind that a blueprint you have not yet finished still needs (a
  * brass waiting for its oil, an iron for the winch); pearls and salt always
  * sell. Order: the
- * ship (if the beacon stands) buys one of every kind, then the trader takes
+ * ship (if the beacon stands) buys up to `SHIP_EACH` of every kind, then the trader takes
  * the most valuable piece left, then the boat (if it stands) the next
  * `BOAT_HOLD` most valuable.
  */
@@ -504,10 +505,9 @@ export function planTrade(state: State): TradePlan {
   const ship: Cargo[] = [];
   if (hasBuilt(state, "beacon")) {
     for (const kind of CARGO) {
-      if (left[kind] > 0) {
-        ship.push(kind);
-        left[kind] -= 1;
-      }
+      const take = Math.min(left[kind], SHIP_EACH);
+      for (let i = 0; i < take; i++) ship.push(kind);
+      left[kind] -= take;
     }
   }
   const trader: Cargo[] = [];
@@ -678,7 +678,7 @@ function trade(s: State): State {
   s = { ...s, inventory, sales, turnSales: [...s.turnSales, plan.total] };
   if (plan.total === 0) return log(s, "At the turn: nothing to sell.", "info");
   const parts: string[] = [];
-  if (plan.ship.length > 0) parts.push(`the ship buys ${plan.ship.map((kind) => itemLabel(kind).toLowerCase()).join(", ")} (${plan.value.ship})`);
+  if (plan.ship.length > 0) parts.push(`the ship buys ${describeCargo(plan.ship)} (${plan.value.ship})`);
   if (plan.trader.length > 0) parts.push(`the trader takes ${describeCargo(plan.trader)} (${plan.value.trader})`);
   if (plan.boat.length > 0) parts.push(`the boat carries ${describeCargo(plan.boat)} (${plan.value.boat})`);
   return log(s, `At the turn: ${parts.join("; ")}.`, "gain");

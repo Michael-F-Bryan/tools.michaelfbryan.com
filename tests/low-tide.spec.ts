@@ -90,7 +90,7 @@ test("the catalogue opens the game at the first tide with the whole chart, a fre
   // Nothing moves until the player says so, and the veil says how points are earned.
   const veil = page.getByRole("status").filter({ hasText: "Two of you" });
   await expect(veil).toContainText("Two of you, twelve tides.");
-  await expect(veil).toContainText("at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys one of every kind");
+  await expect(veil).toContainText("at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys two of every kind");
   await expect(veil).toContainText("the sea only bares the reef and the wreck when the tide is low");
   await expect(veil).not.toContainText(/\b(ring|launch)\b/i);
   // The score starts at nothing, and the turn panel already says what the trader alone will do.
@@ -426,7 +426,7 @@ const ENGINES = { built: ["waders", "beacon", "boat"] as Built[], unlocked: 3 as
 test("cargo shows what it sells for, and the At-the-turn panel previews each engine's sale, which then happens at the turn without ending the run", async ({ page }, info) => {
   const state = runAt(2, { ...ENGINES, inventory: { pearl: 6, brass: 2, iron: 1, oil: 2, kelp: 3, driftwood: 1 }, sales: { trader: 30, boat: 0, ship: 0 } });
   const plan = planTrade(state);
-  expect(plan.total).toBe(122);
+  expect(plan.total).toBe(164);
   expect(plan.held).toEqual(["iron"]);
   await openWith(page, state);
   // The clock is frozen, so resuming only lifts the veil off the scene.
@@ -435,7 +435,7 @@ test("cargo shows what it sells for, and the At-the-turn panel previews each eng
   // The preview is the engine's own plan, row by row; engines that do not stand are not listed, and the held-back kind is explained.
   const rows = turnList(page).getByRole("listitem");
   await expect(rows).toHaveText([
-    "Ship · pearl, brass, oil · 42",
+    "Ship · 2 pearls, 2 brass, 2 oil · 84",
     "Trader · pearl · 20",
     "Boat · 3 pearls · 60",
     "Traders leave your last iron for the workbench until the final turn.",
@@ -460,16 +460,18 @@ test("cargo shows what it sells for, and the At-the-turn panel previews each eng
   // One full turn: the log says so, Sold rises by exactly the previewed total, and the run goes on.
   await page.clock.runFor(TIDE_MS - 1_000 + 500);
   await expect(tideLabel(page, 4)).toBeVisible();
-  await expect(log(page)).toContainText("At the turn: the ship buys pearl, brass, oil (42); the trader takes 1 pearl (20); the boat carries 3 pearls (60).");
+  await expect(log(page)).toContainText("At the turn: the ship buys 2 pearls, 2 brass and 2 oil (84); the trader takes 1 pearl (20); the boat carries 3 pearls (60).");
   await expect(sold(page)).toHaveText(`Sold ${30 + plan.total}`);
-  await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×" })).toContainText("pearl ×1");
+  // 6 pearls: 2 to the ship, 1 to the trader, 3 to the boat. The held iron stays on the tarp.
+  await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×" })).toHaveCount(0);
+  await expect(salvage(page).getByRole("listitem").filter({ hasText: "iron ×" })).toContainText("iron ×1");
   await expect(page.getByRole("heading", { level: 2, name: "Twelve tides worked" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
 });
 
 test("the end screen shows the three sales, the total, and what the sea kept", async ({ page }, info) => {
-  // Final tide, one second from the end. Last turn sells everything it can: the ship one of each kind (62), the trader a pearl,
-  // the boat three more, so 1 pearl and 3 brass are left; kelp is building stock and is not counted as lost cargo.
+  // Final tide, one second from the end. Last turn sells everything it can: two of each kind (94), the trader a pearl,
+  // the boat three more, so the 2 brass the ship did not take are left; kelp is building stock and is not counted as lost cargo.
   const state = runAt(11, {
     ...ENGINES,
     time: 12 * TIDE_MS - 1_000,
@@ -478,7 +480,7 @@ test("the end screen shows the three sales, the total, and what the sea kept", a
     turnSales: Array<number>(11).fill(0),
   });
   const expected = advance({ ...state, paused: false }, 1_000).ended!;
-  expect(expected).toMatchObject({ ship: 92, trader: 120, boat: 110, score: 322, leftover: { pearl: 1, brass: 3 } });
+  expect(expected).toMatchObject({ ship: 124, trader: 120, boat: 110, score: 354, leftover: { brass: 2 } });
   await openWith(page, state);
   await page.getByRole("button", { name: "Resume" }).click();
   await page.clock.runFor(2_000);
@@ -488,15 +490,15 @@ test("the end screen shows the three sales, the total, and what the sea kept", a
   await expect(page.getByText("The twelfth tide is in")).toBeVisible();
   const rows = page.locator("dl");
   await expect(rows.locator("dt")).toHaveText(["Bought by ships", "Bought by the trader", "Carried by your boat"]);
-  await expect(rows.locator('dt:text-is("Bought by ships") + dd')).toHaveText("92");
+  await expect(rows.locator('dt:text-is("Bought by ships") + dd')).toHaveText("124");
   await expect(rows.locator('dt:text-is("Bought by the trader") + dd')).toHaveText("120");
   await expect(rows.locator('dt:text-is("Carried by your boat") + dd')).toHaveText("110");
-  await expect(page.locator("strong").filter({ hasText: /^322$/ })).toBeVisible();
-  await expect(page.locator("p").filter({ hasText: /^Score/ })).toContainText("322");
-  await expect(page.getByText("Left on the tarp: 1 pearl, 3 brass.")).toBeVisible();
+  await expect(page.locator("strong").filter({ hasText: /^354$/ })).toBeVisible();
+  await expect(page.locator("p").filter({ hasText: /^Score/ })).toContainText("354");
+  await expect(page.getByText("Left on the tarp: 2 brass.")).toBeVisible();
   await expect(page.getByText("Built: waders, beacon, boat.")).toBeVisible();
   await expect(page.getByText("your best so far")).toBeVisible();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("low-tide:best:v3")!))).toMatchObject({ score: 322, beacon: true, boats: 1, runs: 1 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("low-tide:best:v3")!))).toMatchObject({ score: 354, beacon: true, boats: 1, runs: 1 });
   expect(await noOverflow(page)).toBe(true);
   await shot(page, info, "ending-sales");
 

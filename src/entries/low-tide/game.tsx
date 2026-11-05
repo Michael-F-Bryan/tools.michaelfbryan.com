@@ -170,7 +170,7 @@ function Camp({ state, best, dispatch }: Props) {
             <div className={styles.veil} role="status">
               {state.time === 0 ? (
                 <>
-                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys one of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
+                  <p><strong>Two of you, twelve tides.</strong> Reef and wreck finds are cargo: at every turn a trader buys your best piece, a boat of your own carries three more, and a lit beacon brings a ship that buys two of every kind. The sooner they stand, the more turns they earn, but the sea only bares the reef and the wreck when the tide is low.</p>
                   <button type="button" className={styles.primary} onClick={() => dispatch({ type: "resume" })}>Begin at low water</button>
                 </>
               ) : (

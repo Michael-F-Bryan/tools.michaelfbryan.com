@@ -258,7 +258,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { bellTower: 1, lantern: 1 },
     structure: true,
     label: "Beacon",
-    effect: "At every turn, a ship calls and buys one of every kind of cargo. Its light keeps dark tides from slowing you.",
+    effect: "At every turn, a ship calls and buys two of every kind of cargo. Its light keeps dark tides from slowing you.",
     flavour: "The lantern goes up the tower. From the sea, this is a harbour now.",
   },
 ];
@@ -283,6 +283,8 @@ export const CARGO_VALUE: Record<Cargo, number> = { pearl: 20, brass: 12, iron: 
 export const TRADER_HOLD = 1;
 /** How many more pieces your own boat carries at each turn. */
 export const BOAT_HOLD = 3;
+/** How many pieces of each kind the ship buys at every turn once the beacon stands. */
+export const SHIP_EACH = 2;
 /** Wreck jobs take this fraction of their time with a winch. */
 export const WINCH_FACTOR = 0.5;
 /** Extra food the trap holds at each turn once a net hangs across it. */

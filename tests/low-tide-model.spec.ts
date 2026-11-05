@@ -431,20 +431,21 @@ test("the trader takes the most valuable piece at each turn and leaves only the 
   expect(lastLog(final)).toBe("The last tide comes in. The traders have had their pick; the sea keeps the rest.");
 });
 
-test("the ship buys one of every kind once the beacon stands, before the trader chooses", () => {
-  const state = at({ built: ["beacon", "winch"], inventory: { pearl: 1, brass: 1, iron: 1, oil: 1, salt: 1 } });
+test("the ship buys two of every kind once the beacon stands, before the trader chooses", () => {
+  const state = at({ built: ["beacon", "winch"], inventory: { pearl: 2, brass: 2, iron: 2, oil: 2, salt: 2 } });
   const plan = planTrade(state);
-  expect(plan.ship).toEqual(["pearl", "brass", "iron", "oil", "salt"]);
+  expect(plan.ship).toEqual(["pearl", "pearl", "brass", "brass", "iron", "iron", "oil", "oil", "salt", "salt"]);
   expect(plan.trader).toEqual([]);
-  expect(plan.total).toBe(62);
+  expect(plan.total).toBe(124);
   const sold = turn(state);
-  expect(sold.sales).toEqual({ trader: 0, boat: 0, ship: 62 });
+  expect(sold.sales).toEqual({ trader: 0, boat: 0, ship: 124 });
   expect(sold.inventory).toEqual({});
-  expect(saleLog(sold)?.text).toContain("the ship buys pearl, brass, iron, oil, salt (62)");
+  expect(saleLog(sold)?.text).toContain("the ship buys 2 pearls, 2 brass, 2 iron, 2 oil and 2 salt (124)");
 
-  // Surplus goes to the trader after the ship has had its one of each.
-  const more = planTrade(at({ built: ["beacon"], inventory: { pearl: 3, brass: 1 } }));
-  expect(more.ship).toEqual(["pearl", "brass"]);
+  // Surplus goes to the trader after the ship has had its two of each: 2 pearls and the 1 brass.
+  const more = planTrade(at({ built: ["beacon", "lantern"], inventory: { pearl: 3, brass: 1 } }));
+  expect(more.ship).toEqual(["pearl", "pearl", "brass"]);
+  expect(more.value.ship).toBe(52);
   expect(more.trader).toEqual(["pearl"]);
   expect(more.held).toEqual([]);
   // The workbench still holds back an iron without a winch, even from the ship.
