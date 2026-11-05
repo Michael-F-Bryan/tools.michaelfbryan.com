@@ -99,7 +99,14 @@
 @media (min-width: 721px) {
   .dock { flex-direction: row; align-items: flex-end; justify-content: space-between; }
   .environment, .inspector { width: auto; }
-  .environment { width: 24rem; }
+  /* A compact dock in the bottom-left corner (the inspector owns bottom-right): the water stays visible while a slider moves. */
+  .environment { width: 17.5rem; max-width: 280px; gap: 0; padding: 4px 10px 2px; background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(4px); }
+  .slider { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; gap: 0 8px; min-height: 44px; }
+  .slider .name { grid-area: name; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; }
+  .slider .name small { overflow: hidden; text-overflow: ellipsis; }
+  .slider output { grid-area: value; }
+  /* Row is 44px tall; the 44px-high input overlaps its neighbours' padding so the touch target is kept. */
+  .slider input { grid-area: track; height: 44px; margin: -8px 0; position: relative; }
   .inspector { width: 18.75rem; max-width: 300px; }
   .glyph { width: 72px; height: 72px; }
   .facts { grid-template-columns: repeat(auto-fill, minmax(4.2rem, 1fr)); }
