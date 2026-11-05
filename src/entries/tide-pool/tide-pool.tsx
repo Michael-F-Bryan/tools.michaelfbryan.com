@@ -886,8 +886,11 @@ export function TidePool() {
                       {inspected.organism.senses.map((reading, index) => {
                         const value = Math.max(0, Math.min(1, reading || 0));
                         return (
-                          <span key={index} className={styles.sense} role="meter" aria-label={`Sensor ${index + 1}`} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Number(value.toFixed(2))}>
-                            <span style={{ width: `${value * 100}%` }} />
+                          <span key={index} className={styles.senseCell}>
+                            <span className={styles.sense} role="meter" aria-label={`Sensor ${index + 1}`} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Number(value.toFixed(2))}>
+                              <span style={{ width: `${value * 100}%` }} />
+                            </span>
+                            <span className={styles.senseValue} data-sense-value>{value.toFixed(2)}</span>
                           </span>
                         );
                       })}

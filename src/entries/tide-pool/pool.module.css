@@ -50,7 +50,9 @@
 .details { flex: 1; min-width: 0; }
 .description { margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
 .died { color: var(--error); font-weight: 700; }
-.senses { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.senses { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 6px; }
+.senseCell { display: inline-flex; align-items: center; gap: 4px; }
+.senseValue { color: var(--ink); font-family: var(--font-mono, monospace); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sensesLabel { color: var(--text-muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-right: 2px; }
 .sense { display: block; flex: 0 0 22px; height: 5px; background: var(--panel); border: 1px solid var(--rule-subtle); }
 .sense span { display: block; height: 100%; background: var(--accent); }

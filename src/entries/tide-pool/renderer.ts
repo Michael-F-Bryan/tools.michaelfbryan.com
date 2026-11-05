@@ -488,22 +488,26 @@ export class PoolRenderer {
     if (fade <= 0.01) return;
     const parts = organism.genome.parts;
     const colours = this.coloursFor(organism);
+    const ink = this.palette.scent;
+    const screen = Math.max(0.05, ctx.getTransform().a / (window.devicePixelRatio || 1));
     let index = 0;
     for (let i = 0; i < parts.length; i++) {
       if (parts[i].kind !== "sensor") continue;
       const reading = clamp01(organism.senses[index++] ?? 0);
       const pose = organism.poses[i];
       if (!pose) continue;
-      ctx.globalAlpha = fade * (0.18 + 0.72 * reading);
+      // Never smaller than 3.5 screen px, and ringed in the scent isoline ink so it reads as a sensor, not a food halo.
+      const radius = Math.max((2.6 + reading * 4.4) * this.boost, 3.5 / screen);
+      ctx.globalAlpha = fade * (0.3 + 0.6 * reading);
       ctx.fillStyle = colours.sensor;
       ctx.beginPath();
-      ctx.arc(pose.tip.x, pose.tip.y, (2.6 + reading * 4.4) * this.boost, 0, Math.PI * 2);
+      ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = fade * 0.6;
-      ctx.strokeStyle = colours.outline;
-      ctx.lineWidth = 0.8 * this.boost;
+      ctx.globalAlpha = fade * (0.5 + 0.5 * reading);
+      ctx.strokeStyle = `rgb(${ink[0]},${ink[1]},${ink[2]})`;
+      ctx.lineWidth = 1.2 / screen;
       ctx.beginPath();
-      ctx.arc(pose.tip.x, pose.tip.y, (2.6 + reading * 4.4) * this.boost, 0, Math.PI * 2);
+      ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
