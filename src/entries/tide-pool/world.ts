@@ -197,20 +197,6 @@ export const TUNING = {
   // --- Water ---------------------------------------------------------------
   /** Large-scale swirl speed as a fraction of env.currentStrength (zero when strength is 0). */
   swirlFraction: 0.6,
-  /**
-   * Background swirl peak speed (units/s) present even with the slider at 0. It is the same
-   * large-scale divergence-free cell pattern as the slider's swirl (no uniform component, zero
-   * net drift), so food circulates rather than piling on a wall, but still water no longer
-   * rewards sensorless drifters: holding position and finding food matter from the start.
-   * Slider swirl adds on top. 0 = perfectly still water.
-   * Hypothesis H18 (round 18): a gentle default swirl (1.5) would make sensing pay from the start.
-   * Measured, seeds 400-419 x 12 min, still vs 1.5: extinctions 0 vs 0; min pop <= 10: 0 vs 0;
-   * median min pop 59 vs 70; patch cycling 11 vs 13 seeds; bodies with >= 1 sensor at 12 min
-   * 18.2% vs 14.7% (mean sensors 0.27 vs 0.20); sensing higher on only 9 of 20 seeds (needed 12).
-   * Survival was fine but sensing prevalence did not improve, so it ships OFF (0). The mechanism
-   * stays available for experiments.
-   */
-  tideSwirl: 0,
   /** Steps between swirl refreshes (it drifts slowly) and between scent updates. */
   swirlRefreshSteps: 30,
   scentEverySteps: 3,
@@ -334,10 +320,10 @@ export class World implements WorldLike {
     return this.scent.sample(point);
   }
 
-  /** Uniform current plus a gentle, slowly evolving divergence-free swirl (the swirl exists even at strength 0). */
+  /** Uniform current plus a gentle, slowly evolving divergence-free swirl. */
   flowAt(point: Vec2): Vec2 {
     const strength = this.env.currentStrength;
-    if (strength === 0 && TUNING.tideSwirl === 0) return { x: 0, y: 0 };
+    if (strength === 0) return { x: 0, y: 0 };
     const gx = point.x / (this.width / this.scent.cols) - 0.5;
     const gy = point.y / (this.height / this.scent.rows) - 0.5;
     return {
@@ -554,7 +540,7 @@ export class World implements WorldLike {
 
   /** Advect food with the current, age it, and drop expired particles. */
   private moveFood(): void {
-    const moving = this.env.currentStrength > 0 || TUNING.tideSwirl > 0;
+    const moving = this.env.currentStrength > 0;
     const m = TUNING.margin;
     let write = 0;
     for (let read = 0; read < this.food.length; read++) {
@@ -602,7 +588,7 @@ export class World implements WorldLike {
 
   /** Recompute the swirl grid: stream function ψ = c·sin(kx·x+a)·sin(ky·y+b), u = ∂ψ/∂y, v = -∂ψ/∂x. */
   private refreshSwirl(): void {
-    const speed = TUNING.tideSwirl + this.env.currentStrength * TUNING.swirlFraction;
+    const speed = this.env.currentStrength * TUNING.swirlFraction;
     const { cols, rows } = this.scent;
     if (speed === 0) {
       this.swirlX.fill(0);
@@ -644,7 +630,7 @@ export class World implements WorldLike {
     if (this.stepCount % TUNING.scentEverySteps !== 0) return;
     const s = this.env.currentStrength;
     const flow: ScentFlow | undefined =
-      s > 0 || TUNING.tideSwirl > 0
+      s > 0
         ? { ux: Math.cos(this.env.currentAngle) * s, uy: Math.sin(this.env.currentAngle) * s, fx: this.swirlX, fy: this.swirlY }
         : undefined;
     this.scent.step(amount, flow);
