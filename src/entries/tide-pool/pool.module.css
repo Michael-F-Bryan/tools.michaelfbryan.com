@@ -50,6 +50,10 @@
 .details { flex: 1; min-width: 0; }
 .description { margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
 .died { color: var(--error); font-weight: 700; }
+.senses { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.sensesLabel { color: var(--text-muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-right: 2px; }
+.sense { display: block; flex: 0 0 22px; height: 5px; background: var(--panel); border: 1px solid var(--rule-subtle); }
+.sense span { display: block; height: 100%; background: var(--accent); }
 .energy { height: 5px; margin-bottom: 8px; background: var(--panel); border: 1px solid var(--rule-subtle); }
 .energy span { display: block; height: 100%; background: var(--accent); }
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr)); gap: 5px 10px; margin: 0; }
