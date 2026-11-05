@@ -298,12 +298,11 @@ function Person({ figure, index }: { figure: Figure; index: number }) {
 export function describeBand(state: State, band: Band): string {
   const flood = floodTime(state, band);
   if (flood === undefined) return "under water this tide";
-  if (flood === null) {
-    if (band === 0 || band < depthOf(state)) return "dry all tide";
-    return beyondWaterline(state, band) === 1 ? "under water · wade, 1.5× time" : "under water · by raft, 2× time";
-  }
+  if (flood === null) return "dry all tide";
   const left = flood - state.time;
   if (left <= 0) return "flooded";
+  // Past the waterline but within reach: workable until the turn, at a time penalty.
+  if (band >= depthOf(state)) return beyondWaterline(state, band) === 1 ? "under water · wade until the turn, 1.5× time" : "under water · by raft until the turn, 2× time";
   const s = Math.ceil(left / 1000);
   return `floods in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

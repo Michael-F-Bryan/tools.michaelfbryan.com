@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-import { advance, dispatch as apply, newRun, type Action, type State } from "./model";
+import { advance, dispatch as apply, hasBuilt, newRun, type Action, type State } from "./model";
 import { hasLegacyRun, loadBest, loadCodex, loadRun, recordBest, retireLegacyRun, saveCodex, saveRun, type Best } from "./storage";
 
 const LEGACY_NOTICE = "The flat has changed since your last visit: blueprints are all visible now, the whole tide chart is shown, and nobody starves. Your earlier run could not be carried over, so a fresh one begins. Your best score is kept.";
@@ -56,7 +56,7 @@ function update(state: State): void {
   if (state.codex.length > 0) saveCodex(state.codex);
   let best = previous.best;
   if (state.ended && !previous.state.ended) {
-    best = recordBest({ score: state.ended.score, beacon: state.ended.reason === "beacon", boat: state.ended.reason === "boat", seed: state.seed });
+    best = recordBest({ score: state.ended.score, beacon: hasBuilt(state, "beacon"), boat: hasBuilt(state, "boat"), seed: state.seed });
   }
   current = { state, best };
   for (const listener of listeners) listener();

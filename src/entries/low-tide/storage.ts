@@ -11,8 +11,11 @@ export const RUN_KEY = "low-tide:run:v2";
 /** The first-pass save. Its rules no longer exist, so it is detected and retired rather than loaded. */
 export const LEGACY_RUN_KEY = "low-tide:run:v1";
 export const CODEX_KEY = "low-tide:codex:v1";
-export const BEST_KEY = "low-tide:best:v2";
-const LEGACY_BEST_KEY = "low-tide:best:v1";
+/**
+ * v3: the score is now cargo sold at the turns, a different scale from the structure-and-salvage
+ * scores stored under v2 and v1, so older bests are not read (they would be unbeatable).
+ */
+export const BEST_KEY = "low-tide:best:v3";
 
 function storage(): Storage | null {
   try {
@@ -40,11 +43,30 @@ export function loadRun(): State | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isState(parsed)) return null;
+    const run = upgradeRun(parsed);
     // A reloaded run always resumes paused: time away never counts.
-    return { ...parsed, paused: true };
+    return run && { ...run, paused: true };
   } catch {
     return null;
   }
+}
+
+export const RULES_NOTICE = "Low Tide's rules changed: traders now buy your cargo at every turn, and the run always lasts twelve tides. Your run carries on from here.";
+
+/**
+ * Brings a saved run from before the cargo rules up to date, additively: the sales ledger starts at zero and a
+ * notice explains the change. A standing beacon or boat simply becomes an engine; old in-flight jobs keep their
+ * `floodsAt: null` for one tide, which is harmless. A run that had already finished under the old scoring is
+ * retired (null) so a new one starts; the codex is kept. Pure, so it is tested without a `localStorage`.
+ */
+export function upgradeRun(saved: State): State | null {
+  const record = saved as unknown as { ended?: { trader?: unknown } | null; sales?: unknown; turnSales?: unknown };
+  if (record.ended && typeof record.ended.trader !== "number") return null;
+  const hasSales = typeof record.sales === "object" && record.sales !== null;
+  const sales = hasSales ? (record.sales as State["sales"]) : { trader: 0, boat: 0, ship: 0 };
+  const turnSales = Array.isArray(record.turnSales) ? (record.turnSales as number[]) : [];
+  if (hasSales && Array.isArray(record.turnSales)) return saved;
+  return { ...saved, sales, turnSales, ...(hasSales ? {} : { notice: RULES_NOTICE }) };
 }
 
 export function clearRun(): void {
@@ -90,7 +112,7 @@ export function loadBest(): Best | null {
   const store = storage();
   if (!store) return null;
   try {
-    const raw = store.getItem(BEST_KEY) ?? store.getItem(LEGACY_BEST_KEY);
+    const raw = store.getItem(BEST_KEY);
     const parsed: unknown = JSON.parse(raw ?? "null");
     if (typeof parsed !== "object" || parsed === null) return null;
     const record = parsed as Record<string, unknown>;

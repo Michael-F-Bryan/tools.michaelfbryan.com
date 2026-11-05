@@ -67,23 +67,21 @@ export type ResourceInfo = Readonly<{
   duration: number;
   yield: number;
   food: boolean;
-  /** Salvage value at the end of the run, for the first `SALVAGE_CAP` of each. */
-  value: number;
   label: string;
 }>;
 
 export const RESOURCES: Record<Resource, ResourceInfo> = {
-  driftwood: { band: 0, duration: 14_000, yield: 1, food: false, value: 1, label: "Driftwood" },
-  stone: { band: 0, duration: 18_000, yield: 1, food: false, value: 1, label: "Stone" },
-  clay: { band: 1, duration: 18_000, yield: 1, food: false, value: 1, label: "Clay" },
-  reed: { band: 1, duration: 16_000, yield: 1, food: false, value: 1, label: "Reeds" },
-  clams: { band: 1, duration: 20_000, yield: 3, food: true, value: 1, label: "Clams" },
-  kelp: { band: 2, duration: 20_000, yield: 1, food: false, value: 2, label: "Kelp" },
-  fish: { band: 2, duration: 24_000, yield: 4, food: true, value: 3, label: "Fish" },
-  pearl: { band: 2, duration: 34_000, yield: 1, food: false, value: 60, label: "Pearl" },
-  brass: { band: 3, duration: 28_000, yield: 1, food: false, value: 25, label: "Brass" },
-  iron: { band: 3, duration: 28_000, yield: 1, food: false, value: 20, label: "Iron" },
-  oil: { band: 3, duration: 32_000, yield: 1, food: false, value: 15, label: "Oil" },
+  driftwood: { band: 0, duration: 14_000, yield: 1, food: false, label: "Driftwood" },
+  stone: { band: 0, duration: 18_000, yield: 1, food: false, label: "Stone" },
+  clay: { band: 1, duration: 18_000, yield: 1, food: false, label: "Clay" },
+  reed: { band: 1, duration: 16_000, yield: 1, food: false, label: "Reeds" },
+  clams: { band: 1, duration: 20_000, yield: 3, food: true, label: "Clams" },
+  kelp: { band: 2, duration: 20_000, yield: 1, food: false, label: "Kelp" },
+  fish: { band: 2, duration: 24_000, yield: 4, food: true, label: "Fish" },
+  pearl: { band: 2, duration: 36_000, yield: 1, food: false, label: "Pearl" },
+  brass: { band: 3, duration: 28_000, yield: 1, food: false, label: "Brass" },
+  iron: { band: 3, duration: 28_000, yield: 1, food: false, label: "Iron" },
+  oil: { band: 3, duration: 30_000, yield: 1, food: false, label: "Oil" },
 };
 
 export const RESOURCES_BY_BAND: Record<Band, readonly Resource[]> = {
@@ -121,7 +119,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { reed: 1, driftwood: 1 },
     structure: true,
     label: "Waders",
-    effect: "Work one band past the waterline, all tide, at 1.5× time.",
+    effect: "Work one band past the waterline until the tide turns, at 1.5× time.",
     flavour: "Reed wrapped over driftwood soles. The water is no longer the edge.",
   },
   {
@@ -130,7 +128,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { reed: 1, stone: 1 },
     structure: true,
     label: "Fish trap",
-    effect: "+2 food at every turn of the tide, forever.",
+    effect: "+2 food at every turn of the tide.",
     flavour: "A reed fence on a stone footing. The tide feeds you now.",
   },
   {
@@ -164,10 +162,11 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     out: "net",
     tier: 2,
     inputs: { rope: 1, reed: 1 },
+    requires: "fishTrap",
     structure: true,
     label: "Net",
-    effect: "Fish jobs bring back 8 instead of 4.",
-    flavour: "Rope knotted through a reed frame. The reef will feed everyone.",
+    effect: "Needs a fish trap. The trap holds 2 more food at every turn: enough for four.",
+    flavour: "Rope knotted across the trap mouth. It catches what the reed fence missed.",
   },
   {
     out: "raft",
@@ -175,7 +174,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { driftwood: 2, rope: 1 },
     structure: true,
     label: "Raft",
-    effect: "One more band past the waterline (two with waders, at 2× time).",
+    effect: "One more band past the waterline (two with waders, at 2× time), until the tide turns.",
     flavour: "Driftwood lashed with rope. It floats. Just.",
   },
   {
@@ -193,7 +192,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { iron: 1, rope: 1 },
     structure: true,
     label: "Winch",
-    effect: "Wreck jobs take 40% less time.",
+    effect: "Wreck jobs take half the time.",
     flavour: "An iron drum and a rope. The wreck gives things up faster.",
   },
   {
@@ -230,7 +229,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     requires: "kiln",
     structure: true,
     label: "Saltworks",
-    effect: "Needs a kiln. At every turn, one salt (worth 25, uncapped). The earlier, the better.",
+    effect: "Needs a kiln. One salt at every turn: cargo worth 10.",
     flavour: "Clay pans by the kiln, kelp ash in the brine. White crust by morning.",
   },
   {
@@ -239,8 +238,8 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { hull: 1, sail: 1 },
     structure: true,
     label: "Boat",
-    effect: "Launch it to end the run: 300 points, 40 for every tide left, and your salvage counts double on board.",
-    flavour: "Hull and sail. The flat is behind you if you want it to be.",
+    effect: "At every turn, carries your three most valuable pieces of cargo to market.",
+    flavour: "Hull and sail. Now you go to the market instead of waiting for it.",
   },
   {
     out: "bellTower",
@@ -257,7 +256,7 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     inputs: { bellTower: 1, lantern: 1 },
     structure: true,
     label: "Beacon",
-    effect: "Ring it to end the run: 500 points plus 40 for every tide left.",
+    effect: "At every turn, a ship calls and buys one of every kind of cargo. Its light keeps dark tides from slowing you.",
     flavour: "The lantern goes up the tower. From the sea, this is a harbour now.",
   },
 ];
@@ -268,15 +267,20 @@ export const BUILT_LABELS: Record<Built, string> = {
   salt: "Salt",
 };
 
-/** Score for each structure standing at the end. Building must beat hoarding. */
-export const STRUCTURE_VALUE = 50;
-/** Only this many of any one item count toward salvage, so spamming the shingle has a ceiling. */
-export const SALVAGE_CAP = 6;
-export const MATERIAL_VALUE: Record<"rope" | "brick" | "hull" | "sail" | "salt", number> = { rope: 6, brick: 8, hull: 12, sail: 10, salt: 25 };
-/** Salt is the saltworks' whole point, so it is never capped. */
-export const UNCAPPED: readonly Item[] = ["salt"];
-export const FOOD_VALUE = 2;
-export const FOOD_CAP = 10;
-export const BEACON_BONUS = 500;
-export const BOAT_BONUS = 300;
-export const TIDE_REMAINING_BONUS = 40;
+/**
+ * What sells at the turn, in tie-break order. Shingle and mudflat goods, rope,
+ * brick and kelp are building stock and never sell: every blueprint input is
+ * either one of these (protected by the keep-last-one rule) or not cargo at all.
+ */
+export const CARGO = ["pearl", "brass", "iron", "oil", "salt"] as const satisfies readonly Item[];
+export type Cargo = (typeof CARGO)[number];
+/** Sale price per piece. The score is the sum of these over the run. */
+export const CARGO_VALUE: Record<Cargo, number> = { pearl: 20, brass: 12, iron: 10, oil: 10, salt: 10 };
+/** How many pieces the trader takes at each turn (the most valuable first). */
+export const TRADER_HOLD = 1;
+/** How many more pieces your own boat carries at each turn. */
+export const BOAT_HOLD = 3;
+/** Wreck jobs take this fraction of their time with a winch. */
+export const WINCH_FACTOR = 0.5;
+/** Extra food the trap holds at each turn once a net hangs across it. */
+export const NET_FOOD = 2;

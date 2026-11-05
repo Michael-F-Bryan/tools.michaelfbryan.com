@@ -16,6 +16,7 @@
 .tideLabel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; }
 .tideNumber { font-size: 18px; font-weight: 700; letter-spacing: var(--tracking-title); }
 .of { color: var(--text-muted); font-size: 13px; font-weight: 400; }
+.sold { color: var(--ink); font-family: var(--font-mono, monospace); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .phase { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 12px; }
 .pause { min-height: 44px; min-width: 5.5rem; padding: 8px 14px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); font-size: 14px; cursor: pointer; }
 .pause[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--panel); }
@@ -46,6 +47,7 @@
 .options button[data-tight] .duration { color: var(--warn); }
 .optionName { text-transform: capitalize; }
 .duration { color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 11px; }
+.price { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 11px; }
 
 .working { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .working li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -80,6 +82,8 @@
 
 .stock { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .stock li { padding: 6px 10px; border: 1px solid var(--rule-subtle); background: var(--panel); }
+.stock li[data-cargo] { border-color: var(--rule); }
+.tag { margin-left: 6px; color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 11px; white-space: nowrap; }
 
 .primary { min-height: 44px; padding: 8px 16px; border: 1px solid var(--accent); background: var(--accent); color: var(--paper); font-size: 14px; font-weight: 600; cursor: pointer; }
 .primary:hover:not(:disabled) { filter: brightness(1.1); }
@@ -126,6 +130,7 @@
 .producers { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--text-secondary); }
 .producers li strong { font-weight: 600; color: var(--ink); }
 .producers li[data-ready] { color: var(--success); }
+.producers li.quiet { color: var(--text-muted); }
 .plans li[data-locked] { opacity: .55; }
 
 .tierGroup { border: 1px dashed var(--rule-subtle); }
