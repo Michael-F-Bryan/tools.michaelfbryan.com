@@ -114,6 +114,12 @@ export const TUNING = {
   patchCount: 4,
   patchRadius: [60, 90] as const,
   patchSpeed: 3,
+  /** A patch relocates after this many meals were taken inside its radius, or after patchLife seconds. */
+  patchGrazedMeals: 40,
+  patchLife: 90,
+  /** Relocation keeps this far from walls and at least patchHop units from the old spot (existing food stays put). */
+  patchMargin: 80,
+  patchHop: 250,
   /** Distance from the wall that food and spawns keep. */
   margin: 8,
 
@@ -189,7 +195,7 @@ type LineageRecord = {
   totalMeals: number;
 };
 
-type Patch = { position: Vec2; radius: number };
+type Patch = { position: Vec2; radius: number; /** Seconds since it last settled. */ age: number; /** Meals taken inside its radius since it settled. */ grazed: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -374,8 +380,10 @@ export class World implements WorldLike {
     const [minR, maxR] = TUNING.patchRadius;
     for (let i = 0; i < TUNING.patchCount; i++) {
       this.patches.push({
-        position: { x: this.rng.range(120, this.width - 120), y: this.rng.range(100, this.height - 100) },
+        position: { x: this.rng.range(TUNING.patchMargin, this.width - TUNING.patchMargin), y: this.rng.range(TUNING.patchMargin, this.height - TUNING.patchMargin) },
         radius: this.rng.range(minR, maxR),
+        age: this.rng.range(0, TUNING.patchLife * 0.5), // staggered so patches do not all renew together
+        grazed: 0,
       });
       this.patchHeading.push(this.rng.range(0, Math.PI * 2));
     }
@@ -459,8 +467,26 @@ export class World implements WorldLike {
     }
   }
 
+  /** Move a grazed-down patch somewhere fresh; its scent follows as new food spawns there. */
+  private relocatePatch(patch: Patch): void {
+    const m = TUNING.patchMargin;
+    let x = patch.position.x;
+    let y = patch.position.y;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      x = this.rng.range(m, this.width - m);
+      y = this.rng.range(m, this.height - m);
+      if (Math.hypot(x - patch.position.x, y - patch.position.y) >= TUNING.patchHop) break;
+    }
+    patch.position.x = x;
+    patch.position.y = y;
+    patch.age = 0;
+    patch.grazed = 0;
+  }
+
   private driftPatches(): void {
     this.patches.forEach((patch, i) => {
+      patch.age += DT;
+      if (patch.grazed >= TUNING.patchGrazedMeals || patch.age >= TUNING.patchLife) this.relocatePatch(patch);
       this.patchHeading[i] += this.rng.gaussian() * 0.4 * Math.sqrt(DT);
       const next = {
         x: patch.position.x + Math.cos(this.patchHeading[i]) * TUNING.patchSpeed * DT,
@@ -743,6 +769,9 @@ export class World implements WorldLike {
     this.eaten[i] = 1;
     org.energy = Math.min(org.capacity, org.energy + f.energy);
     org.meals++;
+    for (const patch of this.patches) {
+      if (Math.hypot(f.position.x - patch.position.x, f.position.y - patch.position.y) <= patch.radius) patch.grazed++;
+    }
     this.mealBuckets[this.windowBucket()]++;
     const record = this.lineageRecords.get(org.lineage);
     if (record) record.totalMeals++;
