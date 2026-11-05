@@ -374,7 +374,7 @@ test("the twelfth tide ends the run, the best score is remembered, and a new run
   await job(page, "Mudflat", "reeds").click();
   await page.clock.runFor(17_000);
   await expect(salvage(page)).toContainText("reeds ×1");
-  // Tide 2 is a depth-4 tide: two pearls from the reef. The first turn of the tide sells one (the trader keeps its hands off your last), the final turn the other.
+  // Tide 2 is a depth-4 tide: two pearls from the reef. No blueprint needs a pearl, so the trader buys one at each of the next two turns.
   await page.clock.runFor(TIDE_MS - 17_000 + 1_000);
   await expect(tideLabel(page, 2)).toBeVisible();
   await pickBand(page, "Reef");
@@ -424,9 +424,9 @@ test("the twelfth tide ends the run, the best score is remembered, and a new run
 const ENGINES = { built: ["waders", "beacon", "boat"] as Built[], unlocked: 3 as const, food: 20 };
 
 test("cargo shows what it sells for, and the At-the-turn panel previews each engine's sale, which then happens at the turn without ending the run", async ({ page }, info) => {
-  const state = runAt(2, { ...ENGINES, inventory: { pearl: 5, brass: 2, iron: 1, oil: 2, kelp: 3, driftwood: 1 }, sales: { trader: 30, boat: 0, ship: 0 } });
+  const state = runAt(2, { ...ENGINES, inventory: { pearl: 6, brass: 2, iron: 1, oil: 2, kelp: 3, driftwood: 1 }, sales: { trader: 30, boat: 0, ship: 0 } });
   const plan = planTrade(state);
-  expect(plan.total).toBe(102);
+  expect(plan.total).toBe(122);
   expect(plan.held).toEqual(["iron"]);
   await openWith(page, state);
   // The clock is frozen, so resuming only lifts the veil off the scene.
@@ -437,19 +437,19 @@ test("cargo shows what it sells for, and the At-the-turn panel previews each eng
   await expect(rows).toHaveText([
     "Ship · pearl, brass, oil · 42",
     "Trader · pearl · 20",
-    "Boat · 2 pearls · 40",
-    "Traders leave your last one of each until the final turn.",
+    "Boat · 3 pearls · 60",
+    "Traders leave your last iron for the workbench until the final turn.",
   ]);
   await expect(page.getByText("No boat or beacon yet")).toHaveCount(0);
   await expect(sold(page)).toHaveText("Sold 30");
 
   // Cargo is marked on the tarp, building stock is not; the reef's pearl job shows its price.
-  await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×5" })).toContainText("sells 20");
+  await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×6" })).toContainText("sells 20");
   await expect(salvage(page).getByRole("listitem").filter({ hasText: "oil ×2" })).toContainText("sells 10");
   await expect(salvage(page).getByRole("listitem").filter({ hasText: "kelp ×3" })).not.toContainText("sells");
   await expect(salvage(page).getByRole("listitem").filter({ hasText: "driftwood ×1" })).not.toContainText("sells");
   await pickBand(page, "Reef");
-  await expect(job(page, "Reef", "pearl")).toHaveAccessibleName(/^Send .* for pearl, 36s, sells for 20$/);
+  await expect(job(page, "Reef", "pearl")).toHaveAccessibleName(/^Send .* for pearl, 30s, sells for 20$/);
   await expect(job(page, "Reef", "pearl")).toContainText("sells for 20");
   await expect(job(page, "Reef", "kelp")).not.toContainText("sells");
   await expect(job(page, "Reef", "kelp")).toHaveAccessibleName(/^Send .* for kelp, 20s$/);
@@ -460,7 +460,7 @@ test("cargo shows what it sells for, and the At-the-turn panel previews each eng
   // One full turn: the log says so, Sold rises by exactly the previewed total, and the run goes on.
   await page.clock.runFor(TIDE_MS - 1_000 + 500);
   await expect(tideLabel(page, 4)).toBeVisible();
-  await expect(log(page)).toContainText("At the turn: the ship buys pearl, brass, oil (42); the trader takes 1 pearl (20); the boat carries 2 pearls (40).");
+  await expect(log(page)).toContainText("At the turn: the ship buys pearl, brass, oil (42); the trader takes 1 pearl (20); the boat carries 3 pearls (60).");
   await expect(sold(page)).toHaveText(`Sold ${30 + plan.total}`);
   await expect(salvage(page).getByRole("listitem").filter({ hasText: "pearl ×" })).toContainText("pearl ×1");
   await expect(page.getByRole("heading", { level: 2, name: "Twelve tides worked" })).toHaveCount(0);
@@ -506,7 +506,7 @@ test("the end screen shows the three sales, the total, and what the sea kept", a
 });
 
 test("a run saved before the cargo rules loads paused with the rules notice and a Dismiss button", async ({ page }) => {
-  const old: Record<string, unknown> = { ...runAt(1, { ...ENGINES, inventory: { pearl: 2 } }) };
+  const old: Record<string, unknown> = { ...runAt(1, { ...ENGINES, inventory: { pearl: 1 } }) };
   delete old.sales;
   delete old.turnSales;
   await openWith(page, old);

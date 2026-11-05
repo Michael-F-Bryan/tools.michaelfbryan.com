@@ -29,6 +29,12 @@ function cargoList(items: readonly Cargo[]): string {
     .join(", ");
 }
 
+/** Kinds as prose: "brass and oil", "iron". */
+function joinKinds(kinds: readonly Cargo[]): string {
+  const names = kinds.map(itemName);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : (names[0] ?? "");
+}
+
 function clock(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -259,7 +265,7 @@ function Camp({ state, best, dispatch }: Props) {
               ))}
               {making.map(producer => <li key={producer.id} data-ready={producer.ready || undefined}><strong>{producer.label}</strong> · {producer.next}</li>)}
               {trading.length === 1 ? <li className={styles.quiet}>No boat or beacon yet: only the trader calls, for one piece.</li> : null}
-              {trade.held.length ? <li className={styles.quiet}>Traders leave your last one of each until the final turn.</li> : null}
+              {trade.held.length ? <li className={styles.quiet}>Traders leave your last {joinKinds(trade.held)} for the workbench until the final turn.</li> : null}
             </ul>
           </section>
 

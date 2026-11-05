@@ -476,28 +476,30 @@ export type TradePlan = Readonly<{
   boat: Cargo[];
   value: Readonly<{ ship: number; trader: number; boat: number }>;
   total: number;
-  /** Cargo kinds a sale would have taken but for the keep-last-one rule (empty on the final turn). */
+  /** Cargo kinds held back this turn for the workbench: you have one, and it is the one kept (empty on the final turn). */
   held: Cargo[];
 }>;
 
 /**
  * What would sell at the next turn of the tide, given the tarp as it is now.
  * Pure, and the engine's own `trade` applies exactly this, so a UI preview
- * cannot disagree with the sale. Traders never take the last one of a kind
- * until the final turn, so a brass waiting for its oil is safe. Order: the
+ * cannot disagree with the sale. Until the final turn, traders leave your last
+ * one of each kind that a blueprint you have not yet finished still needs (a
+ * brass waiting for its oil, an iron for the winch); pearls and salt always
+ * sell. Order: the
  * ship (if the beacon stands) buys one of every kind, then the trader takes
  * the most valuable piece left, then the boat (if it stands) the next
  * `BOAT_HOLD` most valuable.
  */
 export function planTrade(state: State): TradePlan {
   const final = state.tide >= state.tides.length - 1;
-  const keep = final ? 0 : 1;
   const left: Record<Cargo, number> = { pearl: 0, brass: 0, iron: 0, oil: 0, salt: 0 };
   const held: Cargo[] = [];
   for (const kind of CARGO) {
     const have = state.inventory[kind] ?? 0;
-    left[kind] = Math.max(0, have - keep);
-    if (have > 0 && left[kind] === 0) held.push(kind);
+    const keep = !final && have > 0 && neededByWorkbench(state, kind) ? 1 : 0;
+    left[kind] = have - keep;
+    if (keep > 0) held.push(kind);
   }
   const ship: Cargo[] = [];
   if (hasBuilt(state, "beacon")) {
@@ -523,6 +525,20 @@ export function planTrade(state: State): TradePlan {
   const worth = (items: readonly Cargo[]) => items.reduce((sum, kind) => sum + CARGO_VALUE[kind], 0);
   const value = { ship: worth(ship), trader: worth(trader), boat: worth(boat) };
   return { ship, trader, boat, value, total: value.ship + value.trader + value.boat, held };
+}
+
+/**
+ * Whether a blueprint that still has to be built takes this kind as an input.
+ * A structure counts as done while it stands, or once it has been spent into
+ * one that does (the lantern goes up the beacon); a material is never done.
+ */
+function neededByWorkbench(state: State, kind: Cargo): boolean {
+  return BLUEPRINTS.some((blueprint) => {
+    if (!blueprint.inputs[kind]) return false;
+    if (!blueprint.structure) return true;
+    const spent = BLUEPRINTS.some((other) => other.inputs[blueprint.out] && hasBuilt(state, other.out));
+    return !hasBuilt(state, blueprint.out) && !spent;
+  });
 }
 
 /** "2 pearls and 1 brass": cargo grouped by kind in `CARGO` order, for the log and the preview. */
