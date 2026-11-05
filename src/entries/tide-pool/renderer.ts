@@ -487,7 +487,6 @@ export class PoolRenderer {
     const fade = this.senseFade;
     if (fade <= 0.01) return;
     const parts = organism.genome.parts;
-    const colours = this.coloursFor(organism);
     const ink = this.palette.scent;
     const screen = Math.max(0.05, ctx.getTransform().a / (window.devicePixelRatio || 1));
     let index = 0;
@@ -496,16 +495,18 @@ export class PoolRenderer {
       const reading = clamp01(organism.senses[index++] ?? 0);
       const pose = organism.poses[i];
       if (!pose) continue;
-      // Never smaller than 3.5 screen px, and ringed in the scent isoline ink so it reads as a sensor, not a food halo.
-      const radius = Math.max((2.6 + reading * 4.4) * this.boost, 3.5 / screen);
-      ctx.globalAlpha = fade * (0.3 + 0.6 * reading);
-      ctx.fillStyle = colours.sensor;
+      // Never smaller than 4 screen px, filled with the scent ink (not the lineage or food colour) and ringed
+      // heavily in the same ink, so it reads as "scent sensor" and stands apart from food pellets and siblings.
+      const radius = Math.max((2.8 + reading * 4.4) * this.boost, 4 / screen);
+      const inkCss = `rgb(${ink[0]},${ink[1]},${ink[2]})`;
+      ctx.globalAlpha = fade * (0.18 + 0.62 * reading);
+      ctx.fillStyle = inkCss;
       ctx.beginPath();
       ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = fade * (0.5 + 0.5 * reading);
-      ctx.strokeStyle = `rgb(${ink[0]},${ink[1]},${ink[2]})`;
-      ctx.lineWidth = 1.2 / screen;
+      ctx.globalAlpha = fade * 0.9;
+      ctx.strokeStyle = inkCss;
+      ctx.lineWidth = 2 / screen;
       ctx.beginPath();
       ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.stroke();
@@ -620,10 +621,11 @@ export class PoolRenderer {
     for (let i = 0; i < organisms.length; i++) if (organisms[i] !== selected) this.drawOrganism(ctx, organisms[i], 0);
     if (selected) {
       this.drawOrganism(ctx, selected, 1.6);
-      this.drawSenseTips(ctx, selected);
       this.drawSelection(ctx, selected, scale);
     }
     this.drawForaging(ctx, world, organisms, now);
+    // Last, so a sensor tip is never buried under the selection ring, meal rings or a pile of siblings.
+    if (selected) this.drawSenseTips(ctx, selected);
     if (hovered && hovered !== selected) this.drawRing(ctx, hovered, palette.ink, 1.2 / scale, 0.45);
     ctx.restore();
 
