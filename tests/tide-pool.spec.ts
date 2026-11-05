@@ -95,6 +95,10 @@ test("Environment reveals labelled sliders that change their value", async ({ pa
   await food.fill("2.5");
   await expect(output).not.toHaveText(before ?? "");
   await expect(output).toHaveText("2.5");
+  const current = page.getByRole("slider", { name: "Current" });
+  await expect(current).toHaveAttribute("max", "8");
+  await expect(page.getByText("faster metabolism")).toBeVisible();
+  await expect(page.getByText("swimming costs more")).toBeVisible();
   await toggle.click();
   await expect(food).toHaveCount(0);
 });

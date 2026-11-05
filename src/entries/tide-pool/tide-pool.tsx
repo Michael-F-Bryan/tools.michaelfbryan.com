@@ -74,15 +74,18 @@ const EMPTY_READOUT: Readout = { population: 0, lineages: 0, food: 0, clock: "00
 const ENVIRONMENT_CONTROLS: readonly {
   key: "foodRate" | "currentStrength" | "temperature" | "viscosity";
   label: string;
+  hint: string;
   min: number;
   max: number;
   step: number;
   format: (value: number) => string;
 }[] = [
-  { key: "foodRate", label: "Food", min: 0, max: 3, step: 0.1, format: (v) => v.toFixed(1) },
-  { key: "currentStrength", label: "Current", min: 0, max: 40, step: 1, format: (v) => v.toFixed(0) },
-  { key: "temperature", label: "Temperature", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
-  { key: "viscosity", label: "Water thickness", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
+  { key: "foodRate", label: "Food", hint: "supply", min: 0, max: 3, step: 0.1, format: (v) => v.toFixed(1) },
+  // Capped near what a good swimmer can hold (mean evolved speeds are ~7–15 u/s), so full strength
+  // sorts swimmers from drifters instead of sweeping everyone into a wall heap.
+  { key: "currentStrength", label: "Current", hint: "drifts food and bodies", min: 0, max: 8, step: 0.5, format: (v) => v.toFixed(1) },
+  { key: "temperature", label: "Temperature", hint: "faster metabolism", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
+  { key: "viscosity", label: "Water thickness", hint: "swimming costs more", min: 0.5, max: 2, step: 0.05, format: (v) => `${v.toFixed(2)}×` },
 ];
 
 function formatClock(seconds: number): string {
@@ -830,7 +833,10 @@ export function TidePool() {
                 const id = `${idBase}-${control.key}`;
                 return (
                   <div key={control.key} className={styles.slider}>
-                    <label htmlFor={id}>{control.label}</label>
+                    <span className={styles.name}>
+                      <label htmlFor={id}>{control.label}</label>
+                      <small id={`${id}-hint`}>{control.hint}</small>
+                    </span>
                     <input
                       id={id}
                       type="range"
@@ -838,6 +844,7 @@ export function TidePool() {
                       max={control.max}
                       step={control.step}
                       value={env[control.key]}
+                      aria-describedby={`${id}-hint`}
                       onChange={(event) => changeEnvironment(control.key, Number(event.currentTarget.value))}
                     />
                     <output htmlFor={id}>{control.format(env[control.key])}</output>

@@ -30,6 +30,8 @@
 .environment, .inspector { border: 1px solid var(--rule); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--ink); font-size: 13px; }
 .environment { display: grid; gap: 2px; padding: 6px 12px; width: 100%; max-width: 24rem; }
 .slider { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) 3.25rem; align-items: center; gap: 10px; min-height: 44px; }
+.name { display: grid; gap: 1px; min-width: 0; line-height: 1.2; }
+.name small { color: var(--text-muted); font-size: 10px; }
 .slider input { width: 100%; min-width: 0; height: 44px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .slider input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .slider output { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -103,6 +105,12 @@
   .chartCanvas { height: 24px; }
   .marks { display: none; }
   /* A bottom sheet: bounded so the pool stays visible and the bar below is never covered. */
+  /* Two sliders per row (name and value above, track below), capped at 30% of the pool and scrolled inside. */
+  .environment { grid-template-columns: 1fr 1fr; column-gap: 14px; max-height: calc(var(--surface-height, 360px) * 0.3); overflow-y: auto; overscroll-behavior: contain; padding: 4px 10px; }
+  .slider { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; gap: 0 6px; min-height: 0; padding-top: 2px; }
+  .slider .name { grid-area: name; }
+  .slider output { grid-area: value; }
+  .slider input { grid-area: track; }
   .inspector { max-height: calc(var(--surface-height, 360px) * 0.32); padding: 6px 10px 8px; }
   .glyph { width: 56px; height: 56px; }
   .inspectorBody { gap: 10px; margin-top: 2px; }

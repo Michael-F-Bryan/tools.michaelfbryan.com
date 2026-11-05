@@ -392,6 +392,30 @@ export class PoolRenderer {
     if (this.trail.length > cap) this.trail.splice(0, this.trail.length - cap);
   }
 
+  /**
+   * Honest cue for the water's condition, read straight from `world.env` each frame: warmer than 1x tints the water
+   * toward amber, cooler toward blue, and thicker water is a denser, deeper wash (thinner is a touch clearer).
+   * Subtle on purpose; the theme decides how strongly each reads.
+   */
+  private drawWaterCondition(ctx: CanvasRenderingContext2D, world: WorldView) {
+    const { temperature, viscosity } = world.env;
+    const dark = this.palette.dark;
+    const heat = Math.max(-1, Math.min(1, Math.log2(temperature || 1)));
+    if (Math.abs(heat) > 0.01) {
+      ctx.fillStyle = heat > 0 ? "rgb(255, 140, 50)" : "rgb(40, 110, 255)";
+      ctx.globalAlpha = Math.abs(heat) * (dark ? 0.16 : 0.2);
+      ctx.fillRect(0, 0, POOL_WIDTH, POOL_HEIGHT);
+    }
+    const thick = Math.max(-1, Math.min(1, Math.log2(viscosity || 1)));
+    if (Math.abs(thick) > 0.01) {
+      const [r, g, b] = dark ? [8, 30, 44] : [60, 120, 140];
+      ctx.fillStyle = thick > 0 ? `rgb(${r}, ${g}, ${b})` : dark ? "rgb(120, 190, 200)" : "rgb(235, 248, 250)";
+      ctx.globalAlpha = Math.abs(thick) * (thick > 0 ? 0.26 : 0.12);
+      ctx.fillRect(0, 0, POOL_WIDTH, POOL_HEIGHT);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   draw(ctx: CanvasRenderingContext2D, world: WorldView, layout: Layout, ui: UiState, now: number) {
     const palette = this.palette;
     const { dpr, scale } = layout;
@@ -422,6 +446,7 @@ export class PoolRenderer {
     }
     ctx.fillStyle = this.water;
     ctx.fillRect(0, 0, POOL_WIDTH, POOL_HEIGHT);
+    this.drawWaterCondition(ctx, world);
 
     ctx.save();
     ctx.beginPath();
