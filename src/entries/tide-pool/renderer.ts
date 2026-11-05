@@ -556,12 +556,19 @@ export class PoolRenderer {
       const e = 1 - (1 - t) * (1 - t);
       const from = mouthR + 3.4 * boost;
       const peak = Math.max(mouthR * MEAL_BLOOM_RADII, MEAL_BLOOM_MIN_PX / this.scale);
+      const radius = from + (Math.max(peak, from) - from) * e;
+      // A filled accent disc that fades while it expands, so the meal reads at a glance next to trails and rings.
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.45 * (1 - t);
+      ctx.beginPath();
+      ctx.arc(mouth.x, mouth.y, radius, 0, Math.PI * 2);
+      ctx.fill();
       ctx.strokeStyle = accent;
       // Hold at full strength for the first third, then fade: bloom = meal eaten (the arc means food is held).
       ctx.globalAlpha = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
       ctx.lineWidth = 2 / this.scale;
       ctx.beginPath();
-      ctx.arc(mouth.x, mouth.y, from + (Math.max(peak, from) - from) * e, 0, Math.PI * 2);
+      ctx.arc(mouth.x, mouth.y, radius, 0, Math.PI * 2);
       ctx.stroke();
       const slide = Math.min(1, age / MEAL_SLIDE_MS);
       if (flash.hasFood && slide < 1) {

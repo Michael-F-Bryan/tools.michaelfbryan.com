@@ -44,8 +44,6 @@ const MIN_INSPECT_AGE = 20;
 const EMPTY_AFTER = 10;
 /** Seconds of recent deaths summarised in the empty-pool notice. */
 const CAUSE_WINDOW = 120;
-/** A mover's speed (world units per second) that counts as fully travelling. */
-const TRAVEL_SPEED = 6;
 
 /** Engine statistics the UI reads when present; computed here when absent. */
 type ExtraStats = { dominantLineage?: number; dominantShare?: number; extinct?: boolean };
@@ -145,22 +143,51 @@ function canSwim(organism: Organism): boolean {
   return false;
 }
 
+/** Organisms below this fraction of their energy capacity are about to starve and make poor subjects. */
+const PICK_MIN_ENERGY = 0.35;
+
+/**
+ * The organism worth watching: not about to starve, visibly swimming (mean trail speed and a fin or
+ * oscillating part), and the best meals per minute among those old enough for the rate to mean
+ * something. Ties (most are 0 early on) fall to recent travel distance, never array order. In a pool
+ * younger than MIN_INSPECT_AGE nobody has a meaningful rate, so the fastest traveller wins.
+ * Relaxes the filters step by step when nobody qualifies, ending at the most meals.
+ */
 function mostSuccessful(world: WorldLike, lineage?: number): Organism | undefined {
-  const movers: { organism: Organism; score: number; qualifies: boolean }[] = [];
+  type Candidate = { organism: Organism; rate: number; speed: number; mature: boolean; fed: boolean; swims: boolean };
+  const all: Candidate[] = [];
   let fallback: Organism | undefined;
   for (const organism of world.organisms) {
     if (lineage !== undefined && organism.lineage !== lineage) continue;
     if (!fallback || organism.meals > fallback.meals || (organism.meals === fallback.meals && organism.energy > fallback.energy)) fallback = organism;
-    if (organism.age <= MIN_INSPECT_AGE) continue;
     const speed = meanTrailSpeed(organism);
-    movers.push({ organism, score: (organism.meals / organism.age) * 60 * Math.min(1, speed / TRAVEL_SPEED), qualifies: speed >= PICK_MIN_SPEED && canSwim(organism) });
+    all.push({
+      organism,
+      rate: organism.age > 0 ? (organism.meals / organism.age) * 60 : 0,
+      speed,
+      mature: organism.age >= MIN_INSPECT_AGE,
+      fed: organism.capacity > 0 && organism.energy / organism.capacity >= PICK_MIN_ENERGY,
+      swims: speed >= PICK_MIN_SPEED && canSwim(organism),
+    });
   }
-  movers.sort((a, b) => b.score - a.score || b.organism.energy - a.organism.energy);
-  // Only animals that visibly swim are worth watching; relax that only when nobody does.
-  const pool = movers.some((m) => m.qualifies) ? movers.filter((m) => m.qualifies) : movers;
-  const top = pool.slice(0, TOP_MOVERS);
-  const eating = top.find((m) => (m.organism.handlingProgress ?? 0) > 0) ?? top.find((m) => nearFood(m.organism, world));
-  return (eating ?? top[0])?.organism ?? fallback;
+  const anyMature = all.some((c) => c.mature);
+  const tiers: ((c: Candidate) => boolean)[] = [
+    (c) => c.fed && c.swims && (c.mature || !anyMature),
+    (c) => c.fed && c.speed >= PICK_MIN_SPEED,
+    (c) => c.fed,
+  ];
+  let pool: Candidate[] = [];
+  for (const tier of tiers) {
+    pool = all.filter(tier);
+    if (pool.length) break;
+  }
+  if (!pool.length) return fallback;
+  // Youngest pools compare travel alone; otherwise the meal rate leads and travel (the trail covers the same window for all) breaks ties.
+  const key = (c: Candidate) => (anyMature ? c.rate : 0);
+  pool.sort((a, b) => key(b) - key(a) || b.speed - a.speed || b.organism.energy - a.organism.energy || a.organism.id - b.organism.id);
+  const top = pool.filter((c) => key(c) === key(pool[0])).slice(0, TOP_MOVERS);
+  const eating = top.find((c) => (c.organism.handlingProgress ?? 0) > 0) ?? top.find((c) => nearFood(c.organism, world));
+  return (eating ?? top[0]).organism;
 }
 
 /** "Last 12 died of starvation" from the deaths in the last two minutes of world time. */
