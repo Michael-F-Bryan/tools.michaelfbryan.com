@@ -1,5 +1,5 @@
 import { POOL_HEIGHT, POOL_WIDTH } from "./types";
-import type { Genome, Organism, PartGene, PartPose, Vec2, WorldView } from "./types";
+import type { Food, Genome, Organism, PartGene, PartPose, Vec2, WorldView } from "./types";
 
 /** Theme colours read once per theme change, never per frame. */
 export type Palette = {
@@ -194,7 +194,7 @@ export function organismColour(lineage: number, genomeHue: number, dark: boolean
   return swatchHsl(lineageColourIndex(lineage), shadeOffset(genomeHue), dark);
 }
 
-type OrganismColours = { fill: string; outline: string; fin: string; finEdge: string; stalk: string };
+type OrganismColours = { fill: string; outline: string; fin: string; finEdge: string; stalk: string; sensor: string };
 
 function makeColours(slot: number, genomeHue: number, dark: boolean): OrganismColours {
   const shade = shadeOffset(genomeHue);
@@ -207,6 +207,8 @@ function makeColours(slot: number, genomeHue: number, dark: boolean): OrganismCo
     fin: swatchHsl(slot, shade, dark, dark ? 4 : 8, 0.66),
     finEdge: `hsla(${h},${sat}%,${dark ? 82 : 24}%,0.85)`,
     stalk: `hsl(${h},${Math.min(sat, 35)}%,${dark ? 80 : 26}%)`,
+    // The animal's own hue, lightened: sensors must not read as the warm orange food pellets.
+    sensor: `hsl(${h},${Math.min(sat + 12, 92)}%,${dark ? 86 : 74}%)`,
   };
 }
 
@@ -256,6 +258,11 @@ function strokeBoost(scale: number): number {
   return Math.min(1.6, Math.max(1, 0.9 / scale));
 }
 
+/** Real milliseconds the meal flash lasts. */
+const MEAL_FLASH_MS = 500;
+
+type MealFlash = { organism: Organism; at: number; fx: number; fy: number; hasFood: boolean };
+
 const SCENT_COLS = 48;
 const SCENT_ROWS = 30;
 const SCENT_REFRESH_MS = 180;
@@ -296,6 +303,11 @@ export class PoolRenderer {
   private following = false;
   private frameNow = 0;
   private frameStamp = 0;
+  private foodById = new Map<number, Food>();
+  private lastMeals = new Map<number, number>();
+  private lastFood = new Map<number, Vec2>();
+  private mealFlashes: MealFlash[] = [];
+  private foragingWorld: WorldView | null = null;
 
   setPalette(palette: Palette) {
     this.palette = palette;
@@ -418,6 +430,7 @@ export class PoolRenderer {
       this.drawOrganism(ctx, selected, 1.6);
       this.drawSelection(ctx, selected, scale);
     }
+    this.drawForaging(ctx, world, organisms, now);
     if (hovered && hovered !== selected) this.drawRing(ctx, hovered, palette.ink, 1.2 / scale, 0.45);
     ctx.restore();
 
@@ -426,6 +439,112 @@ export class PoolRenderer {
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, POOL_WIDTH, POOL_HEIGHT);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /**
+   * Eating, as the engine reports it: a thin arc filling around the mouth with `handlingProgress`, a faint
+   * link to the handled particle, and a brief flash when `meals` ticks up between frames.
+   */
+  private drawForaging(ctx: CanvasRenderingContext2D, world: WorldView, organisms: readonly Organism[], now: number) {
+    if (this.foragingWorld !== world) {
+      this.foragingWorld = world;
+      this.lastMeals.clear();
+      this.lastFood.clear();
+      this.mealFlashes.length = 0;
+    }
+    const foodById = this.foodById;
+    foodById.clear();
+    let handling = false;
+    for (let i = 0; i < organisms.length; i++) {
+      if ((organisms[i].handlingProgress ?? 0) > 0) {
+        handling = true;
+        break;
+      }
+    }
+    if (handling) for (const f of world.food) foodById.set(f.id, f);
+
+    const boost = this.boost;
+    const accent = this.palette.accent;
+    ctx.lineCap = "round";
+    for (let i = 0; i < organisms.length; i++) {
+      const o = organisms[i];
+      const previous = this.lastMeals.get(o.id);
+      if (previous !== undefined && o.meals > previous && o.poses.length) {
+        const food = this.lastFood.get(o.id);
+        this.mealFlashes.push({ organism: o, at: now, fx: food?.x ?? 0, fy: food?.y ?? 0, hasFood: Boolean(food) });
+      }
+      this.lastMeals.set(o.id, o.meals);
+      const progress = o.handlingProgress ?? 0;
+      if (progress <= 0 || !o.poses.length) continue;
+      const mouth = o.poses[0].base;
+      const food = o.handlingFood === undefined ? undefined : foodById.get(o.handlingFood);
+      if (food) {
+        let last = this.lastFood.get(o.id);
+        if (!last) this.lastFood.set(o.id, (last = { x: 0, y: 0 }));
+        last.x = food.position.x;
+        last.y = food.position.y;
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 0.9 * boost;
+        ctx.beginPath();
+        ctx.moveTo(mouth.x, mouth.y);
+        ctx.lineTo(food.position.x, food.position.y);
+        ctx.stroke();
+      }
+      const radius = this.mouthRadius(o) + 3.4 * boost;
+      ctx.lineWidth = 1.5 * boost;
+      ctx.strokeStyle = accent;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath();
+      ctx.arc(mouth.x, mouth.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(mouth.x, mouth.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp01(progress));
+      ctx.stroke();
+    }
+
+    const flashes = this.mealFlashes;
+    let kept = 0;
+    for (let i = 0; i < flashes.length; i++) {
+      const flash = flashes[i];
+      const t = (now - flash.at) / MEAL_FLASH_MS;
+      if (t >= 1) continue;
+      flashes[kept++] = flash;
+      const mouth = flash.organism.poses[0]?.base;
+      if (!mouth) continue;
+      const e = 1 - (1 - t) * (1 - t);
+      ctx.strokeStyle = accent;
+      ctx.globalAlpha = 1 - t;
+      ctx.lineWidth = (0.8 + 2.2 * (1 - t)) * boost;
+      ctx.beginPath();
+      ctx.arc(mouth.x, mouth.y, this.mouthRadius(flash.organism) + (3.4 + 9 * e) * boost, 0, Math.PI * 2);
+      ctx.stroke();
+      if (flash.hasFood) {
+        ctx.globalAlpha = 1 - t * 0.6;
+        ctx.fillStyle = this.palette.food;
+        ctx.beginPath();
+        ctx.arc(flash.fx + (mouth.x - flash.fx) * e, flash.fy + (mouth.y - flash.fy) * e, Math.max(0.2, 2.6 * (1 - e)) * boost, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    flashes.length = kept;
+    ctx.globalAlpha = 1;
+
+    if (this.lastMeals.size > organisms.length + 64) {
+      const alive = new Set<number>();
+      for (const o of organisms) alive.add(o.id);
+      for (const id of this.lastMeals.keys()) {
+        if (!alive.has(id)) {
+          this.lastMeals.delete(id);
+          this.lastFood.delete(id);
+        }
+      }
+    }
+  }
+
+  private mouthRadius(organism: Organism): number {
+    return Math.max(1.6, (organism.genome.parts[0]?.width ?? 4) * 0.26) * this.boost;
   }
 
   private drawScent(ctx: CanvasRenderingContext2D, world: WorldView, now: number) {
@@ -756,7 +875,7 @@ function paintBody(
     ctx.arc(pose.tip.x, pose.tip.y, 2.1 * boost, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = alpha * (0.2 + 0.8 * reading);
-    ctx.fillStyle = palette.glow;
+    ctx.fillStyle = colours.sensor;
     ctx.beginPath();
     ctx.arc(pose.tip.x, pose.tip.y, (1.6 + reading * 1.8) * boost, 0, Math.PI * 2);
     ctx.fill();
