@@ -255,6 +255,19 @@ function lcg(seed: number): () => number {
   };
 }
 
+test("a spinning body is slowed by billed rotational drag, not a hidden clamp", () => {
+  for (const [length, width] of [[24, 8], [50, 8]] as const) {
+    const o = makeOrganism([trunk(length, width), fin(-1, { amplitude: 0 }), fin(1, { amplitude: 0 })], START);
+    o.angularVelocity = 6;
+    const water = still();
+    const work = run(o, water, 2);
+    expect(Math.abs(o.angularVelocity), `span ${length}`).toBeLessThan(1);
+    expect(work).toBeGreaterThan(0);
+    // Far above the safety clamp's reach: a 6 rad/s spin is allowed to start and pays for itself.
+    expect(PHYSICS.maxSpin).toBeGreaterThan(6);
+  }
+});
+
 test("a random body runs 10,000 steps with no NaN and stays inside the pool", () => {
   for (const seed of [1, 2, 3]) {
     const rand = lcg(seed);

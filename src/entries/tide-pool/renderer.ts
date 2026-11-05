@@ -31,6 +31,9 @@ export type Layout = {
 /** Camera centre in world units and zoom relative to the base fit. */
 export type Camera = { cx: number; cy: number; zoom: number };
 
+type DeathMark = { x: number; y: number; slot: number; shade: number; starved: boolean; start: number };
+type LastSeen = { x: number; y: number; slot: number; shade: number; stamp: number };
+
 export type UiState = {
   selectedId: number | null;
   hoverId: number | null;
@@ -76,49 +79,134 @@ export function readPalette(): Palette {
 }
 
 // ---------------------------------------------------------------------------
-// Lineage colour: the hue comes from the lineage id on a golden-angle ladder so
-// neighbouring lineages are always well apart; genome.hue only shades within one.
+// Lineage colour: a curated palette of maximally distinct colours, handed out at
+// first sight. A lineage keeps its entry for the life of the pool; a newcomer takes
+// the entry that no living lineage uses (oldest assignment first). genome.hue only
+// shades within a lineage, by a few degrees.
 // ---------------------------------------------------------------------------
 
-const GOLDEN_ANGLE = 137.508;
-const LIGHTNESS_STEPS = [0, 7, -6];
+/** hue, then saturation and lightness for light mode, then for dark mode. */
+type Swatch = readonly [hue: number, satLight: number, lightLight: number, satDark: number, lightDark: number];
 
-function lineageHue(lineage: number): number {
-  return (((lineage * GOLDEN_ANGLE) % 360) + 360) % 360;
+const LINEAGE_PALETTE: readonly Swatch[] = [
+  [356, 72, 46, 78, 62], // red
+  [216, 74, 44, 80, 66], // azure
+  [30, 92, 44, 92, 58], // orange
+  [270, 56, 48, 68, 70], // violet
+  [132, 62, 32, 56, 52], // green
+  [330, 72, 56, 82, 72], // pink
+  [168, 90, 27, 62, 42], // teal
+  [50, 94, 38, 96, 56], // gold
+  [18, 50, 28, 46, 44], // rust brown
+  [84, 74, 34, 66, 56], // lime
+  [214, 22, 38, 26, 62], // slate
+  [296, 64, 40, 70, 62], // fuchsia
+  [40, 12, 42, 10, 62], // stone
+  [192, 100, 36, 92, 56], // cyan
+];
+export const LINEAGE_PALETTE_SIZE = LINEAGE_PALETTE.length;
+
+const colourSlots = new Map<number, number>();
+const slotAssigned: number[] = new Array(LINEAGE_PALETTE.length).fill(0);
+let assignments = 0;
+
+/** Forget every lineage-to-colour assignment (call when a new pool starts). */
+export function resetLineageColours() {
+  colourSlots.clear();
+  slotAssigned.fill(0);
+  assignments = 0;
 }
 
-/** Within-lineage shade offset in [-8, 8) degrees from the genome's drifting hue. */
+function assignSlot(lineage: number, living?: readonly Organism[]): number {
+  const users = new Array<number>(LINEAGE_PALETTE.length).fill(0);
+  if (living) {
+    const counted = new Set<number>();
+    for (let i = 0; i < living.length; i++) {
+      const id = living[i].lineage;
+      const slot = colourSlots.get(id);
+      if (slot !== undefined && !counted.has(id)) {
+        counted.add(id);
+        users[slot] += 1;
+      }
+    }
+  }
+  let best = 0;
+  for (let slot = 1; slot < users.length; slot++) {
+    if (users[slot] < users[best] || (users[slot] === users[best] && slotAssigned[slot] < slotAssigned[best])) best = slot;
+  }
+  colourSlots.set(lineage, best);
+  slotAssigned[best] = ++assignments;
+  return best;
+}
+
+/** Palette entry for a lineage, assigning one on first sight. Negative ids (seeded parents) get neutral entry 12. */
+export function lineageColourIndex(lineage: number, living?: readonly Organism[]): number {
+  if (lineage < 0) return 12;
+  return colourSlots.get(lineage) ?? assignSlot(lineage, living);
+}
+
+/**
+ * Keeps the given lineages (largest first, the ones shown as chips) on pairwise different
+ * entries. Only a lineage that collides with a larger one moves, so the leaders keep their colour.
+ */
+export function separateLineages(ids: readonly number[]) {
+  if (ids.length > LINEAGE_PALETTE.length - 1) return;
+  const taken = new Set<number>();
+  for (const id of ids) {
+    const slot = lineageColourIndex(id);
+    if (id < 0) continue;
+    if (!taken.has(slot)) {
+      taken.add(slot);
+      continue;
+    }
+    let best = -1;
+    for (let candidate = 0; candidate < LINEAGE_PALETTE.length; candidate++) {
+      if (taken.has(candidate) || candidate === 12) continue;
+      if (best < 0 || slotAssigned[candidate] < slotAssigned[best]) best = candidate;
+    }
+    if (best < 0) continue;
+    colourSlots.set(id, best);
+    slotAssigned[best] = ++assignments;
+    taken.add(best);
+  }
+}
+
+/** Within-lineage shade offset in [-6, 6) degrees from the genome's drifting hue. */
 function shadeOffset(genomeHue: number): number {
-  return Math.round((((genomeHue % 16) + 16) % 16) - 8);
+  return Math.round((((genomeHue % 12) + 12) % 12) - 6);
 }
 
-function lightnessFor(lineage: number, dark: boolean): number {
-  return (dark ? 62 : 44) + LIGHTNESS_STEPS[((lineage % 3) + 3) % 3];
+function swatchHsl(slot: number, shade: number, dark: boolean, lightShift = 0, alpha?: number): string {
+  const [hue, satLight, lightLight, satDark, lightDark] = LINEAGE_PALETTE[slot];
+  const h = (hue + shade + 360) % 360;
+  const sat = dark ? satDark : satLight;
+  const light = (dark ? lightDark : lightLight) + lightShift;
+  return alpha === undefined ? `hsl(${h},${sat}%,${light}%)` : `hsla(${h},${sat}%,${light}%,${alpha})`;
 }
 
 /** Swatch colour for a lineage (chips, parent lineage), with no within-lineage shade. */
 export function lineageColour(lineage: number, dark: boolean): string {
-  return `hsl(${Math.round(lineageHue(lineage))},${dark ? 58 : 64}%,${lightnessFor(lineage, dark)}%)`;
+  return swatchHsl(lineageColourIndex(lineage), 0, dark);
 }
 
-/** Body colour for one organism: its lineage hue plus a subtle genome shade. */
+/** Body colour for one organism: its lineage colour plus a subtle genome shade. */
 export function organismColour(lineage: number, genomeHue: number, dark: boolean): string {
-  const hue = (Math.round(lineageHue(lineage)) + shadeOffset(genomeHue) + 360) % 360;
-  return `hsl(${hue},${dark ? 58 : 64}%,${lightnessFor(lineage, dark)}%)`;
+  return swatchHsl(lineageColourIndex(lineage), shadeOffset(genomeHue), dark);
 }
 
 type OrganismColours = { fill: string; outline: string; fin: string; finEdge: string; stalk: string };
 
-function makeColours(lineage: number, genomeHue: number, dark: boolean): OrganismColours {
-  const hue = (Math.round(lineageHue(lineage)) + shadeOffset(genomeHue) + 360) % 360;
-  const light = lightnessFor(lineage, dark);
-  const sat = dark ? 58 : 64;
+function makeColours(slot: number, genomeHue: number, dark: boolean): OrganismColours {
+  const shade = shadeOffset(genomeHue);
+  const [hue, satLight, , satDark] = LINEAGE_PALETTE[slot];
+  const h = (hue + shade + 360) % 360;
+  const sat = dark ? satDark : satLight;
   return {
-    fill: `hsl(${hue},${sat}%,${light}%)`,
-    outline: `hsl(${hue},${sat}%,${dark ? 26 : 20}%)`,
-    fin: `hsla(${hue},${sat + 4}%,${light + (dark ? 4 : 8)}%,0.66)`,
-    finEdge: `hsla(${hue},${sat}%,${dark ? 80 : 26}%,0.85)`,
-    stalk: `hsl(${hue},35%,${dark ? 78 : 28}%)`,
+    fill: swatchHsl(slot, shade, dark),
+    outline: `hsl(${h},${sat}%,${dark ? 22 : 17}%)`,
+    fin: swatchHsl(slot, shade, dark, dark ? 4 : 8, 0.66),
+    finEdge: `hsla(${h},${sat}%,${dark ? 82 : 24}%,0.85)`,
+    stalk: `hsl(${h},${Math.min(sat, 35)}%,${dark ? 80 : 26}%)`,
   };
 }
 
@@ -173,6 +261,8 @@ const SCENT_ROWS = 30;
 const SCENT_REFRESH_MS = 180;
 const SELECTED_TRAIL_POINTS = 140;
 const FOLLOW_TRAIL_POINTS = 420;
+const DEATH_MS = 800;
+const MAX_DEATH_MARKS = 40;
 const TRAIL_STEP = 2.5;
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value);
@@ -191,10 +281,16 @@ export class PoolRenderer {
   private water: CanvasGradient | null = null;
   private waterOwner: CanvasRenderingContext2D | null = null;
   private point: Vec2 = { x: 0, y: 0 };
+  private living: readonly Organism[] = [];
   private boost = 1;
   private trailWorld: WorldView | null = null;
   private trailOwner = -1;
   private trail: Vec2[] = [];
+  private lastSeen = new Map<number, LastSeen>();
+  private deathsHandled = new Set<number>();
+  private deaths: DeathMark[] = [];
+  private eventWorld: WorldView | null = null;
+  private frameStamp = 0;
 
   setPalette(palette: Palette) {
     this.palette = palette;
@@ -204,11 +300,11 @@ export class PoolRenderer {
   }
 
   private coloursFor(organism: Organism): OrganismColours {
-    const key = `${organism.lineage}:${shadeOffset(organism.genome.hue)}`;
+    const slot = lineageColourIndex(organism.lineage, this.living);
+    const key = `${slot}:${shadeOffset(organism.genome.hue)}`;
     let colours = this.colours.get(key);
     if (!colours) {
-      if (this.colours.size > 1500) this.colours.clear();
-      colours = makeColours(organism.lineage, organism.genome.hue, this.palette.dark);
+      colours = makeColours(slot, organism.genome.hue, this.palette.dark);
       this.colours.set(key, colours);
     }
     return colours;
@@ -296,6 +392,8 @@ export class PoolRenderer {
     this.drawFood(ctx, world);
 
     const organisms = world.organisms;
+    this.living = organisms;
+    this.noteDeaths(world, organisms, now);
     const selectedId = ui.selectedId;
     for (let i = 0; i < organisms.length; i++) if (organisms[i].id !== selectedId) this.drawTrail(ctx, organisms[i]);
     let selected: Organism | undefined;
@@ -307,8 +405,12 @@ export class PoolRenderer {
     }
     this.trackSelected(world, selected, Boolean(ui.following));
     if (selected) this.drawSelectedTrail(ctx, selected);
-    for (let i = 0; i < organisms.length; i++) this.drawOrganism(ctx, organisms[i]);
-    if (selected) this.drawRing(ctx, selected, palette.accent, 2.4 / scale, 1);
+    this.drawDeaths(ctx, now);
+    for (let i = 0; i < organisms.length; i++) if (organisms[i] !== selected) this.drawOrganism(ctx, organisms[i], 0);
+    if (selected) {
+      this.drawOrganism(ctx, selected, 1.6);
+      this.drawSelection(ctx, selected, scale);
+    }
     if (hovered && hovered !== selected) this.drawRing(ctx, hovered, palette.ink, 1.2 / scale, 0.45);
     ctx.restore();
 
@@ -390,20 +492,21 @@ export class PoolRenderer {
     ctx.globalAlpha = 1;
   }
 
-  /** Fading wake for the selected organism, from the renderer's own longer record. */
+  /** Wake for the selected organism: from the renderer's own longer record, tapering to a point at the tail. */
   private drawSelectedTrail(ctx: CanvasRenderingContext2D, organism: Organism) {
     const trail = this.trail;
     const count = trail.length;
     if (count < 2) return;
     ctx.strokeStyle = this.coloursFor(organism).fill;
-    ctx.lineWidth = 2.4 * this.boost;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const bands = 28;
     const per = Math.max(1, Math.ceil((count - 1) / bands));
     for (let i = 0; i < count - 1; i += per) {
       const end = Math.min(count - 1, i + per);
-      ctx.globalAlpha = 0.08 + 0.72 * (end / count);
+      const along = end / count;
+      ctx.globalAlpha = 0.08 + 0.72 * along;
+      ctx.lineWidth = (0.5 + 2.6 * along) * this.boost;
       ctx.beginPath();
       ctx.moveTo(trail[i].x, trail[i].y);
       for (let j = i + 1; j <= end; j++) ctx.lineTo(trail[j].x, trail[j].y);
@@ -412,13 +515,81 @@ export class PoolRenderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawOrganism(ctx: CanvasRenderingContext2D, organism: Organism) {
+  /** Remembers where each animal was last drawn, and turns new death events into brief marks. */
+  private noteDeaths(world: WorldView, organisms: readonly Organism[], now: number) {
+    if (this.eventWorld !== world) {
+      this.eventWorld = world;
+      this.lastSeen.clear();
+      this.deathsHandled.clear();
+      this.deaths.length = 0;
+    }
+    const stamp = ++this.frameStamp;
+    for (let i = 0; i < organisms.length; i++) {
+      const organism = organisms[i];
+      const seen = this.lastSeen.get(organism.id);
+      const slot = lineageColourIndex(organism.lineage, organisms);
+      if (seen) {
+        seen.x = organism.position.x;
+        seen.y = organism.position.y;
+        seen.slot = slot;
+        seen.shade = shadeOffset(organism.genome.hue);
+        seen.stamp = stamp;
+      } else {
+        this.lastSeen.set(organism.id, { x: organism.position.x, y: organism.position.y, slot, shade: shadeOffset(organism.genome.hue), stamp });
+      }
+    }
+    const events = world.events;
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (event.kind !== "death" || this.deathsHandled.has(event.organism)) continue;
+      this.deathsHandled.add(event.organism);
+      const seen = this.lastSeen.get(event.organism);
+      if (!seen || seen.stamp === stamp) continue;
+      this.deaths.push({ x: seen.x, y: seen.y, slot: seen.slot, shade: seen.shade, starved: event.cause === "starved", start: now });
+      this.lastSeen.delete(event.organism);
+    }
+    if (this.deaths.length > MAX_DEATH_MARKS) this.deaths.splice(0, this.deaths.length - MAX_DEATH_MARKS);
+    if (this.deathsHandled.size > 800) this.deathsHandled.clear();
+    if (stamp % 120 === 0) for (const [id, seen] of this.lastSeen) if (seen.stamp < stamp - 120) this.lastSeen.delete(id);
+  }
+
+  /** A quiet fading mark where an animal died: hollow when it starved, a soft disc when it simply aged out. */
+  private drawDeaths(ctx: CanvasRenderingContext2D, now: number) {
+    const marks = this.deaths;
+    let keep = 0;
+    for (let i = 0; i < marks.length; i++) {
+      const mark = marks[i];
+      const t = (now - mark.start) / DEATH_MS;
+      if (t >= 1) continue;
+      marks[keep++] = mark;
+      if (t < 0) continue;
+      const fade = 1 - t;
+      const colour = swatchHsl(mark.slot, mark.shade, this.palette.dark);
+      ctx.globalAlpha = (mark.starved ? 0.7 : 0.45) * fade * fade;
+      if (mark.starved) {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.6 * this.boost;
+        ctx.beginPath();
+        ctx.arc(mark.x, mark.y, 4 + t * 12, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.arc(mark.x, mark.y, (3 + t * 3) * this.boost, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    marks.length = keep;
+    ctx.globalAlpha = 1;
+  }
+
+  private drawOrganism(ctx: CanvasRenderingContext2D, organism: Organism, outlineExtra: number) {
     const poses = organism.poses;
     if (!poses.length) return;
     const colours = this.coloursFor(organism);
     const fraction = organism.capacity > 0 ? organism.energy / organism.capacity : 1;
     const alpha = Math.max(0.4, Math.min(1, fraction * 1.1));
-    paintBody(ctx, organism.genome.parts, poses, organism.senses, colours, this.palette, this.boost, alpha);
+    paintBody(ctx, organism.genome.parts, poses, organism.senses, colours, this.palette, this.boost, alpha, outlineExtra);
 
     if (organism.age < 1) {
       const root = poses[0];
@@ -433,24 +604,65 @@ export class PoolRenderer {
     }
   }
 
-  private drawRing(ctx: CanvasRenderingContext2D, organism: Organism, colour: string, lineWidth: number, alpha: number) {
+  /** Rotated box hugging one animal's own poses (root heading as the long axis), padded by `pad`. */
+  private outline(organism: Organism, pad: number) {
     const poses = organism.poses;
-    if (!poses.length) return;
-    const root = poses[0];
-    const cx = (root.base.x + root.tip.x) / 2;
-    const cy = (root.base.y + root.tip.y) / 2;
-    let radius = 0;
+    const heading = poses[0].heading;
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
     for (let i = 0; i < poses.length; i++) {
-      const dx = poses[i].tip.x - cx;
-      const dy = poses[i].tip.y - cy;
-      radius = Math.max(radius, Math.hypot(dx, dy));
+      const half = Math.max(1, (organism.genome.parts[i]?.width ?? 1) * 0.5);
+      for (const p of [poses[i].base, poses[i].tip]) {
+        const u = p.x * ux + p.y * uy;
+        const v = -p.x * uy + p.y * ux;
+        minU = Math.min(minU, u - half); maxU = Math.max(maxU, u + half);
+        minV = Math.min(minV, v - half); maxV = Math.max(maxV, v + half);
+      }
     }
+    minU -= pad; maxU += pad; minV -= pad; maxV += pad;
+    const cu = (minU + maxU) / 2;
+    const cv = (minV + maxV) / 2;
+    return { x: cu * ux - cv * uy, y: cu * uy + cv * ux, angle: heading, w: maxU - minU, h: maxV - minV };
+  }
+
+  private strokeBox(ctx: CanvasRenderingContext2D, box: { x: number; y: number; angle: number; w: number; h: number }) {
+    ctx.save();
+    ctx.translate(box.x, box.y);
+    ctx.rotate(box.angle);
+    ctx.beginPath();
+    ctx.roundRect(-box.w / 2, -box.h / 2, box.w, box.h, Math.min(box.w, box.h) / 2);
+    ctx.restore();
+    ctx.stroke();
+  }
+
+  /** Tight ring around the selected animal alone, plus a short leader pointing at its mouth. */
+  private drawSelection(ctx: CanvasRenderingContext2D, organism: Organism, scale: number) {
+    if (!organism.poses.length) return;
+    const pad = 4 / scale;
+    const box = this.outline(organism, pad);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = this.palette.accent;
+    ctx.lineWidth = 2.4 / scale;
+    this.strokeBox(ctx, box);
+    const root = organism.poses[0];
+    const dx = Math.cos(root.heading);
+    const dy = Math.sin(root.heading);
+    const mouth = root.base;
+    ctx.lineCap = "round";
+    ctx.lineWidth = 2.4 / scale;
+    ctx.beginPath();
+    ctx.moveTo(mouth.x - dx * (pad + 1.5 / scale), mouth.y - dy * (pad + 1.5 / scale));
+    ctx.lineTo(mouth.x - dx * (pad + 11 / scale), mouth.y - dy * (pad + 11 / scale));
+    ctx.stroke();
+  }
+
+  private drawRing(ctx: CanvasRenderingContext2D, organism: Organism, colour: string, lineWidth: number, alpha: number) {
+    if (!organism.poses.length) return;
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = colour;
     ctx.lineWidth = lineWidth;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius + 8, 0, Math.PI * 2);
-    ctx.stroke();
+    this.strokeBox(ctx, this.outline(organism, 4 * lineWidth / 1.2));
     ctx.globalAlpha = 1;
   }
 }
@@ -469,6 +681,7 @@ function paintBody(
   palette: Palette,
   boost: number,
   alpha: number,
+  outlineExtra = 0,
 ) {
   ctx.globalAlpha = alpha;
   ctx.lineCap = "round";
@@ -483,7 +696,7 @@ function paintBody(
     for (let i = 0; i < parts.length; i++) {
       if (parts[i].kind !== "trunk" || !poses[i]) continue;
       const { base, tip } = poses[i];
-      ctx.lineWidth = parts[i].width * boost + (pass === 0 ? 2 * Math.sqrt(boost) : 0);
+      ctx.lineWidth = parts[i].width * boost + (pass === 0 ? 2 * Math.sqrt(boost) + outlineExtra : 0);
       ctx.beginPath();
       ctx.moveTo(base.x, base.y);
       ctx.lineTo(tip.x, tip.y);
@@ -615,7 +828,7 @@ export function drawAnatomy(
   if (!poses.length) return;
   const frame = frameOf(genome);
   const scale = (size - 8) / frame.extent;
-  const colours = makeColours(options.lineage ?? 0, genome.hue, palette.dark);
+  const colours = makeColours(options.lineage === undefined ? 0 : lineageColourIndex(options.lineage), genome.hue, palette.dark);
   const root = poses[0];
   ctx.save();
   ctx.translate(size / 2 - frame.cx * scale, size / 2 - frame.cy * scale);

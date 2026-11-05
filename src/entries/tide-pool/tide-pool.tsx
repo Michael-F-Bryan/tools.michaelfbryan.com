@@ -10,7 +10,10 @@ import {
   computeLayout,
   drawAnatomy,
   lineageColour,
+  lineageColourIndex,
   organismColour,
+  resetLineageColours,
+  separateLineages,
   readPalette,
   toWorld,
   type Camera,
@@ -41,7 +44,7 @@ type ExtraStats = { dominantLineage?: number; dominantShare?: number; extinct?: 
 
 type Takeover = { id: number; share: number };
 type Readout = { population: number; lineages: number; food: number; clock: string; speed: string; extinct: boolean; takeover: Takeover | null };
-type LineageChip = { id: number; count: number };
+type LineageChip = { id: number; count: number; description: string };
 type Inspected = {
   id: number;
   organism: Organism;
@@ -316,7 +319,15 @@ export function TidePool() {
         .lineages()
         .filter((lineage) => lineage.count > 0)
         .sort((a, b) => b.count - a.count || a.id - b.id);
-      setChips({ visible: alive.slice(0, CHIP_LIMIT).map((lineage) => ({ id: lineage.id, count: lineage.count })), more: Math.max(0, alive.length - CHIP_LIMIT) });
+      separateLineages(alive.slice(0, CHIP_LIMIT).map((lineage) => lineage.id));
+      const visible = alive.slice(0, CHIP_LIMIT).map((lineage) => ({ id: lineage.id, count: lineage.count, description: describeGenome(lineage.exemplar) }));
+      setChips((prev) =>
+        prev.more === Math.max(0, alive.length - CHIP_LIMIT) &&
+        prev.visible.length === visible.length &&
+        prev.visible.every((chip, i) => chip.id === visible[i].id && chip.count === visible[i].count && chip.description === visible[i].description)
+          ? prev
+          : { visible, more: Math.max(0, alive.length - CHIP_LIMIT) },
+      );
       const population = world.organisms.length;
       dominantRef.current = alive.length && population > 0 ? { id: alive[0].id, share: alive[0].count / population } : null;
     }
@@ -384,6 +395,7 @@ export function TidePool() {
   );
 
   const startPool = useCallback(() => {
+    resetLineageColours();
     worldRef.current = new World(newSeed(), { ...envRef.current });
     uiRef.current.hoverId = null;
     dominantRef.current = null;
@@ -763,6 +775,9 @@ export function TidePool() {
         <div className={styles.lineages} role="group" aria-label="Lineages">
           {chips.visible.map((lineage, index) => {
             const dominant = index === 0 && readout.takeover?.id === lineage.id;
+            const slot = lineageColourIndex(lineage.id);
+            const twin = chips.visible.some((other) => other.id !== lineage.id && lineageColourIndex(other.id) === slot);
+            const label = `Lineage ${lineage.id}, ${lineage.count} alive${dominant ? ", dominant" : ""} · ${lineage.description}`;
             return (
               <button
                 key={lineage.id}
@@ -770,10 +785,11 @@ export function TidePool() {
                 className={styles.chip}
                 data-dominant={dominant ? "" : undefined}
                 aria-pressed={selectedLineage === lineage.id}
-                aria-label={`Lineage ${lineage.id}, ${lineage.count} alive${dominant ? ", dominant" : ""}`}
+                title={label}
+                aria-label={label}
                 onClick={() => selectLineage(lineage.id)}
               >
-                <span className={styles.swatch} style={{ background: lineageColour(lineage.id, dark) }} aria-hidden="true" />
+                <span className={styles.swatch} data-twin={twin ? "" : undefined} style={{ background: lineageColour(lineage.id, dark) }} aria-hidden="true" />
                 <span className={styles.chipId}>{lineage.id}</span>
                 <span className={styles.chipCount}>×{lineage.count}</span>
               </button>
