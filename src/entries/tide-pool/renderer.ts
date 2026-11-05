@@ -504,9 +504,16 @@ export class PoolRenderer {
       ctx.beginPath();
       ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = fade * 0.9;
+      // A contrasting halo under the scent ring keeps the tip visible on green lineages over green tint.
+      ctx.globalAlpha = fade * 0.6;
+      ctx.strokeStyle = this.palette.ink;
+      ctx.lineWidth = 3.6 / screen;
+      ctx.beginPath();
+      ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = fade * 0.95;
       ctx.strokeStyle = inkCss;
-      ctx.lineWidth = 2 / screen;
+      ctx.lineWidth = 1.8 / screen;
       ctx.beginPath();
       ctx.arc(pose.tip.x, pose.tip.y, radius, 0, Math.PI * 2);
       ctx.stroke();
