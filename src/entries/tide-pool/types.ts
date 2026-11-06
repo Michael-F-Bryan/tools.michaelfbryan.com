@@ -292,7 +292,7 @@ export type BirthRecord = { t: number; parent: number; child: number; hash: stri
  */
 export interface WorldOptions {
   /** Replace the random founders. Position/heading default to deterministic draws from the world RNG. */
-  founders?: { genome: Genome; position?: Vec2; heading?: number }[];
+  founders?: { genome: Genome; position?: Vec2; heading?: number; /** Starting energy as a fraction of capacity (default TUNING.startEnergy). */ energyFraction?: number }[];
   /**
    * "default": the game's full `mutate`. "controller-only": only the sensorimotor weights operator
    * (symmetric Gaussian, 8% prune, clip, uniform slot). "none": children are exact copies.

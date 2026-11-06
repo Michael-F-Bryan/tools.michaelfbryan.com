@@ -99,9 +99,15 @@ export type EvolveResult = {
 
 type Run = { world: World; perMinutePopulation: number[]; extinctAt: number | null };
 
-function founders(): { genome: Genome }[] {
+function founders(): { genome: Genome; energyFraction: number }[] {
   // Positions and headings are left to the world RNG, so a run is a pure function of its seed.
-  return Array.from({ length: FOUNDER_COUNT }, () => ({ genome: founderGenome() }));
+  // Starting energy is a fixed ladder from 0.35 to 0.95 of capacity (mean 0.65; baseline pools start every
+  // body at 0.60). Thirty-six identical founders that all start at the same energy breed in lockstep, graze the
+  // patches bare together and starve together (founder-only pools died at 290-558 s on 3/8 held-out seeds while
+  // mutating pools, whose varied weights desynchronise them, survived 16/16). The ladder is deterministic,
+  // identical for every seed, disclosed in the manifest, and is an initial condition, not a rescue.
+  const genome = founderGenome();
+  return Array.from({ length: FOUNDER_COUNT }, (_, i) => ({ genome, energyFraction: 0.35 + (0.6 * i) / (FOUNDER_COUNT - 1) }));
 }
 
 function simulate(seed: number, minutes: number, mutation: "controller-only" | "none", scentBlind: boolean, env: Partial<Environment> = TRAINING_ENVIRONMENT): Run {
