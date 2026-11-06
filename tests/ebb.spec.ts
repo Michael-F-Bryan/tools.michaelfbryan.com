@@ -72,7 +72,7 @@ test("About traps focus, closes with Escape and returns focus; sound starts off"
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("Original writing and piece by Claude");
   await page.keyboard.press("Tab");
-  expect(await dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
+  await expect.poll(() => dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
   await expect(about).toBeFocused();
