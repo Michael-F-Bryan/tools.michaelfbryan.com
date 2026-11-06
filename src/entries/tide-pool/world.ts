@@ -453,7 +453,7 @@ export class World implements WorldLike {
     const lineage = this.newLineage(-1, genome);
     this.lineageRecords.get(lineage)!.count = 1;
     const org = this.makeOrganism(genome, position, founder?.heading ?? drawnHeading, lineage, -1, 0);
-    org.energy = org.capacity * TUNING.startEnergy;
+    org.energy = org.capacity * (founder?.energyFraction ?? TUNING.startEnergy);
     this.organisms.push(org);
   }
 
