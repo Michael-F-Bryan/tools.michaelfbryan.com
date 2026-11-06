@@ -487,6 +487,16 @@ function structuralOp(g: Genome, rng: Rng): boolean {
   return changed;
 }
 
+/**
+ * Discovery-mode mutation: only the sensorimotor weights operator (`perturbWeights`) may fire, with
+ * probability `rate` per birth. No body, gait, attachment, topology, hue or reproduction changes.
+ */
+export function mutateControllerOnly(genome: Genome, rng: Rng, rate: number = MUTATION.weights): Genome {
+  const child = cloneGenome(genome);
+  if (rng.chance(rate)) perturbWeights(child, rng);
+  return validateGenome(child) === null ? child : cloneGenome(genome);
+}
+
 /** Copy-on-write mutation: the input genome is never modified. */
 export function mutate(genome: Genome, rng: Rng): { genome: Genome; topologyChanged: boolean } {
   const child = cloneGenome(genome);
