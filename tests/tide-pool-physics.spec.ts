@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { stepOrganism, PHYSICS } from "../src/entries/tide-pool/physics";
 import { wave } from "../src/entries/tide-pool/controller";
 import { bodyMass } from "../src/entries/tide-pool/body";
+import { validateGenome } from "../src/entries/tide-pool/genome";
+import { World } from "../src/entries/tide-pool/world";
 import {
   DEFAULT_ENVIRONMENT,
   DT,
@@ -207,44 +209,101 @@ test("asymmetric fin amplitude turns the body", () => {
 });
 
 /**
- * Hunter with left and right sensors. Each fin's amplitude depends on the difference between the
- * sensors, so the response does not depend on absolute scent level. Positive `gain` weakens the
- * fin on the side that smells stronger; negative `gain` does the opposite.
+ * HAND-BUILT POSITIVE CONTROL, NOT EVIDENCE OF DISCOVERY. A klino-style body with a single in-domain
+ * steering weight (w = 1 on the left fin's rate slot, within the +-2 weight limit) is dropped into a real World
+ * whose real ScentField has been built up by food. It shows the sensorimotor loop can carry a gradient signal
+ * at all; it says nothing about whether evolution can find such a weight. Normal vs blind vs reversed-sign.
  */
-function hunter(gain: number): Organism {
-  const sensor = (side: -1 | 1) =>
-    part({ kind: "sensor", parent: 0, anchor: 1, side, angle: side * 0.9, length: 12, width: 1 });
-  // Sensors come after the fins, so sensor 0 is the left one and sensor 1 the right one.
-  const left = fin(-1, { skew: 0.25, feather: 0.6, ampWeights: [-gain, gain, 0] });
-  const right = fin(1, { skew: 0.25, feather: 0.6, ampWeights: [gain, -gain, 0] });
-  return makeOrganism([trunk(), left, right, sensor(-1), sensor(1)], { x: 1000, y: 1000 });
+function handBuiltKlino(w: number): Genome {
+  const klinoFin = (side: -1 | 1, ampWeights: number[]) =>
+    part({
+      kind: "fin",
+      parent: 0,
+      anchor: 0.3,
+      side,
+      angle: -Math.PI / 2,
+      length: 16,
+      width: 3,
+      frequency: 2,
+      amplitude: 0.7,
+      skew: 0.25,
+      feather: 0.6,
+      ampWeights,
+      freqWeights: [0, 0, 0],
+    });
+  const genome: Genome = {
+    parts: [
+      part({ kind: "trunk", parent: -1, anchor: 0, length: 16, width: 6, frequency: 1, ampWeights: [0, 0, 0], freqWeights: [0, 0, 0] }),
+      klinoFin(-1, [0, w, -0.4]),
+      klinoFin(1, [0, 0, 0]),
+      part({ kind: "sensor", parent: 0, anchor: 0, side: 0, angle: Math.PI, length: 12, width: 1, ampWeights: [0, 0, 0], freqWeights: [0, 0, 0] }),
+    ],
+    hue: 200,
+    reproduceAt: 0.8,
+  };
+  return genome;
 }
 
-test("evolved sensor weights can steer toward scent, and the opposite weights steer away", () => {
-  const source: Vec2 = { x: 1300, y: 800 };
-  // Linear gradient out to 600 units: sensors a few tens of units apart see a small difference.
-  const scent = (p: Vec2) => Math.max(0, 1 - distance(p, source) / 600);
-  const trial = (gain: number) => {
-    const o = hunter(gain);
-    const water = still(scent, 2000);
-    let closest = Infinity;
-    for (let i = 0; i < Math.round(20 / DT); i++) {
-      stepOrganism(o, water, DT);
-      closest = Math.min(closest, distance(o.position, source));
-    }
-    return { final: distance(o.position, source), closest };
+/** Seconds spent within 30 units of a food drop, steady scent field from a real World (reference assay hooks). */
+function secondsNear(genome: Genome, start: Vec2, heading: number, target: Vec2, blind: boolean): number {
+  // eslint-disable-next-line prefer-const -- assigned after the World that captures it exists (contract Appendix A pattern)
+  let view!: Water;
+  const w = new World(7, { foodRate: 0, currentStrength: 0 }, (o, _water, dt) => stepOrganism(o, view, dt));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const priv = w as any;
+  view = {
+    get env() { return w.env; },
+    flowAt: (p: Vec2) => w.flowAt(p),
+    width: 800,
+    height: 500,
+    scentAt: (p: Vec2) => (blind ? 0 : priv.scent.sample(p)),
   };
-  const blind = trial(0);
-  const toward = trial(20);
-  const away = trial(-20);
-  console.log(
-    `distance to source after 20 s: blind ${blind.final.toFixed(0)} (closest ${blind.closest.toFixed(0)}), ` +
-      `gain +20 ${toward.final.toFixed(0)} (closest ${toward.closest.toFixed(0)}), ` +
-      `gain -20 ${away.final.toFixed(0)} (closest ${away.closest.toFixed(0)})`,
-  );
-  expect(toward.final).toBeLessThan(blind.final - 50);
-  expect(toward.closest).toBeLessThan(blind.closest - 50);
-  expect(away.final).toBeGreaterThan(blind.final);
+  w.organisms.length = 0;
+  priv.lineageRecords.clear();
+  priv.food.length = 0;
+  priv.patches.length = 0;
+  priv.scent.data.fill(0);
+  priv.canReproduce = () => false;
+  w.dropFood(target, 6);
+  for (let i = 0; i < 30 * 60; i++) w.step();
+  priv.consume = () => {}; // keep the source steady for a clean comparison
+  const lineage = priv.newLineage(-1, genome);
+  priv.lineageRecords.get(lineage).count = 1;
+  const o: Organism = priv.makeOrganism(genome, start, heading, lineage, -1, 0);
+  o.energy = 0.5 * o.capacity;
+  w.organisms.push(o);
+  let near = 0;
+  for (let i = 0; i < 30 * 60; i++) {
+    w.step();
+    if (distance(o.position, target) < 30) near += DT;
+  }
+  return near;
+}
+
+test("hand-built positive control (not evidence of discovery): a left-fin rate weight of 1 steers toward scent; blind and reversed do not", () => {
+  const normal = handBuiltKlino(1);
+  const reversed = handBuiltKlino(-1);
+  expect(validateGenome(normal)).toBeNull();
+  expect(validateGenome(reversed)).toBeNull();
+  for (const g of [normal, reversed]) for (const p of g.parts) for (const x of [...p.ampWeights, ...p.freqWeights]) expect(Math.abs(x)).toBeLessThanOrEqual(2);
+  const target: Vec2 = { x: 400, y: 250 };
+  const totals = { normal: 0, blind: 0, reversed: 0 };
+  let trials = 0;
+  for (let b = 0; b < 4; b++) {
+    const bearing = (b * Math.PI) / 2 + 0.3;
+    const start = { x: target.x + 60 * Math.cos(bearing), y: target.y + 60 * Math.sin(bearing) };
+    for (const heading of [bearing + Math.PI, bearing + Math.PI / 2]) {
+      totals.normal += secondsNear(normal, start, heading, target, false);
+      totals.blind += secondsNear(normal, start, heading, target, true);
+      totals.reversed += secondsNear(reversed, start, heading, target, false);
+      trials++;
+    }
+  }
+  expect(trials).toBe(8);
+  const mean = { normal: totals.normal / trials, blind: totals.blind / trials, reversed: totals.reversed / trials };
+  console.log(`mean seconds within 30 units over 8 starts: normal ${mean.normal.toFixed(2)}, blind ${mean.blind.toFixed(2)}, reversed ${mean.reversed.toFixed(2)}`);
+  expect(mean.normal).toBeGreaterThan(mean.blind);
+  expect(mean.normal).toBeGreaterThan(mean.reversed);
 });
 
 function lcg(seed: number): () => number {

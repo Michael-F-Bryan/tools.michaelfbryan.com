@@ -136,12 +136,15 @@ test("a world seeds a viable population and exposes its API", () => {
   for (const o of world.organisms) {
     expect(validateGenome(o.genome)).toBeNull();
     expect(o.senses).toHaveLength(o.genome.parts.filter(p => p.kind === "sensor").length);
-    expect(o.poses).toHaveLength(o.genome.parts.length);
+    // Poses start empty: the first physics step builds the real pose (no collapsed-to-expanded jump).
+    expect(o.poses).toHaveLength(0);
     expect(o.energy).toBeCloseTo(o.capacity * TUNING.startEnergy, 5);
     expect(world.getOrganism(o.id)).toBe(o);
   }
   const first = world.organisms[0];
   expect(world.organismAt(first.position, 4)).toBeDefined();
+  world.step();
+  for (const o of world.organisms) expect(o.poses).toHaveLength(o.genome.parts.length);
   expect(world.organismAt({ x: -999, y: -999 }, 4)).toBeUndefined();
 });
 
@@ -553,4 +556,24 @@ test("torpor: a starving organism pays half the basal drain, and still starves e
   const id = starving.id;
   for (let i = 0; i < Math.round(3600 / DT) && world.organisms.some(o => o.id === id); i++) world.step();
   expect(world.organisms.some(o => o.id === id)).toBe(false);
+});
+
+test("a newborn's first step is not billed for expanding from a collapsed pose", () => {
+  const n = 300;
+  let speed = 0;
+  let cost = 0;
+  for (let i = 0; i < n; i++) {
+    const genome = randomGenome(new Rng(5000 + i));
+    const world = new World(i, { foodRate: 0 }, undefined, { founders: [{ genome, position: { x: 400, y: 250 }, heading: 0.3 }] });
+    const o = world.organisms[0];
+    expect(o.poses).toHaveLength(0);
+    const before = { x: o.position.x, y: o.position.y };
+    const energy = o.energy;
+    world.step();
+    speed += Math.max(Math.hypot(o.velocity.x, o.velocity.y), Math.hypot(o.position.x - before.x, o.position.y - before.y) / DT);
+    cost += (energy - o.energy) / o.capacity;
+  }
+  // Baseline (collapsed poses): 24.95 u/s and about 1.8% of capacity.
+  expect(speed / n).toBeLessThan(0.5);
+  expect(cost / n).toBeLessThan(0.001);
 });

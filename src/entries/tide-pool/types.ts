@@ -282,6 +282,31 @@ export type WorldLike = WorldView & WorldControls;
 
 /** Initial population size when seeding a pool. */
 export const SEED_POPULATION = 36;
+
+/** One birth, as recorded by an opt-in `birthLog`. `hash` identifies the child's genome. */
+export type BirthRecord = { t: number; parent: number; child: number; hash: string };
+
+/**
+ * Opt-in discovery mode. Every field is optional and the defaults reproduce the game exactly
+ * (`new World(seed)` is unchanged): random founders, full mutation, scent visible to creatures.
+ */
+export interface WorldOptions {
+  /** Replace the random founders. Position/heading default to deterministic draws from the world RNG. */
+  founders?: { genome: Genome; position?: Vec2; heading?: number }[];
+  /**
+   * "default": the game's full `mutate`. "controller-only": only the sensorimotor weights operator
+   * (symmetric Gaussian, 8% prune, clip, uniform slot). "none": children are exact copies.
+   */
+  mutation?: "default" | "controller-only" | "none";
+  /** Per-birth probability that the weights operator fires in "controller-only" mode (default: the baseline rate). */
+  weightMutationRate?: number;
+  /** Creatures sense zero scent (training-time blindness); the scent field itself still accumulates. */
+  scentBlind?: boolean;
+  /** Record `{ t, parent, child, hash }` for every birth in `World.birthLog`. */
+  birthLog?: boolean;
+  /** Genome hash used by `birthLog` (supplied by the caller so the browser bundle needs no node imports). */
+  hashGenome?: (genome: Genome) => string;
+}
 export const MAX_POPULATION = 120;
 export const MAX_FOOD = 240;
 

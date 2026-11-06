@@ -1,4 +1,4 @@
-import { genomeMass, mutate, randomGenome, sensorCount } from "./genome";
+import { genomeMass, mutate, mutateControllerOnly, randomGenome, sensorCount } from "./genome";
 import { stepOrganism } from "./physics";
 import { Rng } from "./random";
 import { SCENT, ScentField, type ScentFlow } from "./scent";
@@ -10,6 +10,7 @@ import {
   POOL_HEIGHT,
   POOL_WIDTH,
   SEED_POPULATION,
+  type BirthRecord,
   type Environment,
   type Food,
   type Genome,
@@ -19,7 +20,9 @@ import {
   type Stats,
   type StepOrganism,
   type Vec2,
+  type Water,
   type WorldEvent,
+  type WorldOptions,
   type WorldLike,
   type FoodPatch,
 } from "./types";
@@ -247,6 +250,11 @@ export class World implements WorldLike {
   stats: Stats;
 
   private readonly rng: Rng;
+  private readonly options: WorldOptions;
+  /** Present only in scent-blind discovery mode: the view creatures sense through. */
+  private blindWater: Water | undefined;
+  /** Births so far, when `options.birthLog` is set (otherwise stays empty). */
+  readonly birthLog: BirthRecord[] = [];
   private readonly scent = new ScentField(POOL_WIDTH, POOL_HEIGHT);
   private readonly swirlX: Float32Array;
   private readonly swirlY: Float32Array;
@@ -281,7 +289,9 @@ export class World implements WorldLike {
     readonly seed: number,
     env: Partial<Environment> = {},
     private readonly stepFn: StepOrganism = stepOrganism,
+    options: WorldOptions = {},
   ) {
+    this.options = options;
     this.rng = new Rng(seed);
     this.env = this.sanitize({ ...DEFAULT_ENVIRONMENT, ...env });
     this.hashHead = new Int32Array(this.hashCols * this.hashRows);
@@ -290,7 +300,19 @@ export class World implements WorldLike {
     this.refreshSwirl();
     this.seedPatches();
     for (let i = 0; i < TUNING.initialFood * TUNING.foodGrain; i++) this.spawnOneFood();
-    for (let i = 0; i < SEED_POPULATION; i++) this.seedOrganism();
+    if (options.founders) for (const f of options.founders) this.seedOrganism(f);
+    else for (let i = 0; i < SEED_POPULATION; i++) this.seedOrganism();
+    if (options.scentBlind) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- the blind water view needs a live reference to this world
+      const world = this;
+      this.blindWater = {
+        get env() { return world.env; },
+        flowAt: (p) => world.flowAt(p),
+        scentAt: () => 0,
+        get width() { return world.width; },
+        get height() { return world.height; },
+      };
+    }
     this.stats = this.computeStats();
     this.history.push(this.stats);
   }
@@ -423,12 +445,14 @@ export class World implements WorldLike {
     }
   }
 
-  private seedOrganism(): void {
-    const genome = randomGenome(this.rng);
-    const position = { x: this.rng.range(40, this.width - 40), y: this.rng.range(40, this.height - 40) };
+  private seedOrganism(founder?: NonNullable<WorldOptions["founders"]>[number]): void {
+    const genome = founder ? (JSON.parse(JSON.stringify(founder.genome)) as Genome) : randomGenome(this.rng);
+    const drawn = { x: this.rng.range(40, this.width - 40), y: this.rng.range(40, this.height - 40) };
+    const position = founder?.position ? { x: founder.position.x, y: founder.position.y } : drawn;
+    const drawnHeading = this.rng.range(-Math.PI, Math.PI);
     const lineage = this.newLineage(-1, genome);
     this.lineageRecords.get(lineage)!.count = 1;
-    const org = this.makeOrganism(genome, position, this.rng.range(-Math.PI, Math.PI), lineage, -1, 0);
+    const org = this.makeOrganism(genome, position, founder?.heading ?? drawnHeading, lineage, -1, 0);
     org.energy = org.capacity * TUNING.startEnergy;
     this.organisms.push(org);
   }
@@ -436,12 +460,9 @@ export class World implements WorldLike {
   private makeOrganism(genome: Genome, position: Vec2, heading: number, lineage: number, parentLineage: number, generation: number): Organism {
     const mass = genomeMass(genome);
     const capacity = capacityFor(mass);
-    const poses: PartPose[] = genome.parts.map(() => ({
-      base: { x: position.x, y: position.y },
-      tip: { x: position.x, y: position.y },
-      jointAngle: 0,
-      heading,
-    }));
+    // Empty on purpose: `stepOrganism` builds the real pose on the first step, so a newborn is not
+    // billed for "expanding" from a collapsed point.
+    const poses: PartPose[] = [];
     return {
       id: this.nextOrganismId++,
       genome,
@@ -642,7 +663,7 @@ export class World implements WorldLike {
 
   /** Advance one organism; returns false if it died. */
   private stepOrganism(org: Organism): boolean {
-    const cost = this.stepFn(org, this, DT);
+    const cost = this.stepFn(org, this.blindWater ?? this, DT);
     this.keepInside(org);
     const T = this.env.temperature;
     const work = Number.isFinite(cost.work) ? cost.work : 0;
@@ -830,7 +851,12 @@ export class World implements WorldLike {
   }
 
   private reproduce(parent: Organism): void {
-    const { genome, topologyChanged } = mutate(parent.genome, this.rng);
+    const mode = this.options.mutation ?? "default";
+    let genome: Genome;
+    let topologyChanged = false;
+    if (mode === "default") ({ genome, topologyChanged } = mutate(parent.genome, this.rng));
+    else if (mode === "none") genome = JSON.parse(JSON.stringify(parent.genome)) as Genome;
+    else genome = mutateControllerOnly(parent.genome, this.rng, this.options.weightMutationRate);
     const lineage = topologyChanged ? this.newLineage(parent.lineage, genome) : parent.lineage;
     const angle = this.rng.range(-Math.PI, Math.PI);
     const reach = TUNING.birthOffset + parent.genome.parts[0].length * 0.5;
@@ -852,6 +878,9 @@ export class World implements WorldLike {
       record.exemplar = genome;
     }
     this.births++;
+    if (this.options.birthLog) {
+      this.birthLog.push({ t: this.time, parent: parent.id, child: child.id, hash: this.options.hashGenome?.(genome) ?? "" });
+    }
     this.pendingBirths.push(child);
     this.emit({ kind: "birth", time: this.time, organism: child.id, lineage });
     if (topologyChanged) this.emit({ kind: "lineage", time: this.time, organism: child.id, lineage, parentLineage: parent.lineage });
