@@ -1,4 +1,4 @@
-/* Phone: ring, transport, readouts, controls in one column. Wider: ring and transport on the left, the rest beside them. */
+/* Phone: ring, transport, history, readouts, controls in one column. Wider: ring and transport on the left, the rest beside them. */
 .experiment { display: grid; gap: 24px; min-width: 0; }
 .stage, .side { display: grid; align-content: start; gap: 10px; min-width: 0; }
 .side { gap: 24px; }
@@ -69,6 +69,15 @@
 /* Simulated time sits in the ring's corner, beside what it describes. */
 .time { position: absolute; top: 8px; left: 10px; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 
+/* ---- Space-time history ---- */
+.history { display: grid; gap: 6px; margin: 6px 0 0; }
+.historyPlot { position: relative; width: 100%; aspect-ratio: 3 / 4; border: 1px solid var(--rule-subtle); background: var(--surface); }
+.historyPlot canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+@media (min-width: 52rem) {
+  .historyPlot { aspect-ratio: 1; }
+}
+.historyKey { color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+
 /* ---- Readouts ---- */
 .readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 16px 24px; }
 .facts { display: grid; gap: 4px; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid var(--rule-subtle); }
@@ -77,6 +86,9 @@
 .facts dt small { display: block; color: var(--text-muted); font-size: 12px; }
 .facts dd { margin: 0; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: pre; text-align: right; }
 .facts dd[data-active] { color: var(--accent); font-weight: 700; }
+.facts .sparkRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; }
+.sparkRow dd:last-child { grid-column: 1 / -1; }
+.spark { display: block; width: 100%; height: 28px; }
 
 /* ---- Controls ---- */
 .controls { display: grid; gap: 20px; }

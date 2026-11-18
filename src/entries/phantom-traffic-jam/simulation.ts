@@ -60,7 +60,7 @@ export const BRAKE_LIGHT_OFF = -0.3;
  */
 export const JUMBLE_FRACTION = 0.13;
 
-/** History kept for perception, s. Longer delays (only reachable by odd inputs) are clamped. */
+/** History kept for perception, s. Longer delays (beyond the slider range) are clamped. */
 export const HISTORY_SECONDS = 3;
 
 const DRIVER_KEYS: readonly DriverParamKey[] = [
@@ -214,41 +214,57 @@ function gapOf(sim: Simulation, car: number): number {
 
 // --- Perception ---------------------------------------------------------
 
-/** Store the current state as step `sim.steps` of the history. */
+/** What `car` can see right now, read straight from the state. */
+function observeNow(sim: Simulation, car: number): Observation {
+  return {
+    speed: sim.speed[car],
+    gap: gapOf(sim, car),
+    closingSpeed: sim.speed[car] - sim.speed[sim.leader[car]],
+  };
+}
+
+/** Store the current observations as step `sim.steps` of the history. */
 function recordHistory(sim: Simulation): void {
   const s = internal(sim);
   const base = (s.steps % s.historyCapacity) * s.carCount;
   for (let car = 0; car < s.carCount; car++) {
-    s.historySpeed[base + car] = s.speed[car];
-    s.historyGap[base + car] = gapOf(s, car);
-    s.historyClosing[base + car] = s.speed[car] - s.speed[s.leader[car]];
+    const seen = observeNow(s, car);
+    s.historySpeed[base + car] = seen.speed;
+    s.historyGap[base + car] = seen.gap;
+    s.historyClosing[base + car] = seen.closingSpeed;
   }
+}
+
+/**
+ * What `car` saw `stepsBack` whole steps ago: the current state for 0,
+ * otherwise the stored snapshot. Before step 0 the initial state is held.
+ */
+function observedStepsAgo(sim: Simulation, car: number, stepsBack: number): Observation {
+  if (stepsBack === 0) return observeNow(sim, car);
+  const s = internal(sim);
+  const slot = (Math.max(0, s.steps - stepsBack) % s.historyCapacity) * s.carCount + car;
+  return { speed: s.historySpeed[slot], gap: s.historyGap[slot], closingSpeed: s.historyClosing[slot] };
 }
 
 /**
  * What `car` perceives: its observation `reactionDelay` seconds ago.
  * x(t−τ) = β·x[t−n−1] + (1−β)·x[t−n], n = floor(τ/dt), β = τ/dt − n
- * (Treiber et al. 2006). Before t = 0 the initial state is held constant.
+ * (Treiber et al. 2006), where x[t−k] is the observation k steps ago. Delays
+ * beyond the stored history are clamped to it.
  */
 export function perceive(sim: Simulation, car: number): Observation {
   const s = internal(sim);
   const delaySteps = s.drivers[car].reactionDelay / s.dt;
   const n = Math.min(Math.floor(delaySteps), s.historyCapacity - 2);
   const beta = Math.min(delaySteps - n, 1);
-  const live = (buffer: Float64Array): number =>
-    buffer === s.historySpeed
-      ? s.speed[car]
-      : buffer === s.historyGap
-        ? gapOf(s, car)
-        : s.speed[car] - s.speed[s.leader[car]];
-  const at = (stepsBack: number, buffer: Float64Array): number => {
-    if (stepsBack === 0) return live(buffer); // the current state, always read directly
-    const step = Math.max(0, s.steps - stepsBack);
-    return buffer[(step % s.historyCapacity) * s.carCount + car];
+  const newer = observedStepsAgo(s, car, n);
+  if (beta === 0) return newer;
+  const older = observedStepsAgo(s, car, n + 1);
+  return {
+    speed: beta * older.speed + (1 - beta) * newer.speed,
+    gap: beta * older.gap + (1 - beta) * newer.gap,
+    closingSpeed: beta * older.closingSpeed + (1 - beta) * newer.closingSpeed,
   };
-  const pick = (buffer: Float64Array): number =>
-    beta === 0 ? at(n, buffer) : beta * at(n + 1, buffer) + (1 - beta) * at(n, buffer);
-  return { speed: pick(s.historySpeed), gap: pick(s.historyGap), closingSpeed: pick(s.historyClosing) };
 }
 
 // --- Intervention -------------------------------------------------------
@@ -334,7 +350,7 @@ function checkStatus(sim: Simulation): void {
     const gap = gapOf(sim, car);
     const values = [sim.position[car], sim.speed[car], sim.acceleration[car], gap];
     if (!values.every(Number.isFinite)) {
-      sim.status = { kind: "invalid", time: sim.time, reason: `car ${car} has a non-finite value` };
+      sim.status = { kind: "invalid", time: sim.time, reason: `Car ${car + 1} has a non-finite value` };
       return;
     }
   }

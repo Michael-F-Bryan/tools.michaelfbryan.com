@@ -20,12 +20,12 @@ export const DEFAULT_DT = 0.05;
  *  - reaction delay 0-1.2 s: 0 is plain IDM; ~0.5-1 s is typical for humans.
  *  - acceleration 0.3-3 m/s²: heavy vehicle to sporty car.
  *  - comfortable braking 1-4 m/s²: gentle to firm.
- * Some extreme combinations (a delay longer than about half the time gap,
- * with a dense ring) crash. That is the model being honest, not a bug.
+ * Some extreme combinations (a long delay against a short time gap, on a
+ * dense ring) crash. That is the model being honest, not a bug.
  */
 export const DRIVER_SLIDERS: Record<DriverParamKey, SliderSpec> = {
   desiredSpeed: { label: "Desired speed", unit: "km/h", displayPerSI: 3.6, min: 30, max: 80, step: 5 },
-  timeGap: { label: "Time gap", unit: "s", displayPerSI: 1, min: 0.6, max: 2.5, step: 0.1 },
+  timeGap: { label: "Following time gap", unit: "s", displayPerSI: 1, min: 0.6, max: 2.5, step: 0.1 },
   reactionDelay: { label: "Reaction delay", unit: "s", displayPerSI: 1, min: 0, max: 1.2, step: 0.1 },
   maxAcceleration: { label: "Acceleration", unit: "m/s²", displayPerSI: 1, min: 0.3, max: 3, step: 0.1 },
   comfortableBraking: { label: "Comfortable braking", unit: "m/s²", displayPerSI: 1, min: 1, max: 4, step: 0.1 },
@@ -57,8 +57,9 @@ export const VARIATION_SLIDER: SliderSpec = {
  * with 0.4 s a perturbation decays, with 0.8 s it grows into stop-and-go waves.
  * Both start "jumbled", so the jam-prone ring jams without any tap and the
  * steady one smooths the same unevenness away.
- *
- * Population centre shared by both presets, except for the reaction delay. */
+ */
+
+/** Population centre shared by both presets; the jam-prone one overrides the reaction delay. */
 const BASE_DRIVER: DriverParams = {
   desiredSpeed: 60 / 3.6,
   timeGap: 1.6,

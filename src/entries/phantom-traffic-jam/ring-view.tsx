@@ -138,7 +138,8 @@ export const RingView = memo(function RingView({ sim, selected, collided, maxSpe
               onClick={() => onSelect(car)}
               onKeyDown={(event) => keyDown(event, car)}
             >
-              <rect className={styles.hit} x={-length / 2 - 1.2} y={-2.6} width={length + 2.4} height={5.2} />
+              {/* Generous across the lane; along it, 30 cars leave only 7.7 m each. */}
+              <rect className={styles.hit} x={-length / 2 - 1.2} y={-4} width={length + 2.4} height={8} />
               <ellipse className={styles.glow} cx={-length / 2} cy="0" rx="1.6" ry="1.9" />
               {collided.includes(car) ? (
                 <rect className={styles.collided} x={-length / 2 - 1.5} y={-CAR_WIDTH / 2 - 1.5} width={length + 3} height={CAR_WIDTH + 3} rx="1.7" />

@@ -5,13 +5,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Label } from "@/components/label";
 
 import { Controls } from "./controls";
-import { kmh, metres, seconds, signed } from "./format";
-import { DEFAULT_CONFIG, DRIVER_SLIDERS } from "./parameters";
+import { kmh, metres, seconds, signed, toDisplay } from "./format";
+import { createHistory, noteChange, noteTap, recordSample, type History } from "./history";
+import { createHistoryFeed, HistoryView, Sparkline } from "./history-view";
+import { DEFAULT_CONFIG, DRIVER_SLIDERS, VARIATION_SLIDER } from "./parameters";
 import { createRingPainter, RingView } from "./ring-view";
 import { createSimulation, readCar, setDrivers, stepSimulation, summarise, tapBrake } from "./simulation";
-import { SPEED_TICKS_KMH, speedFraction, speedGradient } from "./speed-scale";
+import { MAX_SPEED, SPEED_TICKS_KMH, speedFraction, speedGradient } from "./speed-scale";
 import styles from "./experiment.module.css";
-import type { CarReadout, DriverParamKey, ExperimentConfig, Simulation, SimulationStatus, TrafficSummary } from "./types";
+import type { CarReadout, DriverParamKey, ExperimentConfig, Simulation, SimulationStatus, SliderSpec, TrafficSummary } from "./types";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -32,8 +34,29 @@ const MAX_FRAME_SECONDS = 0.1;
 /** How often the numeric readouts refresh, s of real time. */
 const READOUT_SECONDS = 0.125;
 
-/** The speed colour domain: fixed at the desired-speed slider's maximum so colours never shift with the sliders. */
-const MAX_SPEED = DRIVER_SLIDERS.desiredSpeed.max / DRIVER_SLIDERS.desiredSpeed.displayPerSI;
+/** Fixed top of the speed-spread sparkline, m/s (40 km/h): a jam spreads speeds by roughly half of this. */
+const MAX_SPREAD = MAX_SPEED / 2;
+
+/** Short names for change markers on the history. */
+const CHANGE_NAMES: Record<DriverParamKey, string> = {
+  desiredSpeed: "desired speed",
+  timeGap: "time gap",
+  reactionDelay: "delay",
+  maxAcceleration: "accel.",
+  comfortableBraking: "braking",
+};
+
+function describeChange(name: string, spec: SliderSpec) {
+  const unit = spec.unit === "%" ? "%" : ` ${spec.unit}`;
+  return (from: number, to: number) => `${name} ${toDisplay(spec, from)} → ${toDisplay(spec, to)}${unit}`;
+}
+
+type Run = Readonly<{ sim: Simulation; history: History }>;
+
+function startRun(config: ExperimentConfig): Run {
+  const sim = createSimulation(config);
+  return { sim, history: createHistory(sim) };
+}
 
 type Snapshot = Readonly<{ time: number; summary: TrafficSummary; car: CarReadout; status: SimulationStatus }>;
 
@@ -57,7 +80,8 @@ export function Experiment() {
   const paused = userPaused ?? prefersReducedMotion;
   const [rate, setRate] = useState(1);
   const [config, setConfig] = useState<ExperimentConfig>(DEFAULT_CONFIG);
-  const [sim, setSim] = useState(() => createSimulation(DEFAULT_CONFIG));
+  const [{ sim, history }, setRun] = useState(() => startRun(DEFAULT_CONFIG));
+  const [feed] = useState(createHistoryFeed);
   const [selected, setSelected] = useState(0);
   const [snapshot, setSnapshot] = useState(() => snapshotOf(sim, 0));
   const svgRef = useRef<SVGSVGElement>(null);
@@ -90,7 +114,13 @@ export function Experiment() {
         pending += real * playback.rate;
         const steps = Math.floor(pending / sim.dt + 1e-9);
         pending -= steps * sim.dt;
-        for (let step = 0; step < steps && sim.status.kind === "running"; step += 1) stepSimulation(sim);
+        let sampled = false;
+        // Record inside the step loop so a fast frame never skips a sample point.
+        for (let step = 0; step < steps && sim.status.kind === "running"; step += 1) {
+          stepSimulation(sim);
+          if (recordSample(history, sim)) sampled = true;
+        }
+        if (sampled) feed.notify();
       } else {
         pending = 0;
       }
@@ -106,15 +136,15 @@ export function Experiment() {
     painter.paint();
     frameId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(frameId);
-  }, [sim]);
+  }, [sim, history, feed]);
 
   const restart = useCallback((next: ExperimentConfig, car = 0) => {
-    const fresh = createSimulation(next);
-    const keep = car < fresh.carCount ? car : 0;
+    const fresh = startRun(next);
+    const keep = car < fresh.sim.carCount ? car : 0;
     setConfig(next);
-    setSim(fresh);
+    setRun(fresh);
     setSelected(keep);
-    setSnapshot(snapshotOf(fresh, keep));
+    setSnapshot(snapshotOf(fresh.sim, keep));
   }, []);
 
   const select = useCallback(
@@ -129,17 +159,23 @@ export function Experiment() {
     const next = { ...config, driver: { ...config.driver, [key]: si } };
     setConfig(next);
     setDrivers(sim, next.driver, next.variation);
+    noteChange(history, { time: sim.time, key, from: config.driver[key], to: si, describe: describeChange(CHANGE_NAMES[key], DRIVER_SLIDERS[key]) }, performance.now());
+    feed.notify();
     setSnapshot(snapshotOf(sim, selected));
   }
 
   function changeVariation(variation: number) {
     setConfig({ ...config, variation });
     setDrivers(sim, config.driver, variation);
+    noteChange(history, { time: sim.time, key: "variation", from: config.variation, to: variation, describe: describeChange("variation", VARIATION_SLIDER) }, performance.now());
+    feed.notify();
     setSnapshot(snapshotOf(sim, selected));
   }
 
   function brake() {
     tapBrake(sim, selected);
+    noteTap(history, sim, selected);
+    feed.notify();
     setSnapshot(snapshotOf(sim, selected));
   }
 
@@ -162,7 +198,7 @@ export function Experiment() {
             <span className={styles.legendScale}>
               {SPEED_TICKS_KMH.filter((tick) => tick <= MAX_SPEED * 3.6 + 1e-9).map((tick) => (
                 <span key={tick} style={{ left: `${(speedFraction(tick / 3.6, MAX_SPEED) * 100).toFixed(1)}%` }}>
-                  {tick === 0 ? "stopped" : tick}
+                  {tick}
                 </span>
               ))}
             </span>
@@ -178,7 +214,7 @@ export function Experiment() {
 
         <div className={styles.transport} role="group" aria-label="Playback">
           <button type="button" className={`${styles.button} ${styles.play}`} onClick={() => setUserPaused(!paused)} disabled={!running}>
-            {paused ? "Play" : "Pause"}
+            {!running ? "Frozen" : paused ? "Play" : "Pause"}
           </button>
           <div className={styles.segmented} role="group" aria-label="Playback speed">
             {PLAYBACK_RATES.map((option) => (
@@ -201,7 +237,8 @@ export function Experiment() {
             Reset
           </button>
         </div>
-        {/* The next slice's space-time history (the ring unrolled at the 0 m cut) belongs here, under the transport. */}
+        {/* The space-time history: the ring unrolled at the 0 m cut, under the transport. */}
+        <HistoryView history={history} feed={feed} selected={selected} maxSpeed={MAX_SPEED} />
       </div>
 
       <div className={styles.side}>
@@ -209,13 +246,19 @@ export function Experiment() {
           <section aria-labelledby="ptj-traffic">
             <Label id="ptj-traffic" tone="muted">Traffic</Label>
             <dl className={styles.facts}>
-              <div>
+              <div className={styles.sparkRow}>
                 <dt>Average speed</dt>
                 <dd>{kmh(summary.meanSpeed)}</dd>
+                <dd>
+                  <Sparkline history={history} feed={feed} values="meanSpeed" max={MAX_SPEED} label={`Average speed over the last ${history.windowSeconds / 60} minutes, on a fixed 0 to ${Math.round(MAX_SPEED * 3.6)} km/h scale`} />
+                </dd>
               </div>
-              <div>
+              <div className={styles.sparkRow}>
                 <dt>Speed spread <small>(std. dev. across cars)</small></dt>
                 <dd>{kmh(summary.speedSpread)}</dd>
+                <dd>
+                  <Sparkline history={history} feed={feed} values="speedSpread" max={MAX_SPREAD} label={`Speed spread over the last ${history.windowSeconds / 60} minutes, on a fixed 0 to ${Math.round(MAX_SPREAD * 3.6)} km/h scale`} />
+                </dd>
               </div>
             </dl>
           </section>

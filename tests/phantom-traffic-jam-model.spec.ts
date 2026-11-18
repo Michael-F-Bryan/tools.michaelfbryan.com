@@ -664,9 +664,10 @@ test.describe("honest failure", () => {
 
   test("a non-finite value is reported as invalid", () => {
     const sim = createSimulation(STEADY);
-    sim.speed[3] = Number.NaN;
+    sim.speed[3] = Number.NaN;  // car 2 sees it first, as a NaN gap, so it is the one reported
     stepSimulation(sim);
     expect(sim.status.kind).toBe("invalid");
+    if (sim.status.kind === "invalid") expect(sim.status.reason).toBe("Car 3 has a non-finite value");
     const frozen = Array.from(sim.position);
     stepSimulation(sim);
     expect(Array.from(sim.position)).toEqual(frozen);

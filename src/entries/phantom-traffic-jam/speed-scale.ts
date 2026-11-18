@@ -1,6 +1,6 @@
 /**
- * The one speed colour scale, shared by the ring and (later) the history
- * view so a colour means the same speed everywhere on the page.
+ * The one speed colour scale, shared by the ring and the
+ * space-time history view so a colour means the same speed everywhere on the page.
  *
  * Viridis, sampled at nine points: perceptually uniform, monotonic in
  * lightness (dark = slow, light = fast) and readable with the common forms
@@ -9,6 +9,11 @@
  * The domain is fixed (0 to the desired-speed slider's maximum) so a colour
  * never changes meaning while sliders move, and the mapping is linear.
  */
+import { DRIVER_SLIDERS } from "./parameters";
+
+/** The speed colour domain, m/s: fixed at the desired-speed slider's maximum so colours never shift with the sliders. */
+export const MAX_SPEED = DRIVER_SLIDERS.desiredSpeed.max / DRIVER_SLIDERS.desiredSpeed.displayPerSI;
+
 export const SPEED_STOPS: readonly string[] = [
   "#440154",
   "#472d7b",
