@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { newestTime, slotOf, type History } from "./history";
+import { markerLabel, newestTime, slotOf, type History } from "./history";
 import { speedColour, speedFraction } from "./speed-scale";
 import styles from "./experiment.module.css";
 
@@ -114,6 +114,10 @@ function useHistoryCanvas(draw: Draw, feed: HistoryFeed) {
 
 function setData(element: HTMLElement | null, name: string, value: number) {
   if (element && element.dataset[name] !== String(value)) element.dataset[name] = String(value);
+}
+
+function setText(element: HTMLElement | null, name: string, value: string) {
+  if (element && element.dataset[name] !== value) element.dataset[name] = value;
 }
 
 const SPEED_BUCKETS = 40;
@@ -328,7 +332,7 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
       ctx.fill();
       // Keep the label clear of the mark it names.
       const side = mx > left + plotWidth * 0.6 ? "left" : "right";
-      label(`tap · car ${marker.car + 1}`, my + 14, side, palette.accent);
+      label(markerLabel(marker), my + 14, side, palette.accent);
     }
   }
 }
@@ -345,6 +349,7 @@ export function HistoryView({ history, feed, selected, maxSpeed }: HistoryViewPr
     (ctx, width, height, palette, canvas) => {
       setData(canvas.parentElement, "samples", history.count);
       setData(canvas.parentElement, "markers", history.markers.length);
+      setText(canvas.parentElement, "markerLabels", history.markers.map(markerLabel).join("|"));
       drawSpaceTime(ctx, width, height, palette, history, selected, maxSpeed);
     },
     [history, selected, maxSpeed],
@@ -357,7 +362,7 @@ export function HistoryView({ history, feed, selected, maxSpeed }: HistoryViewPr
         <canvas
           ref={canvasRef}
           role="img"
-          aria-label={`Space-time history of the last ${minutes} minutes: position round the ring from the 0 m cut across, simulated time downwards, one line per car coloured by speed, with brake taps and setting changes marked.`}
+          aria-label={`Space-time history of the last ${minutes} minutes: position round the ring from the 0 m cut across, simulated time downwards, one line per car coloured by speed, with brake interventions and setting changes marked.`}
         />
       </div>
       <figcaption className={styles.historyKey}>Each line is one car, moving right. Where cars slow, their lines kink dark; the kinks line up into jams that drift left.</figcaption>

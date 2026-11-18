@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { COALESCE_MS, createHistory, newestTime, noteChange, noteTap, oldestTime, recordSample, slotOf } from "../src/entries/phantom-traffic-jam/history";
-import { DEFAULT_CONFIG } from "../src/entries/phantom-traffic-jam/parameters";
-import { createSimulation, stepSimulation, summarise } from "../src/entries/phantom-traffic-jam/simulation";
+import { COALESCE_MS, createHistory, markerLabel, newestTime, noteChange, oldestTime, recordSample, slotOf, syncInterventions } from "../src/entries/phantom-traffic-jam/history";
+import { DEFAULT_CONFIG, SCHEDULED_TAP } from "../src/entries/phantom-traffic-jam/parameters";
+import { createSimulation, holdBrake, releaseBrake, stepSimulation, summarise, tapBrake } from "../src/entries/phantom-traffic-jam/simulation";
 
 const describe = (from: number, to: number) => `delay ${from} → ${to} s`;
 
@@ -48,10 +48,11 @@ test("each sample stores every car and the summary at that instant", () => {
 });
 
 test("keeps a bounded rolling window and prunes markers that fall out of it", () => {
-  const sim = createSimulation(DEFAULT_CONFIG);
+  const sim = createSimulation({ ...DEFAULT_CONFIG, scheduledTap: undefined });
   const history = createHistory(sim, { windowSeconds: 10 });
-  noteTap(history, sim, 3);
-  expect(history.markers).toEqual([{ kind: "tap", time: 0, car: 3, position: sim.position[3] }]);
+  tapBrake(sim, 3);
+  expect(syncInterventions(history, sim)).toBe(true);
+  expect(history.markers).toEqual([{ kind: "intervention", action: "tap", time: 0, car: 3, position: sim.position[3] }]);
   for (let step = 0; step < 15 / sim.dt; step += 1) {
     stepSimulation(sim);
     recordSample(history, sim);
@@ -59,7 +60,43 @@ test("keeps a bounded rolling window and prunes markers that fall out of it", ()
   expect(history.count).toBe(history.capacity);
   expect(newestTime(history) - oldestTime(history)).toBeCloseTo(10, 9);
   expect(oldestTime(history)).toBeCloseTo(5, 9);
+  // Pruned, and not brought back by the log it came from.
   expect(history.markers).toEqual([]);
+  expect(syncInterventions(history, sim)).toBe(false);
+  expect(history.markers).toEqual([]);
+});
+
+test("marks every intervention in the model's log once: explicit taps, the scheduled tap and held brakes", () => {
+  const sim = createSimulation(DEFAULT_CONFIG);
+  const history = createHistory(sim);
+  const step = (seconds: number) => {
+    for (let i = 0; i < Math.round(seconds / sim.dt); i += 1) {
+      stepSimulation(sim);
+      recordSample(history, sim);
+    }
+  };
+  // A tap while paused is marked as soon as the page syncs, before any step.
+  tapBrake(sim, 5);
+  syncInterventions(history, sim);
+  expect(history.markers.map(markerLabel)).toEqual(["tap · car 6"]);
+  // The scheduled tap is applied by the model itself and marked by the recorder at its time.
+  step(SCHEDULED_TAP.time + 1);
+  expect(history.markers.map(markerLabel)).toEqual(["tap · car 6", "scheduled tap · car 1"]);
+  const scheduled = history.markers[1];
+  expect(scheduled.time).toBeCloseTo(SCHEDULED_TAP.time, 9);
+  // A hold is one marker at its start however long it lasts; a second hold is another.
+  holdBrake(sim, 2);
+  const heldAt = sim.time;
+  step(2);
+  releaseBrake(sim, 2);
+  step(1);
+  holdBrake(sim, 2);
+  releaseBrake(sim, 2);
+  syncInterventions(history, sim);
+  syncInterventions(history, sim);
+  expect(history.markers.map(markerLabel)).toEqual(["tap · car 6", "scheduled tap · car 1", "hold · car 3", "hold · car 3"]);
+  expect(history.markers[2].time).toBeCloseTo(heldAt, 9);
+  expect(history.markers).toHaveLength(sim.interventions.length);
 });
 
 test("coalesces a run of edits to one parameter into one marker", () => {

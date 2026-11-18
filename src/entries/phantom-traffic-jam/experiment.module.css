@@ -22,33 +22,12 @@
 
 /* ---- Ring ---- */
 .ring {
-  --brake-on: #ff2a1a;
-  --brake-off: #7d2e28;
   position: relative;
   aspect-ratio: 1;
   width: 100%;
   border: 1px solid var(--rule-subtle);
   background: var(--surface);
 }
-.ringSvg { display: block; width: 100%; height: 100%; overflow: visible; -webkit-tap-highlight-color: transparent; }
-.lane { fill: none; stroke: color-mix(in srgb, var(--rule) 26%, var(--surface)); }
-.kerb { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
-.cutAcross { stroke: var(--ink); stroke-width: 1px; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.45; }
-.cutTick { stroke: var(--ink); stroke-width: 2px; vector-effect: non-scaling-stroke; }
-.cutLabel { fill: var(--text-muted); font-family: var(--font-mono); font-size: 2.6px; }
-.direction path { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-
-.car { cursor: pointer; outline: none; }
-.hit { fill: transparent; pointer-events: all; }
-.body { stroke: var(--ink); stroke-width: 1px; vector-effect: non-scaling-stroke; }
-.lamp { fill: var(--brake-off); }
-.glow { fill: var(--brake-on); opacity: 0; pointer-events: none; }
-.car[data-braking="true"] .lamp { fill: var(--brake-on); }
-.car[data-braking="true"] .glow { opacity: 0.4; }
-.halo { fill: none; stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
-.collided { fill: none; stroke: var(--error); stroke-width: 2px; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-.focus { fill: none; stroke: var(--ink); stroke-width: 1.5px; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0; pointer-events: none; }
-.car:focus-visible .focus { opacity: 1; }
 
 /* The legend sits in the empty middle of the ring. */
 .legend { position: absolute; top: 50%; left: 50%; display: grid; gap: 4px; width: min(52%, 14rem); transform: translate(-50%, -50%); color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; line-height: 1.2; pointer-events: none; }
@@ -82,7 +61,8 @@
 /* Phones wrap it to three rows: play and rates; brake and reset; run ahead and the view toggle. */
 .transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .play { min-width: 5.25rem; font-weight: 700; }
-.brake { flex: 1 1 11rem; border-color: var(--ink); font-weight: 700; }
+.brake { flex: 1 1 11rem; border-color: var(--ink); font-weight: 700; touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.brake[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
 .ahead { display: inline-grid; align-items: center; justify-items: center; }
 .ahead > span { grid-area: 1 / 1; }
 .ahead > span[hidden] { display: block; visibility: hidden; }
@@ -120,7 +100,12 @@
 .experiments { display: grid; gap: 8px; margin-top: 6px; }
 .group { display: grid; gap: 4px; }
 .group > :first-child { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-subtle); }
-.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+/* One row of three where it fits, otherwise stacked full width; each button states what its experiment is. */
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); gap: 8px; }
+.preset { display: grid; gap: 2px; justify-items: start; text-align: left; }
+.presetName { font-weight: 700; }
+.presetFacts { color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; font-weight: 400; }
+.preset[aria-pressed="true"] .presetFacts { color: var(--accent); }
 
 .slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; align-items: baseline; gap: 0 10px; padding-top: 4px; }
 .sliderName { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; font-size: 14px; }
@@ -135,6 +120,3 @@
 .seed input { width: 8.5rem; min-height: 44px; padding: 6px 10px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; }
 .seed input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.details { margin-top: 8px; border-top: 1px solid var(--rule-subtle); }
-.details summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-size: 14px; font-weight: 700; }
-.details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

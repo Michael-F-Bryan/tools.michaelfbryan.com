@@ -2,11 +2,20 @@
 .ringSvg {
   --brake-on: #ff2a1a;
   --brake-off: light-dark(#7a2a24, #6a2620);
+  /*
+   * --mpp (drawing metres per CSS px) is set from the drawn size. Labels are
+   * sized for a phone-sized ring and shrink, never grow, on a larger one, so
+   * they stay about 9-11 px on screen while the road and cars keep true scale.
+   */
+  --label-scale: min(1, calc(var(--mpp, 0.27) * 4.2));
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ---- Road ---- */
@@ -16,11 +25,15 @@
 .postMajor { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .cutAcross { stroke: var(--ink); stroke-width: 1px; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.45; }
 .cutTick { stroke: var(--ink); stroke-width: 2px; vector-effect: non-scaling-stroke; }
-.cutLabel { fill: var(--text-muted); font-family: var(--font-mono); font-size: 2.4px; }
+.cutLabel { fill: var(--text-muted); font-family: var(--font-mono); font-size: calc(2.4px * var(--label-scale)); }
+.scale path { fill: none; stroke: var(--text-muted); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.scale text { fill: var(--text-muted); font-family: var(--font-mono); font-size: calc(2.2px * var(--label-scale)); }
 .direction path { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 
 /* ---- Cars ---- */
-.car { cursor: pointer; outline: none; }
+/* Vertical swipes that start on a car still scroll the page until a hold engages (then touchmove is cancelled in script). */
+.car { cursor: pointer; outline: none; touch-action: pan-y pinch-zoom; }
+.car[data-held="true"] { cursor: grabbing; }
 .hit { fill: transparent; pointer-events: all; }
 /* A soft, direction-less contact shadow: no blur, no offset. */
 .shadow { fill: light-dark(rgb(23 25 29 / 0.16), rgb(0 0 0 / 0.38)); pointer-events: none; }
@@ -33,6 +46,10 @@
 .car[data-braking="true"] .lamp { fill: var(--brake-on); }
 .car[data-braking="true"] .glow { opacity: 1; }
 .halo { fill: none; stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Held: the car sits in a solid accent pad, heavier than the selection ring it replaces. */
+.held { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: var(--accent); stroke-width: 4px; vector-effect: non-scaling-stroke; opacity: 0; pointer-events: none; }
+.car[data-held="true"] .held { opacity: 1; }
+.car[data-held="true"] .halo { opacity: 0; }
 .collided { fill: none; stroke: var(--error); stroke-width: 2px; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .focus { fill: none; stroke: var(--ink); stroke-width: 1.5px; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0; pointer-events: none; }
 .car:focus-visible .focus { opacity: 1; }
@@ -41,3 +58,4 @@
 .marker { pointer-events: none; }
 .marker path, .marker rect { fill: var(--accent); }
 .marker text { fill: var(--surface); font-family: var(--font-mono); font-size: 2.6px; font-weight: 700; }
+.tabFace { transform-box: fill-box; transform-origin: center; scale: var(--label-scale); }

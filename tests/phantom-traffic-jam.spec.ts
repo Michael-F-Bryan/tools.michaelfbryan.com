@@ -1,6 +1,8 @@
 import { expect, test as base, type Locator, type Page } from "@playwright/test";
 
-import { ROAD } from "../src/entries/phantom-traffic-jam/parameters";
+import { SAMPLE_SECONDS } from "../src/entries/phantom-traffic-jam/history";
+import { DEFAULT_CONFIG, DEFAULT_DT, PRESETS, ROAD } from "../src/entries/phantom-traffic-jam/parameters";
+import { createSimulation, HOLD_LIMIT, stepSimulation } from "../src/entries/phantom-traffic-jam/simulation";
 
 /**
  * The page is deterministic in simulated time (fixed step, seeded start), so
@@ -28,11 +30,25 @@ const test = base.extend<{ problems: string[] }>({
 
 async function open(page: Page, options: { paused?: boolean } = {}) {
   if (options.paused ?? true) await page.emulateMedia({ reducedMotion: "reduce" });
+  await isolate(page);
   await page.goto("/phantom-traffic-jam");
   await expect(page.getByTestId("ring")).toBeVisible();
   await expect(page.locator("g[data-car]")).toHaveCount(14);
   // Server-rendered controls ignore input until React has hydrated them.
   await page.waitForFunction(() => Object.keys(document.querySelector('g[data-car="0"]')!).some((key) => key.startsWith("__reactFiber")));
+  // ...and until the ring's effects have mounted (their resize observer sets this), so a press is
+  // not dropped by React's development-mode effect remount right after hydration.
+  await page.waitForFunction(() => document.querySelector<SVGSVGElement>('[data-testid="ring"]')!.style.getPropertyValue("--mpp") !== "");
+}
+
+/**
+ * Headless Chromium under load can briefly report the page hidden, which (rightly) lets go of any
+ * held brake. Pin visibility to "visible"; a test that wants a hidden tab sets `window.__hidden`.
+ */
+async function isolate(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => ((window as unknown as { __hidden?: boolean }).__hidden ? "hidden" : "visible") });
+  });
 }
 
 const simTime = (page: Page) => page.getByTestId("sim-time");
@@ -95,6 +111,80 @@ async function outputOf(page: Page, label: string): Promise<Locator> {
 
 const overflows = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
 
+const RUN_AHEAD_SECONDS = 60;
+/** The page's press-and-hold threshold (ring-view.tsx, which can't be imported here: it pulls in CSS), ms of real time. */
+const HOLD_THRESHOLD_MS = 200;
+const runAhead = (page: Page) => page.getByRole("button", { name: /^(Run ahead 60 s|Stop run-ahead)$/ });
+
+/** Press "Run ahead" and wait for it to hand back. */
+async function runAheadToEnd(page: Page) {
+  await runAhead(page).click();
+  await expect(button(page, "Run ahead 60 s")).toBeVisible({ timeout: 15_000 });
+}
+
+const brakeButton = (page: Page) => page.getByRole("button", { name: /^Hold to brake · car \d+$/ });
+/** The selected car's override readout: "off", "tap" or "held". */
+const brakeState = (page: Page) => page.getByTestId("brake-state");
+const heldCars = (page: Page) => page.locator('g[data-car][data-held="true"]');
+const markerCount = (page: Page) => history(page).getAttribute("data-markers").then(Number);
+/** The history's marker labels, oldest first ("scheduled tap · car 1", "hold · car 6", ...). */
+const markerLabels = async (page: Page) => ((await history(page).getAttribute("data-marker-labels")) ?? "").split("|").filter(Boolean);
+/** Speed spread across cars, km/h, from the traffic readout. */
+async function spread(page: Page): Promise<number> {
+  const text = (await page.locator("dt", { hasText: "Speed spread" }).locator("xpath=following-sibling::dd[1]").textContent()) ?? "";
+  return Number(/([\d.]+) km\/h/.exec(text)![1]);
+}
+
+async function centreOf(locator: Locator): Promise<{ x: number; y: number }> {
+  const box = (await locator.boundingBox())!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** Click a control without the mouse (the mouse may be holding a car). */
+const press = (locator: Locator) => locator.evaluate((node) => (node as HTMLElement).click());
+
+/**
+ * A synthetic touch-typed pointer event on a car, at its centre plus (dx, dy).
+ * This drives the page's own pointer handlers; it does not exercise the
+ * browser's native arbitration between a held press and a page scroll.
+ */
+async function touch(page: Page, index: number, type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel", offset: { dx?: number; dy?: number } = {}) {
+  await page.evaluate(
+    ({ index, type, dx, dy }) => {
+      const g = document.querySelector(`g[data-car="${index}"]`)!;
+      const box = g.getBoundingClientRect();
+      const down = type === "pointerdown" || type === "pointermove";
+      (g.querySelector("rect") ?? g).dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerId: 41,
+          pointerType: "touch",
+          isPrimary: true,
+          button: type === "pointermove" ? -1 : 0,
+          buttons: down ? 1 : 0,
+          clientX: box.x + box.width / 2 + dx,
+          clientY: box.y + box.height / 2 + dy,
+        }),
+      );
+    },
+    { index, type, dx: offset.dx ?? 0, dy: offset.dy ?? 0 },
+  );
+}
+
+/** Records, in the page, whether any car was ever marked held from now on. */
+async function watchHeld(page: Page): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    const flag = window as unknown as { __everHeld: boolean };
+    flag.__everHeld = false;
+    new MutationObserver(() => {
+      if (document.querySelector('g[data-car][data-held="true"]')) flag.__everHeld = true;
+    }).observe(document.querySelector('[data-testid="ring"]')!, { subtree: true, attributes: true, attributeFilter: ["data-held"] });
+  });
+  return () => page.evaluate(() => (window as unknown as { __everHeld: boolean }).__everHeld);
+}
+
 test("the catalogue opens the entry, which paints its ring, transport, history and notes", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
@@ -110,9 +200,8 @@ test("the catalogue opens the entry, which paints its ring, transport, history a
   await expect(button(page, "Play")).toBeVisible();
   await expect(history(page)).toBeVisible();
 
-  for (const title of ["Reading the page", "The driver model", "What this does not show", "Sources"]) {
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-  }
+  // The notes' other headings are theirs to change; the sources must stay.
+  await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
   for (const href of ["https://doi.org/10.1088/1367-2630/10/3/033001", "https://arxiv.org/abs/cond-mat/0002177", "https://arxiv.org/abs/cond-mat/0404736"]) {
     await expect(page.locator(`a[href="${href}"]`)).toHaveCount(1);
   }
@@ -162,17 +251,20 @@ test("selecting a car and tapping its brakes lights its lamp, marks the history 
   await car(page, 7).click();
   await expect(page.locator('g[data-car][aria-pressed="true"]')).toHaveCount(1);
   await expect(car(page, 7)).toHaveAttribute("aria-pressed", "true");
-  await expect(button(page, "Tap brakes · car 8")).toBeEnabled();
+  await expect(button(page, "Hold to brake · car 8")).toBeEnabled();
   await expect(page.locator("#ptj-car")).toHaveText("Car 8");
   await expect(page.getByText("Gap to car 9", { exact: true })).toBeVisible();
 
-  const markers = Number(await history(page).getAttribute("data-markers"));
-  const tapStatus = page.locator('dd[data-active="true"]');
-  await expect(tapStatus).toHaveCount(0);
-  await button(page, "Tap brakes · car 8").click();
-  await expect(history(page)).toHaveAttribute("data-markers", String(markers + 1));
-  await expect(page.locator('section[aria-labelledby="ptj-car"]').getByText("Brake tap", { exact: true })).toBeVisible();
-  await expect(tapStatus).toHaveText("active");
+  await expect(history(page)).toHaveAttribute("data-markers", "0");
+  await expect(page.locator('section[aria-labelledby="ptj-car"]').getByText("Brake", { exact: true })).toBeVisible();
+  await expect(brakeState(page)).toHaveText("off");
+  // A click with no press before it (as assistive tech sends) is one tap.
+  await press(button(page, "Hold to brake · car 8"));
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  expect(await markerLabels(page)).toEqual(["tap · car 8"]);
+  await expect(brakeState(page)).toHaveText("tap");
+  await expect(brakeState(page)).toHaveAttribute("data-active", "true");
+  await expect(heldCars(page)).toHaveCount(0);
 
   // Run slowly so the lit lamp is there to be seen, then freeze on it.
   await button(page, "Quarter speed").click();
@@ -203,8 +295,8 @@ test("selecting a car and tapping its brakes lights its lamp, marks the history 
   await button(page, "Four times speed").click();
   await button(page, "Play").click();
   await expect.poll(() => readTime(page)).toBeGreaterThan(tappedAt + 2);
-  await expect(tapStatus).toHaveCount(0);
-  await expect(page.locator("dd", { hasText: /^off$/ })).toHaveCount(1);
+  await expect(brakeState(page)).toHaveText("off");
+  await expect(brakeState(page)).not.toHaveAttribute("data-active");
 });
 
 test("keyboard: only the selected car is a tab stop and arrows walk along the traffic", async ({ page }) => {
@@ -237,7 +329,7 @@ test("keyboard: only the selected car is a tab stop and arrows walk along the tr
   await expect(car(page, 1)).toHaveAttribute("tabindex", "0");
   await expect(car(page, 0)).toHaveAttribute("tabindex", "-1");
   await expect(page.locator('g[data-car][aria-pressed="true"]')).toHaveCount(1);
-  await expect(button(page, "Tap brakes · car 2")).toBeVisible();
+  await expect(button(page, "Hold to brake · car 2")).toBeVisible();
   expect(Number((await style(1)).opacity)).toBe(1);
   await page.keyboard.press("ArrowUp");
   expect(await focusedCar()).toBe("2");
@@ -272,8 +364,8 @@ test("keyboard: only the selected car is a tab stop and arrows walk along the tr
 
 test("parameters: delay changes live without restarting, road settings restart, presets and start apply", async ({ page }) => {
   await open(page);
-  const jamProne = button(page, "Slow reactions");
-  const steady = button(page, "One brake tap");
+  const jamProne = button(page, /^Slow reactions/);
+  const steady = button(page, /^One brake tap/);
   await expect(jamProne).toHaveAttribute("aria-pressed", "true");
   const delay = slider(page, "Reaction delay");
   const delayOutput = await outputOf(page, "Reaction delay");
@@ -370,14 +462,12 @@ function bunches(at: number[]): number[] {
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
 test("the phenomenon as rendered: every car drives forward while the jam moves backward", async ({ page }, info) => {
-  test.setTimeout(120_000);
+  test.setTimeout(60_000);
   await open(page);
-  await button(page, "Four times speed").click();
-  await button(page, "Play").click();
   // "Slow reactions" grows its one scheduled brake tap into waves within about 15 s; by 60 s they are well formed.
-  await expect.poll(() => readTime(page), { timeout: 90_000, intervals: [250] }).toBeGreaterThanOrEqual(60);
-  await button(page, "Pause").click();
+  await runAheadToEnd(page);
   const t1 = await settled(page);
+  expect(t1).toBe(60);
   const p1 = await positions(page);
   const lit1 = await litCars(page);
 
@@ -459,7 +549,10 @@ test("a collision freezes the run honestly and Reset recovers", async ({ page })
   await slider(page, "Comfortable braking").fill("1");
   await button(page, "Four times speed").click();
   await button(page, "Play").click();
-  await button(page, /^Tap brakes/).click();
+  await brakeButton(page).click();
+  // A press on a car that is still held when the run freezes must not stay held.
+  await touch(page, 3, "pointerdown");
+  await expect(heldCars(page)).toHaveCount(1);
 
   const status = page.getByTestId("status");
   await expect(status).toBeVisible({ timeout: 30_000 });
@@ -474,7 +567,10 @@ test("a collision freezes the run honestly and Reset recovers", async ({ page })
   const frozenAt = await settled(page);
   expect(frozenAt).toBe(Number(match![3]));
   await expect(page.getByRole("button", { name: "Frozen", exact: true })).toBeDisabled();
-  await expect(button(page, /^Tap brakes/)).toBeDisabled();
+  await expect(brakeButton(page)).toBeDisabled();
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(brakeState(page)).toHaveText("off");
+  await touch(page, 3, "pointerup");
   const frozen = await transforms(page);
   await page.waitForTimeout(500);
   expect(await readTime(page)).toBe(frozenAt);
@@ -484,7 +580,7 @@ test("a collision freezes the run honestly and Reset recovers", async ({ page })
   await expect(status).toHaveCount(0);
   await expect(simTime(page)).toHaveText("t = 0.0 s");
   await expect(page.locator('g[data-car] [class*="collided"]')).toHaveCount(0);
-  await expect(button(page, /^Tap brakes/)).toBeEnabled();
+  await expect(brakeButton(page)).toBeEnabled();
   await expect(page.getByRole("button", { name: /^(Play|Pause)$/ })).toBeEnabled();
 });
 
@@ -498,7 +594,7 @@ test("layout: no horizontal overflow, ring and brake button on screen together, 
   await page.setViewportSize(original);
 
   const ring = page.getByTestId("ring");
-  const brake = button(page, /^Tap brakes/);
+  const brake = brakeButton(page);
   if (test.info().project.use.isMobile) {
     await ring.evaluate((node) => node.scrollIntoView({ block: "start" }));
     const [ringBox, brakeBox, viewport] = [await ring.boundingBox(), await brake.boundingBox(), page.viewportSize()!];
@@ -539,21 +635,9 @@ test("layout: no horizontal overflow, ring and brake button on screen together, 
 
 // ---- Run ahead and the watch view ----
 
-import { SAMPLE_SECONDS } from "../src/entries/phantom-traffic-jam/history";
-import { DEFAULT_CONFIG, DEFAULT_DT } from "../src/entries/phantom-traffic-jam/parameters";
-import { createSimulation, stepSimulation } from "../src/entries/phantom-traffic-jam/simulation";
-
-const RUN_AHEAD_SECONDS = 60;
-const runAhead = (page: Page) => page.getByRole("button", { name: /^(Run ahead 60 s|Stop run-ahead)$/ });
 const samplesOf = async (page: Page) => Number(await history(page).getAttribute("data-samples"));
 /** History samples one run-ahead records: the recorder samples every `every` model steps. */
 const SAMPLES_PER_RUN_AHEAD = RUN_AHEAD_SECONDS / (Math.max(1, Math.round(SAMPLE_SECONDS / DEFAULT_DT)) * DEFAULT_DT);
-
-/** Press "Run ahead" and wait for it to hand back. */
-async function runAheadToEnd(page: Page) {
-  await runAhead(page).click();
-  await expect(button(page, "Run ahead 60 s")).toBeVisible({ timeout: 15_000 });
-}
 
 /** The page's default run stepped `steps` times in Node with the same model code, as front-bumper positions. */
 function modelPositions(steps: number): number[] {
@@ -662,7 +746,7 @@ test("run ahead stops itself at a collision and is disabled while the run is fro
   await slider(page, "Following time gap").fill("0.6");
   await slider(page, "Reaction delay").fill("1.2");
   await slider(page, "Comfortable braking").fill("1");
-  await button(page, /^Tap brakes/).click();
+  await brakeButton(page).click();
   await runAhead(page).click();
   await expect(page.getByTestId("status")).toBeVisible({ timeout: 30_000 });
   await expect(button(page, "Run ahead 60 s")).toBeDisabled();
@@ -712,9 +796,9 @@ test("watch view hides the details, keeps the ring, transport, experiments and h
   await expect(ring).toBeVisible();
   await expect(page.getByRole("group", { name: "Playback", exact: true })).toBeVisible();
   for (const name of ["Play", "Reset", "Run ahead 60 s", "Quarter speed", "Real time", "Four times speed", "Sixteen times speed"]) await expect(button(page, name)).toBeVisible();
-  await expect(button(page, /^Tap brakes · car 5$/)).toBeVisible();
-  await expect(page.getByRole("region", { name: /^Experiments/ }).getByRole("button")).not.toHaveCount(0);
-  await expect(page.getByRole("region", { name: /^Experiments/ })).toBeVisible();
+  await expect(button(page, "Hold to brake · car 5")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Experiments", exact: true }).getByRole("button")).toHaveCount(PRESETS.length);
+  await expect(page.getByRole("region", { name: "Experiments", exact: true })).toBeVisible();
   await expect(history(page)).toBeVisible();
   await expect(page.getByTestId("car-line")).toBeVisible();
   await expect(page.getByTestId("car-line")).toContainText(/Car 5\s*\d+ km\/h · gap \d+\.\d m/);
@@ -763,4 +847,284 @@ test("watch view: focus inside a panel that hides moves to the toggle", async ({
   });
   await expect(watch).toHaveAttribute("aria-pressed", "true");
   await expect(watch).toBeFocused();
+});
+
+// ---- Press and hold ----
+
+test("hold on a car: a click only selects; a press held past the threshold brakes it until released or the limit", async ({ page }) => {
+  test.skip(Boolean(test.info().project.use.isMobile), "real mouse input; touch-typed pointers are covered separately");
+  await open(page);
+  // Without the opening tap every marker here is the reader's own.
+  await button(page, "None").click();
+  await expect(history(page)).toHaveAttribute("data-markers", "0");
+  const everHeld = await watchHeld(page);
+  const target = car(page, 5);
+
+  // A quick click selects and does nothing else.
+  await target.scrollIntoViewIfNeeded();
+  let at = await centreOf(target);
+  await page.mouse.click(at.x, at.y);
+  await expect(target).toHaveAttribute("aria-pressed", "true");
+  await page.waitForTimeout(HOLD_THRESHOLD_MS + 150);
+  expect(await everHeld()).toBe(false);
+  expect(await markerCount(page)).toBe(0);
+  await expect(brakeState(page)).toHaveText("off");
+
+  // Moving beyond the slop before the threshold is a swipe, not a hold.
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 20, at.y + 20, { steps: 2 });
+  await page.waitForTimeout(HOLD_THRESHOLD_MS + 150);
+  await page.mouse.up();
+  expect(await everHeld()).toBe(false);
+  expect(await markerCount(page)).toBe(0);
+
+  // Press and hold: held at once on the car, the readout and the brake button, with one marker.
+  await target.scrollIntoViewIfNeeded();
+  at = await centreOf(target);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await expect(target).toHaveAttribute("data-held", "true");
+  await expect(heldCars(page)).toHaveCount(1);
+  await expect(brakeState(page)).toHaveText("held");
+  await expect(button(page, "Hold to brake · car 6")).toHaveAttribute("aria-pressed", "true");
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  expect(await markerLabels(page)).toEqual(["hold · car 6"]);
+  // Its lamps light once simulated time advances (they follow the realised braking).
+  await press(button(page, "Play"));
+  await expect(target).toHaveAttribute("data-braking", "true");
+  await press(button(page, "Pause"));
+  await page.mouse.up();
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(brakeState(page)).not.toHaveText("held");
+  await expect(button(page, "Hold to brake · car 6")).toHaveAttribute("aria-pressed", "false");
+  const releasedAt = await settled(page);
+  await press(button(page, "Four times speed"));
+  await press(button(page, "Play"));
+  await expect.poll(() => readTime(page)).toBeGreaterThan(releasedAt + 1.5);
+  await expect(brakeState(page)).toHaveText("off");
+  await press(button(page, "Pause"));
+  expect(await markerCount(page)).toBe(1);
+
+  // Held past the limit: it lets go by itself while the button is still down, and stays let go.
+  const pausedAt = await settled(page);
+  await target.scrollIntoViewIfNeeded();
+  at = await centreOf(target);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await expect(target).toHaveAttribute("data-held", "true");
+  await press(button(page, "Sixteen times speed"));
+  await press(button(page, "Play"));
+  await expect.poll(() => readTime(page)).toBeGreaterThan(pausedAt + HOLD_LIMIT + 0.5);
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(brakeState(page)).not.toHaveText("held");
+  await expect.poll(() => readTime(page)).toBeGreaterThan(pausedAt + HOLD_LIMIT + 4);
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(brakeState(page)).toHaveText("off");
+  await page.mouse.up();
+  expect(await markerLabels(page)).toEqual(["hold · car 6", "hold · car 6"]);
+});
+
+test("hold release paths: cancel, window blur, hidden tab, Reset and a new experiment all let go", async ({ page }) => {
+  await open(page);
+  const engage = async () => {
+    await touch(page, 2, "pointerdown");
+    await expect(heldCars(page)).toHaveCount(1);
+    await expect(brakeState(page)).toHaveText("held");
+  };
+  const released = async () => {
+    await expect(heldCars(page)).toHaveCount(0);
+    await expect(brakeState(page)).not.toHaveText("held");
+    // The finger lifting afterwards changes nothing.
+    await touch(page, 2, "pointerup");
+    await expect(heldCars(page)).toHaveCount(0);
+  };
+
+  await engage();
+  await touch(page, 2, "pointercancel");
+  await released();
+
+  await engage();
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await released();
+
+  await engage();
+  await page.evaluate(() => {
+    const flag = window as unknown as { __hidden?: boolean };
+    flag.__hidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+    flag.__hidden = false;
+  });
+  await released();
+
+  // Reset (paused): a fresh run at 0 with nothing held, and it stays at 0.
+  await engage();
+  await button(page, "Reset").click();
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  await released();
+  await expect(brakeState(page)).toHaveText("off");
+  await page.waitForTimeout(250);
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+
+  // Switching experiment.
+  await engage();
+  await button(page, /^One brake tap/).click();
+  await expect(button(page, /^One brake tap/)).toHaveAttribute("aria-pressed", "true");
+  await released();
+
+  // Time runs normally afterwards and nothing comes back held.
+  await button(page, "Four times speed").click();
+  await button(page, "Play").click();
+  await expect.poll(() => readTime(page)).toBeGreaterThan(2);
+  await expect(heldCars(page)).toHaveCount(0);
+});
+
+test("touch-typed presses: hold and release, a swipe cancels, and no long-press menu during a press", async ({ page }) => {
+  await open(page);
+  const contextMenuPrevented = () =>
+    page.evaluate(() => {
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      document.querySelector('g[data-car="4"] rect')!.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+  // Without a press, the context menu is left alone.
+  expect(await contextMenuPrevented()).toBe(false);
+
+  await touch(page, 4, "pointerdown");
+  await expect(car(page, 4)).toHaveAttribute("aria-pressed", "true");
+  expect(await contextMenuPrevented()).toBe(true);
+  await expect(car(page, 4)).toHaveAttribute("data-held", "true");
+  expect(await contextMenuPrevented()).toBe(true);
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  await touch(page, 4, "pointerup");
+  await expect(heldCars(page)).toHaveCount(0);
+
+  // A swipe that starts on a car: past the slop before the threshold, no hold.
+  const everHeld = await watchHeld(page);
+  await touch(page, 4, "pointerdown");
+  await touch(page, 4, "pointermove", { dy: 4 });
+  await touch(page, 4, "pointermove", { dy: 24 });
+  await page.waitForTimeout(HOLD_THRESHOLD_MS + 150);
+  expect(await everHeld()).toBe(false);
+  await touch(page, 4, "pointerup");
+  expect(await markerCount(page)).toBe(1);
+});
+
+test("brake button: pointer and Space hold while down, a bare click taps, blur lets go", async ({ page }) => {
+  await open(page);
+  await car(page, 2).click();
+  const brake = button(page, "Hold to brake · car 3");
+  await expect(brake).toHaveAttribute("aria-pressed", "false");
+
+  // Pointer: held while down, released on up, and the click that follows is not an extra tap.
+  await brake.hover();
+  await page.mouse.down();
+  await expect(brake).toHaveAttribute("aria-pressed", "true");
+  await expect(car(page, 2)).toHaveAttribute("data-held", "true");
+  await expect(brakeState(page)).toHaveText("held");
+  await page.mouse.up();
+  await expect(brake).toHaveAttribute("aria-pressed", "false");
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  expect(await markerLabels(page)).toEqual(["hold · car 3"]);
+
+  // Keyboard: Space down holds (repeats ignored), up releases, no click tap.
+  await brake.focus();
+  await page.keyboard.down(" ");
+  await expect(brake).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.down(" ");
+  await page.keyboard.down(" ");
+  await page.keyboard.up(" ");
+  await expect(brake).toHaveAttribute("aria-pressed", "false");
+  await expect(heldCars(page)).toHaveCount(0);
+  await expect(history(page)).toHaveAttribute("data-markers", "2");
+  await expect(brake).toBeFocused();
+
+  // Losing focus mid-hold lets go.
+  await page.keyboard.down(" ");
+  await expect(brake).toHaveAttribute("aria-pressed", "true");
+  await brake.evaluate((node) => (node as HTMLElement).blur());
+  await expect(brake).toHaveAttribute("aria-pressed", "false");
+  await expect(heldCars(page)).toHaveCount(0);
+  await page.keyboard.up(" ");
+  await expect(history(page)).toHaveAttribute("data-markers", "3");
+
+  // A bare click (assistive tech, element.click()) is exactly one tap.
+  await page.waitForTimeout(50);
+  await press(brake);
+  await expect(history(page)).toHaveAttribute("data-markers", "4");
+  expect(await markerLabels(page)).toEqual(["hold · car 3", "hold · car 3", "hold · car 3", "tap · car 3"]);
+  await expect(brakeState(page)).toHaveText("tap");
+  await expect(brake).toHaveAttribute("aria-pressed", "false");
+});
+
+// ---- Experiments ----
+
+const EXPECTED_FACTS = ["delay 0.4 s · tap at 5 s", "delay 0.8 s · tap at 5 s", "delay 0.8 s · ±10% · no tap"];
+const experiments = (page: Page) => page.getByRole("region", { name: "Experiments", exact: true }).getByRole("button");
+
+test("experiments describe themselves; the default is slow reactions following car 1; a changed setting un-presses", async ({ page }) => {
+  await open(page);
+  await expect(experiments(page)).toHaveCount(3);
+  expect(await experiments(page).locator("span:first-child").allTextContents()).toEqual(PRESETS.map((preset) => preset.label));
+  expect(PRESETS.map((preset) => preset.label)).toEqual(["One brake tap", "Slow reactions", "Mixed drivers"]);
+  const facts = await experiments(page).locator("span:last-child").allTextContents();
+  expect(facts).toEqual(EXPECTED_FACTS);
+  // The two tap experiments differ in exactly one stated fact, the delay, as their configs do.
+  const [tapFacts, slowFacts] = facts.map((line) => line.split(" · "));
+  expect(tapFacts.filter((fact, index) => fact !== slowFacts[index])).toEqual(["delay 0.4 s"]);
+  expect({ ...PRESETS[0].config, driver: { ...PRESETS[0].config.driver, reactionDelay: 0 } }).toEqual({ ...PRESETS[1].config, driver: { ...PRESETS[1].config.driver, reactionDelay: 0 } });
+  await expect(experiments(page).nth(1)).toHaveAccessibleName(/^Slow reactions\s*delay 0\.8 s · tap at 5 s$/);
+
+  // Opening the page: slow reactions, car 1 followed, the opening tap on.
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "true", "false"]);
+  await expect(car(page, 0)).toHaveAttribute("aria-pressed", "true");
+  await expect(button(page, "Hold to brake · car 1")).toBeVisible();
+  await expect(button(page, "Car 1 at 5 s")).toHaveAttribute("aria-pressed", "true");
+  await expect(button(page, "None")).toHaveAttribute("aria-pressed", "false");
+
+  // Any change of setting means the run no longer is one of the experiments.
+  await slider(page, "Following time gap").fill("1.7");
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "false", "false"]);
+  await slider(page, "Following time gap").fill("1.6");
+  await expect(experiments(page).nth(1)).toHaveAttribute("aria-pressed", "true");
+});
+
+test("experiments: one brake tap fades; without its opening tap nothing happens at all", async ({ page }) => {
+  await open(page);
+  await experiments(page).nth(0).click();
+  await expect(experiments(page).nth(0)).toHaveAttribute("aria-pressed", "true");
+  await runAheadToEnd(page);
+  await runAheadToEnd(page);
+  await expect(simTime(page)).toHaveText("t = 120.0 s");
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  expect(await markerLabels(page)).toEqual(["scheduled tap · car 1"]);
+  await expect.poll(() => spread(page)).toBeLessThan(2);
+
+  // The opening tap off: no longer the experiment, nobody intervenes and the flow stays even.
+  await experiments(page).nth(0).click();
+  await button(page, "None").click();
+  await expect(button(page, "None")).toHaveAttribute("aria-pressed", "true");
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "false", "false"]);
+  await runAheadToEnd(page);
+  await expect(history(page)).toHaveAttribute("data-markers", "0");
+  await expect.poll(() => spread(page)).toBeLessThan(0.1);
+});
+
+test("experiments: slow reactions jam from the one tap; mixed drivers jam with nobody intervening", async ({ page }) => {
+  await open(page);
+  await runAheadToEnd(page);
+  await expect(history(page)).toHaveAttribute("data-markers", "1");
+  expect(await markerLabels(page)).toEqual(["scheduled tap · car 1"]);
+  await expect.poll(() => spread(page)).toBeGreaterThan(5);
+
+  await experiments(page).nth(2).click();
+  await expect(experiments(page).nth(2)).toHaveAttribute("aria-pressed", "true");
+  await expect(await outputOf(page, "Driver variation")).toHaveText("10%");
+  await expect(button(page, "None")).toHaveAttribute("aria-pressed", "true");
+  for (let i = 0; i < 3; i += 1) await runAheadToEnd(page);
+  await expect(simTime(page)).toHaveText("t = 180.0 s");
+  await expect(history(page)).toHaveAttribute("data-markers", "0");
+  await expect.poll(() => spread(page)).toBeGreaterThan(5);
 });

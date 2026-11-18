@@ -6,7 +6,7 @@
  * frame rate, so the recording is identical at any playback rate.
  */
 import { summarise } from "./simulation";
-import type { Simulation } from "./types";
+import type { Intervention, Simulation } from "./types";
 
 /** Simulated seconds kept, about three laps of the default jam wave. */
 export const HISTORY_WINDOW_SECONDS = 120;
@@ -15,9 +15,17 @@ export const SAMPLE_SECONDS = 0.25;
 /** Edits to one parameter within this much real time are one change marker, ms. */
 export const COALESCE_MS = 1000;
 
-export type TapMarker = Readonly<{ kind: "tap"; time: number; car: number; position: number }>;
+/** One experimenter intervention from the model's log; a held brake is one marker at its start. */
+export type InterventionMarker = Readonly<{ kind: "intervention"; action: Intervention["kind"]; time: number; car: number; position: number }>;
 export type ChangeMarker = Readonly<{ kind: "change"; time: number; key: string; from: number; to: number; label: string }>;
-export type HistoryMarker = TapMarker | ChangeMarker;
+export type HistoryMarker = InterventionMarker | ChangeMarker;
+
+const ACTION_NAMES: Record<Intervention["kind"], string> = { tap: "tap", scheduled: "scheduled tap", hold: "hold" };
+
+/** "tap · car 6", "hold · car 6", "scheduled tap · car 1". */
+export function markerLabel(marker: HistoryMarker): string {
+  return marker.kind === "change" ? marker.label : `${ACTION_NAMES[marker.action]} · car ${marker.car + 1}`;
+}
 
 export type History = {
   readonly carCount: number;
@@ -42,6 +50,8 @@ export type History = {
   markers: HistoryMarker[];
   /** Real time (ms) the newest change marker was last extended; only used for coalescing. */
   lastChangeAt: number;
+  /** How many of `sim.interventions` have been turned into markers. */
+  seenInterventions: number;
 };
 
 export function createHistory(sim: Simulation, options: { windowSeconds?: number; sampleSeconds?: number } = {}): History {
@@ -65,6 +75,7 @@ export function createHistory(sim: Simulation, options: { windowSeconds?: number
     lastStep: -1,
     markers: [],
     lastChangeAt: -Infinity,
+    seenInterventions: 0,
   };
   recordSample(history, sim);
   return history;
@@ -88,6 +99,7 @@ export function oldestTime(history: History): number {
  * multiple of `every` (once per step count). Returns true if it sampled.
  */
 export function recordSample(history: History, sim: Simulation): boolean {
+  syncInterventions(history, sim);
   if (sim.steps % history.every !== 0 || sim.steps === history.lastStep) return false;
   history.lastStep = sim.steps;
   let slot: number;
@@ -114,9 +126,22 @@ export function recordSample(history: History, sim: Simulation): boolean {
   return true;
 }
 
-/** The experimenter tapped `car`'s brakes now. */
-export function noteTap(history: History, sim: Simulation, car: number): void {
-  history.markers.push({ kind: "tap", time: sim.time, car, position: sim.position[car] });
+/**
+ * Marks every intervention the model has logged since the last call: taps,
+ * the scheduled tap and the starts of held brakes alike, one marker each.
+ * Cheap when nothing is new, so it can run after every step and right after
+ * an explicit action. The position is the car's when this runs: call it at
+ * the latest one step after the intervention. Returns true if it added any.
+ */
+export function syncInterventions(history: History, sim: Simulation): boolean {
+  const log = sim.interventions;
+  if (history.seenInterventions >= log.length) return false;
+  for (let index = history.seenInterventions; index < log.length; index += 1) {
+    const { time, car, kind } = log[index];
+    history.markers.push({ kind: "intervention", action: kind, time, car, position: sim.position[car] });
+  }
+  history.seenInterventions = log.length;
+  return true;
 }
 
 /**

@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Label } from "@/components/label";
 
 import { Controls, Presets } from "./controls";
 import { kmh, metres, seconds, signed, toDisplay } from "./format";
-import { createHistory, noteChange, noteTap, recordSample, type History } from "./history";
+import { createHistory, noteChange, recordSample, syncInterventions, type History } from "./history";
 import { createHistoryFeed, HistoryView, Sparkline } from "./history-view";
 import { DEFAULT_CONFIG, DRIVER_SLIDERS, VARIATION_SLIDER } from "./parameters";
 import { createRingPainter, RingView } from "./ring-view";
-import { createSimulation, readCar, setDrivers, stepSimulation, summarise, tapBrake } from "./simulation";
+import { createSimulation, holdBrake, readCar, releaseBrake, setDrivers, stepSimulation, summarise, tapBrake } from "./simulation";
 import { MAX_SPEED, SPEED_TICKS_KMH, speedFraction, speedGradient } from "./speed-scale";
 import styles from "./experiment.module.css";
 import type { CarReadout, DriverParamKey, ExperimentConfig, Simulation, SimulationStatus, SliderSpec, TrafficSummary } from "./types";
@@ -83,6 +83,21 @@ function carLine(car: CarReadout): string {
   return `${Math.round(car.speed * 3.6)} km/h · gap ${metres(car.gap)}`;
 }
 
+/** The experimenter's override on one car, as one value. A frozen run has nothing acting on it. */
+function brakeState(car: CarReadout, running: boolean): "off" | "tap" | "held" {
+  if (!running) return "off";
+  if (car.brakeHeld) return "held";
+  return car.tapActive ? "tap" : "off";
+}
+
+/** The car followed when the page opens: the one the default experiment taps, so the tap happens where the reader is looking. */
+const FIRST_CAR = DEFAULT_CONFIG.scheduledTap?.car ?? 0;
+
+/** A hold in force, by whoever holds it: a pointer on a car (`p<pointerId>`) or the brake button (`button`). */
+type Hold = Readonly<{ sim: Simulation; car: number }>;
+
+const isActivationKey = (key: string) => key === " " || key === "Enter";
+
 function statusMessage(status: SimulationStatus): string {
   if (status.kind === "collision") {
     return `Car ${status.follower + 1} ran into car ${status.leader + 1} at t = ${seconds(status.time)}. The run is frozen at that moment.`;
@@ -101,8 +116,8 @@ export function Experiment() {
   const [config, setConfig] = useState<ExperimentConfig>(DEFAULT_CONFIG);
   const [{ sim, history }, setRun] = useState(() => startRun(DEFAULT_CONFIG));
   const [feed] = useState(createHistoryFeed);
-  const [selected, setSelected] = useState(0);
-  const [snapshot, setSnapshot] = useState(() => snapshotOf(sim, 0));
+  const [selected, setSelected] = useState(FIRST_CAR);
+  const [snapshot, setSnapshot] = useState(() => snapshotOf(sim, FIRST_CAR));
   const [ahead, setAhead] = useState(false);
   const [watch, setWatch] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -114,6 +129,12 @@ export function Experiment() {
   const playbackRef = useRef({ paused, rate, selected });
   /** Set by "Run ahead", cleared by the loop when it is done and by anything that cancels it. */
   const aheadRef = useRef<Ahead | null>(null);
+  /** Every hold the reader has in force, and the cars they hold on the current run (what the painter marks as held). */
+  const holdsRef = useRef(new Map<string, Hold>());
+  const pressedRef = useRef<ReadonlySet<number>>(new Set());
+  /** The brake button is being pressed (pointer or key); its own click is then not a separate tap. */
+  const buttonDownRef = useRef(false);
+  const swallowClickRef = useRef(false);
 
   useEffect(() => {
     playbackRef.current = { paused, rate, selected };
@@ -126,7 +147,7 @@ export function Experiment() {
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const painter = createRingPainter(svg, sim, MAX_SPEED);
+    const painter = createRingPainter(svg, sim, MAX_SPEED, (car) => pressedRef.current.has(car) && sim.status.kind === "running" && readCar(sim, car).brakeHeld);
     let frameId = 0;
     let previous = performance.now();
     let pending = 0;
@@ -136,6 +157,7 @@ export function Experiment() {
     /** Up to `steps` model steps within the frame's budget; false if the budget ran out first. */
     function advance(steps: number, started: number): boolean {
       let sampled = false;
+      let marked = false;
       let within = true;
       // Record inside the step loop so a fast frame never skips a sample point.
       for (let step = 0; step < steps && sim.status.kind === "running"; step += 1) {
@@ -144,9 +166,11 @@ export function Experiment() {
           break;
         }
         stepSimulation(sim);
+        // Every step, so a scheduled tap is marked where it happened (to within one step).
+        if (syncInterventions(history, sim)) marked = true;
         if (recordSample(history, sim)) sampled = true;
       }
-      if (sampled) feed.notify();
+      if (sampled || marked) feed.notify();
       return within;
     }
 
@@ -204,7 +228,63 @@ export function Experiment() {
     if (top < 0 || bottom > innerHeight) window.scrollBy({ top: top - 8, behavior: "instant" });
   }, [watch]);
 
+  /** After an explicit action: mark it on the history and refresh the readouts now, even while paused. */
+  const afterAction = useCallback(() => {
+    syncInterventions(history, sim);
+    feed.notify();
+    setSnapshot(snapshotOf(sim, playbackRef.current.selected));
+  }, [sim, history, feed]);
+
+  const startHold = useCallback(
+    (key: string, car: number): boolean => {
+      if (sim.status.kind !== "running") return false;
+      holdsRef.current.set(key, { sim, car });
+      pressedRef.current = new Set([...holdsRef.current.values()].filter((hold) => hold.sim === sim).map((hold) => hold.car));
+      holdBrake(sim, car);
+      afterAction();
+      return true;
+    },
+    [sim, afterAction],
+  );
+
+  const endHold = useCallback(
+    (key: string) => {
+      const hold = holdsRef.current.get(key);
+      if (!hold) return;
+      holdsRef.current.delete(key);
+      const others = [...holdsRef.current.values()];
+      // Two presses on one car: the brake stays held until the last lets go.
+      if (!others.some((other) => other.sim === hold.sim && other.car === hold.car)) releaseBrake(hold.sim, hold.car);
+      pressedRef.current = new Set(others.filter((other) => other.sim === sim).map((other) => other.car));
+      afterAction();
+    },
+    [sim, afterAction],
+  );
+
+  /** Let go of everything: the window lost focus, the tab was hidden, the run froze or is being replaced. */
+  const endAll = useCallback(() => {
+    buttonDownRef.current = false;
+    for (const key of [...holdsRef.current.keys()]) endHold(key);
+  }, [endHold]);
+
+  useEffect(() => {
+    const hidden = () => {
+      if (document.visibilityState === "hidden") endAll();
+    };
+    window.addEventListener("blur", endAll);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("blur", endAll);
+      document.removeEventListener("visibilitychange", hidden);
+      endAll();
+    };
+  }, [endAll]);
+
+  const onHoldStart = useCallback((car: number, pointerId: number) => startHold(`p${pointerId}`, car), [startHold]);
+  const onHoldEnd = useCallback((pointerId: number) => endHold(`p${pointerId}`), [endHold]);
+
   const restart = useCallback((next: ExperimentConfig, car = 0) => {
+    endAll();
     aheadRef.current = null;
     setAhead(false);
     const fresh = startRun(next);
@@ -213,7 +293,7 @@ export function Experiment() {
     setRun(fresh);
     setSelected(keep);
     setSnapshot(snapshotOf(fresh.sim, keep));
-  }, []);
+  }, [endAll]);
 
   const select = useCallback(
     (car: number) => {
@@ -240,11 +320,54 @@ export function Experiment() {
     setSnapshot(snapshotOf(sim, selected));
   }
 
-  function brake() {
+  /*
+   * The brake button is press-and-hold too: pointer or Space/Enter down holds
+   * the selected car's brake, up lets go (a quick press is one tap's worth).
+   * A click with no press before it (assistive tech, element.click()) is one tap.
+   */
+  function brakeDown() {
+    if (buttonDownRef.current) return;
+    buttonDownRef.current = true;
+    swallowClickRef.current = true;
+    startHold("button", selected);
+  }
+
+  function brakeUp() {
+    if (!buttonDownRef.current) return;
+    buttonDownRef.current = false;
+    endHold("button");
+    // The click that follows this release (same task) belongs to the press.
+    setTimeout(() => {
+      swallowClickRef.current = false;
+    }, 0);
+  }
+
+  function brakePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Not an active pointer; pointerup on the button still ends it.
+    }
+    brakeDown();
+  }
+
+  function brakeKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!isActivationKey(event.key)) return;
+    event.preventDefault();
+    if (!event.repeat) brakeDown();
+  }
+
+  function brakeKeyUp(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!isActivationKey(event.key)) return;
+    event.preventDefault();
+    brakeUp();
+  }
+
+  function brakeClick() {
+    if (swallowClickRef.current) return;
     tapBrake(sim, selected);
-    noteTap(history, sim, selected);
-    feed.notify();
-    setSnapshot(snapshotOf(sim, selected));
+    afterAction();
   }
 
   function runAhead() {
@@ -276,10 +399,15 @@ export function Experiment() {
   }
 
   const running = snapshot.status.kind === "running";
+  // A frozen run takes no more input: nothing stays held on it.
+  useEffect(() => {
+    if (!running) endAll();
+  }, [running, endAll]);
   const moving = ahead || !paused;
   const { status } = snapshot;
   const collided = useMemo(() => (status.kind === "collision" ? [status.follower, status.leader] : []), [status]);
   const { summary, car } = snapshot;
+  const brakeShown = brakeState(car, running);
 
   return (
     <div className={styles.experiment} data-watch={watch || undefined}>
@@ -288,7 +416,7 @@ export function Experiment() {
           <output className={styles.time} data-testid="sim-time" aria-label="Simulated time">
             t = {seconds(snapshot.time)}
           </output>
-          <RingView sim={sim} selected={selected} collided={collided} maxSpeed={MAX_SPEED} onSelect={select} svgRef={svgRef} />
+          <RingView sim={sim} selected={selected} collided={collided} maxSpeed={MAX_SPEED} onSelect={select} onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} svgRef={svgRef} />
           <div className={styles.legend}>
             <span className={styles.legendTitle}>Speed · km/h</span>
             <span className={styles.legendBar} style={{ background: speedGradient() }} />
@@ -333,8 +461,24 @@ export function Experiment() {
               </button>
             ))}
           </div>
-          <button type="button" className={`${styles.button} ${styles.brake}`} onClick={brake} disabled={!running}>
-            Tap brakes · car {selected + 1}
+          <button
+            type="button"
+            className={`${styles.button} ${styles.brake}`}
+            disabled={!running}
+            aria-pressed={brakeShown === "held" && car.car === selected}
+            onPointerDown={brakePointerDown}
+            onPointerUp={brakeUp}
+            onPointerCancel={brakeUp}
+            onLostPointerCapture={brakeUp}
+            onKeyDown={brakeKeyDown}
+            onKeyUp={brakeKeyUp}
+            onBlur={brakeUp}
+            onContextMenu={(event) => {
+              if (buttonDownRef.current) event.preventDefault();
+            }}
+            onClick={brakeClick}
+          >
+            Hold to brake · car {selected + 1}
           </button>
           <button type="button" className={styles.button} onClick={() => restart(config, selected)}>
             Reset
@@ -396,8 +540,10 @@ export function Experiment() {
                 <dd>{signed(car.acceleration, 2)} m/s²</dd>
               </div>
               <div>
-                <dt>Brake tap</dt>
-                <dd data-active={car.tapActive || undefined}>{car.tapActive ? "active" : "off"}</dd>
+                <dt>Brake</dt>
+                <dd data-testid="brake-state" data-active={brakeShown !== "off" || undefined}>
+                  {brakeShown}
+                </dd>
               </div>
             </dl>
           </section>
