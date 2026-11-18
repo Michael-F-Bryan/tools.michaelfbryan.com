@@ -27,6 +27,7 @@ import type {
   DriverParamKey,
   DriverParams,
   ExperimentConfig,
+  Intervention,
   Observation,
   Simulation,
   TrafficSummary,
@@ -47,6 +48,14 @@ export const PHYSICAL_BRAKING_LIMIT = 8;
  */
 export const TAP_DECELERATION = 2.5;
 export const TAP_DURATION = 1;
+
+/**
+ * A held brake releases itself after this much simulated time (s), even if
+ * the experimenter never lets go, so one press is a bounded disturbance and
+ * can never become a permanent roadblock. Holding again afterwards is a new,
+ * explicit `holdBrake` call.
+ */
+export const HOLD_LIMIT = 4;
 
 /** Brake light turns on at or below this realised acceleration, m/s². */
 export const BRAKE_LIGHT_ON = -0.8;
@@ -83,6 +92,13 @@ export type InternalSimulation = Simulation & {
   offsets: Float64Array;
   /** Seconds of brake tap left per car. */
   tapRemaining: Float64Array;
+  /** Steps of held brake left per car before the limit ends it; 0 = not held. Counted in whole steps. */
+  holdStepsLeft: Int32Array;
+  /** Step number at which the scheduled tap lands, or -1 for none (or an unusable schedule). */
+  scheduledStep: number;
+  scheduledCar: number;
+  /** Mutable backing of `Simulation.interventions`. */
+  log: Intervention[];
   /** Ring buffer of perceived state, slot (step mod capacity) * carCount + car. */
   historySpeed: Float64Array;
   historyGap: Float64Array;
@@ -165,6 +181,8 @@ export function createSimulation(config: ExperimentConfig, options: { dt?: numbe
   const startSpeed = equilibriumSpeed(config.driver, spacing - vehicleLength, minimumGap);
   const historyCapacity = Math.ceil(HISTORY_SECONDS / dt) + 2;
 
+  const scheduledStep = scheduleStep(config, dt);
+
   const sim: InternalSimulation = {
     road: ROAD,
     carCount: n,
@@ -183,15 +201,35 @@ export function createSimulation(config: ExperimentConfig, options: { dt?: numbe
     variation: config.variation,
     offsets,
     tapRemaining: new Float64Array(n),
+    holdStepsLeft: new Int32Array(n),
+    scheduledStep,
+    scheduledCar: scheduledStep < 0 ? -1 : (config.scheduledTap?.car ?? -1),
+    log: [],
+    interventions: [],
     historySpeed: new Float64Array(historyCapacity * n),
     historyGap: new Float64Array(historyCapacity * n),
     historyClosing: new Float64Array(historyCapacity * n),
     historyCapacity,
     request: new Float64Array(n),
   };
+  (sim as { interventions: readonly Intervention[] }).interventions = sim.log;
   setDrivers(sim, config.driver, config.variation);
   recordHistory(sim);
   return sim;
+}
+
+/**
+ * The step count at which the scheduled tap lands: round(time / dt), so it is
+ * the same simulated instant at any dt. Time 0 lands before the first step.
+ * A car index outside 0..carCount-1 (or a negative or non-finite time) is
+ * ignored rather than thrown on: the experiment simply has no scheduled tap.
+ */
+function scheduleStep(config: ExperimentConfig, dt: number): number {
+  const tap = config.scheduledTap;
+  if (!tap) return -1;
+  if (!Number.isInteger(tap.car) || tap.car < 0 || tap.car >= config.carCount) return -1;
+  if (!Number.isFinite(tap.time) || tap.time < 0) return -1;
+  return Math.round(tap.time / dt);
 }
 
 /** Live change of the population: same offsets, new centre and spread. No reset. */
@@ -204,8 +242,45 @@ export function setDrivers(sim: Simulation, driver: DriverParams, variation: num
   );
 }
 
+function isValidCar(sim: Simulation, car: number): boolean {
+  return Number.isInteger(car) && car >= 0 && car < sim.carCount;
+}
+
+function log(sim: Simulation, car: number, kind: Intervention["kind"]): void {
+  internal(sim).log.push({ time: sim.time, car, kind });
+}
+
+/**
+ * One experimenter tap on `car`. Does nothing, and logs nothing, on a frozen
+ * run, for an invalid car, or while that car's brake is held (the hold already
+ * overrides the driver; after release the car behaves as if never tapped).
+ */
 export function tapBrake(sim: Simulation, car: number): void {
-  internal(sim).tapRemaining[car] = TAP_DURATION;
+  if (sim.status.kind !== "running" || !isValidCar(sim, car)) return;
+  const s = internal(sim);
+  if (s.holdStepsLeft[car] > 0) return;
+  s.tapRemaining[car] = TAP_DURATION;
+  log(s, car, "tap");
+}
+
+/**
+ * The experimenter starts holding `car`'s brake: at least one tap's worth,
+ * then for as long as it stays held, up to HOLD_LIMIT. No-op (nothing logged,
+ * limit not extended) when already held, on a frozen run, or for an invalid car.
+ */
+export function holdBrake(sim: Simulation, car: number): void {
+  if (sim.status.kind !== "running" || !isValidCar(sim, car)) return;
+  const s = internal(sim);
+  if (s.holdStepsLeft[car] > 0) return;
+  s.holdStepsLeft[car] = Math.max(1, Math.round(HOLD_LIMIT / s.dt));
+  s.tapRemaining[car] = TAP_DURATION;
+  log(s, car, "hold");
+}
+
+/** The experimenter lets go. Idempotent; the driver resumes once any tap minimum has run out. */
+export function releaseBrake(sim: Simulation, car: number): void {
+  if (sim.status.kind !== "running" || !isValidCar(sim, car)) return;
+  internal(sim).holdStepsLeft[car] = 0;
 }
 
 function gapOf(sim: Simulation, car: number): number {
@@ -275,7 +350,11 @@ function applyTap(sim: Simulation, car: number, driverRequest: number): number {
 }
 
 function tapIsActive(sim: Simulation, car: number): boolean {
-  return internal(sim).tapRemaining[car] > sim.dt / 2;
+  return internal(sim).tapRemaining[car] > sim.dt / 2 || isHeld(sim, car);
+}
+
+function isHeld(sim: Simulation, car: number): boolean {
+  return internal(sim).holdStepsLeft[car] > 0;
 }
 
 // --- Vehicle ------------------------------------------------------------
@@ -322,6 +401,12 @@ export function stepSimulation(sim: Simulation): void {
   const s = internal(sim);
   const n = s.carCount;
 
+  // 0. The scheduled tap lands as the step that starts at its time begins.
+  if (s.steps === s.scheduledStep && s.holdStepsLeft[s.scheduledCar] === 0) {
+    s.tapRemaining[s.scheduledCar] = TAP_DURATION;
+    log(s, s.scheduledCar, "scheduled");
+  }
+
   // 1. Everyone decides from the same pre-step state.
   for (let car = 0; car < n; car++) {
     const driverRequest = desiredAcceleration(perceive(s, car), s.drivers[car], s.road);
@@ -336,6 +421,7 @@ export function stepSimulation(sim: Simulation): void {
     const heldStationary = wasStopped && s.speed[car] === 0 && s.request[car] <= 0;
     updateBrakeLight(s, car, realised, heldStationary);
     if (s.tapRemaining[car] > 0) s.tapRemaining[car] = Math.max(0, s.tapRemaining[car] - s.dt);
+    if (s.holdStepsLeft[car] > 0) s.holdStepsLeft[car] -= 1;
   }
 
   s.steps += 1;
@@ -375,6 +461,7 @@ export function readCar(sim: Simulation, car: number): CarReadout {
     acceleration: sim.acceleration[car],
     brakeLight: sim.brakeLight[car] === 1,
     tapActive: tapIsActive(sim, car),
+    brakeHeld: isHeld(sim, car),
   };
 }
 
@@ -428,10 +515,14 @@ export function permuteStorage(sim: Simulation, order: readonly number[]): Simul
     drivers: order.map((car) => s.drivers[car]),
     offsets,
     tapRemaining: perCar(s.tapRemaining),
+    holdStepsLeft: Int32Array.from(order, (car) => s.holdStepsLeft[car]),
+    scheduledCar: s.scheduledCar < 0 ? -1 : (slotOf.get(s.scheduledCar) as number),
+    log: s.log.map((entry) => ({ ...entry, car: slotOf.get(entry.car) as number })),
     historySpeed: perCarHistory(s.historySpeed),
     historyGap: perCarHistory(s.historyGap),
     historyClosing: perCarHistory(s.historyClosing),
     request: new Float64Array(n),
   };
+  (copy as { interventions: readonly Intervention[] }).interventions = copy.log;
   return copy;
 }

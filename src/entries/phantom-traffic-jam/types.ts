@@ -69,6 +69,13 @@ export type ExperimentConfig = Readonly<{
   /** "even": equal gaps. "jumbled": equal gaps with small seeded offsets. */
   start: StartArrangement;
   seed: number;
+  /**
+   * An experimenter's brake tap that is part of the experiment itself: the
+   * model applies exactly one `tapBrake` to `car` on the step at which
+   * simulated time reaches `time`. It is a stated intervention, not an
+   * outcome: what the traffic does with it is up to the drivers.
+   */
+  scheduledTap?: Readonly<{ time: number; car: number }>;
 }>;
 
 export type SimulationStatus =
@@ -108,7 +115,21 @@ export type Simulation = {
   readonly brakeLight: Uint8Array;
   /** Each driver's current parameters (population centre scaled by their fixed offsets). */
   readonly drivers: readonly DriverParams[];
+  /**
+   * Every experimenter intervention so far, oldest first, appended by the
+   * model when it takes effect (a tap, the scheduled tap, or the start of a
+   * held brake). Read-only for the page, which uses it to mark the history.
+   */
+  readonly interventions: readonly Intervention[];
 };
+
+export type Intervention = Readonly<{
+  /** Simulated time at which it began, s. */
+  time: number;
+  car: number;
+  /** "tap": fixed short tap. "scheduled": the config's scheduled tap. "hold": a brake held by the experimenter. */
+  kind: "tap" | "scheduled" | "hold";
+}>;
 
 /** A snapshot of one car for the details panel. */
 export type CarReadout = Readonly<{
@@ -122,8 +143,10 @@ export type CarReadout = Readonly<{
   /** Realised acceleration over the most recent step, m/s². */
   acceleration: number;
   brakeLight: boolean;
-  /** True while an experimenter's brake tap is overriding this driver. */
+  /** True while an experimenter's brake (tap or hold) is overriding this driver. */
   tapActive: boolean;
+  /** True while the experimenter is holding this car's brake and the hold limit has not been reached. */
+  brakeHeld: boolean;
 }>;
 
 /** Cross-car statistics at one instant. */
@@ -148,6 +171,7 @@ export type SliderSpec = Readonly<{
   step: number;
 }>;
 
+/** A curated, reproducible experiment: a whole configuration applied in one tap. */
 export type Preset = Readonly<{
   id: string;
   label: string;
@@ -165,7 +189,12 @@ export type Preset = Readonly<{
  *   createSimulation(config: ExperimentConfig, options?: { dt?: number }): Simulation
  *   stepSimulation(sim: Simulation): void          // one fixed step; no-op unless status is "running"
  *   setDrivers(sim: Simulation, driver: DriverParams, variation: number): void   // live change, no reset
- *   tapBrake(sim: Simulation, car: number): void   // experimenter's brake tap on one car
+ *   tapBrake(sim: Simulation, car: number): void   // experimenter's brake tap on one car (fixed short duration)
+ *   holdBrake(sim: Simulation, car: number): void  // experimenter starts holding this car's brake: at least one
+ *                                                  // tap's worth, then for as long as held, up to HOLD_LIMIT seconds
+ *   releaseBrake(sim: Simulation, car: number): void // experimenter lets go; the driver has control again once any
+ *                                                  // remaining tap minimum has run out. Safe to call when not held.
+ *   HOLD_LIMIT: number                             // s of simulated time after which a held brake releases itself
  *   readCar(sim: Simulation, car: number): CarReadout
  *   summarise(sim: Simulation): TrafficSummary
  *
@@ -175,6 +204,11 @@ export type Preset = Readonly<{
  *   DRIVER_SLIDERS: Record<DriverParamKey, SliderSpec>
  *   CAR_COUNT_SLIDER: SliderSpec
  *   VARIATION_SLIDER: SliderSpec          // display unit "%"; displayPerSI 100
- *   PRESETS: readonly Preset[]            // first is the page default
- *   DEFAULT_CONFIG: ExperimentConfig      // === PRESETS[0].config
+ *   PRESETS: readonly Preset[]            // the curated experiments, in display order:
+ *                                         //   id "tap"   "One brake tap"   (quick drivers; the tap fades)
+ *                                         //   id "slow"  "Slow reactions"  (same, but a longer reaction delay; the tap grows)
+ *                                         //   id "mixed" "Mixed drivers"   (drivers differ; variation > 0)
+ *   DEFAULT_PRESET_ID: string             // "slow": the page opens on the experiment that shows the phenomenon
+ *   DEFAULT_CONFIG: ExperimentConfig      // === the config of the preset with DEFAULT_PRESET_ID
+ *   SCHEDULED_TAP: { time: number; car: number }   // the one scheduled tap the experiments share
  */

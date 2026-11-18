@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 
 import { Label } from "@/components/label";
 
-import { Controls } from "./controls";
+import { Controls, Presets } from "./controls";
 import { kmh, metres, seconds, signed, toDisplay } from "./format";
 import { createHistory, noteChange, noteTap, recordSample, type History } from "./history";
 import { createHistoryFeed, HistoryView, Sparkline } from "./history-view";
@@ -27,10 +27,21 @@ const PLAYBACK_RATES: readonly { rate: number; label: string; name: string }[] =
   { rate: 0.25, label: "¼×", name: "Quarter speed" },
   { rate: 1, label: "1×", name: "Real time" },
   { rate: 4, label: "4×", name: "Four times speed" },
+  { rate: 16, label: "16×", name: "Sixteen times speed" },
 ];
 
 /** Real seconds a single frame may account for, so a background tab can't spiral into catch-up. */
 const MAX_FRAME_SECONDS = 0.1;
+/**
+ * Real milliseconds of stepping one frame may spend. Past it the frame paints
+ * and any backlog is dropped: a device that can't keep up runs the model
+ * slower than asked, never with skipped or longer steps.
+ */
+const STEP_BUDGET_MS = 7;
+/** Simulated seconds "Run ahead" adds, in whole steps. */
+const RUN_AHEAD_SECONDS = 60;
+/** Simulated seconds per real second while running ahead: 60 s reads as a one-second fast-forward, not a jump cut. */
+const RUN_AHEAD_RATE = 60;
 /** How often the numeric readouts refresh, s of real time. */
 const READOUT_SECONDS = 0.125;
 
@@ -58,10 +69,18 @@ function startRun(config: ExperimentConfig): Run {
   return { sim, history: createHistory(sim) };
 }
 
+/** A run-ahead in progress: the run it belongs to and the step count it stops at. */
+type Ahead = Readonly<{ sim: Simulation; target: number }>;
+
 type Snapshot = Readonly<{ time: number; summary: TrafficSummary; car: CarReadout; status: SimulationStatus }>;
 
 function snapshotOf(sim: Simulation, car: number): Snapshot {
   return { time: sim.time, summary: summarise(sim), car: readCar(sim, car), status: sim.status };
+}
+
+/** "22 km/h · gap 11.8 m": left-aligned with tabular digits, so only the tail moves as the numbers change. */
+function carLine(car: CarReadout): string {
+  return `${Math.round(car.speed * 3.6)} km/h · gap ${metres(car.gap)}`;
 }
 
 function statusMessage(status: SimulationStatus): string {
@@ -84,9 +103,17 @@ export function Experiment() {
   const [feed] = useState(createHistoryFeed);
   const [selected, setSelected] = useState(0);
   const [snapshot, setSnapshot] = useState(() => snapshotOf(sim, 0));
+  const [ahead, setAhead] = useState(false);
+  const [watch, setWatch] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  const ringRef = useRef<HTMLDivElement>(null);
+  const transportRef = useRef<HTMLDivElement>(null);
+  const sideRef = useRef<HTMLDivElement>(null);
+  const watchRef = useRef<HTMLButtonElement>(null);
   /** What the playback loop reads each frame without restarting. */
   const playbackRef = useRef({ paused, rate, selected });
+  /** Set by "Run ahead", cleared by the loop when it is done and by anything that cancels it. */
+  const aheadRef = useRef<Ahead | null>(null);
 
   useEffect(() => {
     playbackRef.current = { paused, rate, selected };
@@ -94,7 +121,8 @@ export function Experiment() {
 
   // The fixed-step loop: real time × playback rate is spent in whole `dt` steps,
   // so a run is identical whatever the frame rate or rate. Pausing stops
-  // stepping, not drawing.
+  // stepping, not drawing. Running ahead is the same loop at a high rate up to
+  // a fixed step count, so it is exactly the run ordinary play would give.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -105,28 +133,53 @@ export function Experiment() {
     let sinceReadout = 0;
     let shownSteps = sim.steps;
 
+    /** Up to `steps` model steps within the frame's budget; false if the budget ran out first. */
+    function advance(steps: number, started: number): boolean {
+      let sampled = false;
+      let within = true;
+      // Record inside the step loop so a fast frame never skips a sample point.
+      for (let step = 0; step < steps && sim.status.kind === "running"; step += 1) {
+        if (performance.now() - started > STEP_BUDGET_MS) {
+          within = false;
+          break;
+        }
+        stepSimulation(sim);
+        if (recordSample(history, sim)) sampled = true;
+      }
+      if (sampled) feed.notify();
+      return within;
+    }
+
     function frame(now: number) {
       frameId = requestAnimationFrame(frame);
       const real = Math.min(MAX_FRAME_SECONDS, Math.max(0, (now - previous) / 1000));
       previous = now;
       const playback = playbackRef.current;
-      if (!playback.paused && sim.status.kind === "running") {
+      const fastForward = aheadRef.current?.sim === sim ? aheadRef.current : null;
+      let flush = false;
+      if (fastForward && sim.status.kind === "running") {
+        pending += real * RUN_AHEAD_RATE;
+        const steps = Math.min(fastForward.target - sim.steps, Math.max(1, Math.floor(pending / sim.dt + 1e-9)));
+        pending = Math.max(0, pending - steps * sim.dt);
+        if (!advance(steps, performance.now())) pending = 0;
+      } else if (!playback.paused && sim.status.kind === "running") {
         pending += real * playback.rate;
         const steps = Math.floor(pending / sim.dt + 1e-9);
         pending -= steps * sim.dt;
-        let sampled = false;
-        // Record inside the step loop so a fast frame never skips a sample point.
-        for (let step = 0; step < steps && sim.status.kind === "running"; step += 1) {
-          stepSimulation(sim);
-          if (recordSample(history, sim)) sampled = true;
-        }
-        if (sampled) feed.notify();
+        if (!advance(steps, performance.now())) pending = 0;
       } else {
         pending = 0;
       }
+      if (fastForward && (sim.steps >= fastForward.target || sim.status.kind !== "running")) {
+        // Done (or frozen): hand back to whatever playback the reader had chosen.
+        aheadRef.current = null;
+        pending = 0;
+        flush = true;
+        setAhead(false);
+      }
       painter.paint();
       sinceReadout += real;
-      if (sim.steps !== shownSteps && (sinceReadout >= READOUT_SECONDS || sim.status.kind !== "running")) {
+      if (sim.steps !== shownSteps && (sinceReadout >= READOUT_SECONDS || flush || sim.status.kind !== "running")) {
         sinceReadout = 0;
         shownSteps = sim.steps;
         setSnapshot(snapshotOf(sim, playback.selected));
@@ -135,10 +188,25 @@ export function Experiment() {
 
     painter.paint();
     frameId = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(frameId);
+    return () => {
+      cancelAnimationFrame(frameId);
+      if (aheadRef.current?.sim === sim) aheadRef.current = null;
+    };
   }, [sim, history, feed]);
 
+  // Entering the watch view, bring the (now larger) ring and its transport into view together.
+  useEffect(() => {
+    const ring = ringRef.current;
+    const transport = transportRef.current;
+    if (!watch || !ring || !transport) return;
+    const top = ring.getBoundingClientRect().top;
+    const bottom = transport.getBoundingClientRect().bottom;
+    if (top < 0 || bottom > innerHeight) window.scrollBy({ top: top - 8, behavior: "instant" });
+  }, [watch]);
+
   const restart = useCallback((next: ExperimentConfig, car = 0) => {
+    aheadRef.current = null;
+    setAhead(false);
     const fresh = startRun(next);
     const keep = car < fresh.sim.carCount ? car : 0;
     setConfig(next);
@@ -179,15 +247,44 @@ export function Experiment() {
     setSnapshot(snapshotOf(sim, selected));
   }
 
+  function runAhead() {
+    if (aheadRef.current) {
+      // Stop where it is; playback carries on as it was before.
+      aheadRef.current = null;
+      setAhead(false);
+      return;
+    }
+    if (sim.status.kind !== "running") return;
+    aheadRef.current = { sim, target: sim.steps + Math.round(RUN_AHEAD_SECONDS / sim.dt) };
+    setAhead(true);
+  }
+
+  function playPause() {
+    if (aheadRef.current) {
+      // Pause during a run-ahead stops it there and pauses.
+      aheadRef.current = null;
+      setAhead(false);
+      setUserPaused(true);
+      return;
+    }
+    setUserPaused(!paused);
+  }
+
+  function toggleWatch() {
+    if (!watch && sideRef.current?.contains(document.activeElement)) watchRef.current?.focus();
+    setWatch(!watch);
+  }
+
   const running = snapshot.status.kind === "running";
+  const moving = ahead || !paused;
   const { status } = snapshot;
   const collided = useMemo(() => (status.kind === "collision" ? [status.follower, status.leader] : []), [status]);
   const { summary, car } = snapshot;
 
   return (
-    <div className={styles.experiment}>
+    <div className={styles.experiment} data-watch={watch || undefined}>
       <div className={styles.stage}>
-        <div className={styles.ring}>
+        <div className={styles.ring} ref={ringRef}>
           <output className={styles.time} data-testid="sim-time" aria-label="Simulated time">
             t = {seconds(snapshot.time)}
           </output>
@@ -202,6 +299,12 @@ export function Experiment() {
                 </span>
               ))}
             </span>
+            {/* The selected car in one glance, so the watch view needs no details panel. */}
+            <span className={styles.carLine} data-testid="car-line">
+              <span className={styles.carName}>Car {car.car + 1}</span>
+              {" "}
+              <span>{carLine(car)}</span>
+            </span>
           </div>
         </div>
 
@@ -212,9 +315,9 @@ export function Experiment() {
           </div>
         ) : null}
 
-        <div className={styles.transport} role="group" aria-label="Playback">
-          <button type="button" className={`${styles.button} ${styles.play}`} onClick={() => setUserPaused(!paused)} disabled={!running}>
-            {!running ? "Frozen" : paused ? "Play" : "Pause"}
+        <div className={styles.transport} role="group" aria-label="Playback" ref={transportRef}>
+          <button type="button" className={`${styles.button} ${styles.play}`} onClick={playPause} disabled={!running}>
+            {!running ? "Frozen" : moving ? "Pause" : "Play"}
           </button>
           <div className={styles.segmented} role="group" aria-label="Playback speed">
             {PLAYBACK_RATES.map((option) => (
@@ -236,12 +339,23 @@ export function Experiment() {
           <button type="button" className={styles.button} onClick={() => restart(config, selected)}>
             Reset
           </button>
+          {/* Both labels share one cell so the button keeps its width when it toggles; only the shown one is its name. */}
+          <button type="button" className={`${styles.button} ${styles.ahead}`} onClick={runAhead} disabled={!running} data-active={ahead || undefined}>
+            <span hidden={ahead}>Run ahead {RUN_AHEAD_SECONDS} s</span>
+            <span hidden={!ahead}>Stop run-ahead</span>
+          </button>
+          <button type="button" ref={watchRef} className={`${styles.button} ${styles.watch}`} aria-pressed={watch} onClick={toggleWatch}>
+            Watch view
+          </button>
         </div>
-        {/* The space-time history: the ring unrolled at the 0 m cut, under the transport. */}
-        <HistoryView history={history} feed={feed} selected={selected} maxSpeed={MAX_SPEED} />
+
+        <Presets config={config} onPreset={(next) => restart(next, selected)} />
       </div>
 
-      <div className={styles.side}>
+      {/* The space-time history: the ring unrolled at the 0 m cut. */}
+      <HistoryView history={history} feed={feed} selected={selected} maxSpeed={MAX_SPEED} />
+
+      <div className={styles.side} ref={sideRef} hidden={watch}>
         <div className={styles.readouts}>
           <section aria-labelledby="ptj-traffic">
             <Label id="ptj-traffic" tone="muted">Traffic</Label>
@@ -291,7 +405,6 @@ export function Experiment() {
 
         <Controls
           config={config}
-          onPreset={(next) => restart(next, selected)}
           onRestartWith={(change) => restart({ ...config, ...change }, selected)}
           onDriver={changeDriver}
           onVariation={changeVariation}

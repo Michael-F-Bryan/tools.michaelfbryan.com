@@ -5,13 +5,16 @@ import {
   BRAKE_LIGHT_ON,
   PHYSICAL_BRAKING_LIMIT,
   TAP_DECELERATION,
+  HOLD_LIMIT,
   JUMBLE_FRACTION,
   TAP_DURATION,
   createSimulation,
   equilibriumSpeed,
+  holdBrake,
   perceive,
   permuteStorage,
   readCar,
+  releaseBrake,
   setDrivers,
   stepSimulation,
   summarise,
@@ -21,19 +24,35 @@ import {
   CAR_COUNT_SLIDER,
   DEFAULT_CONFIG,
   DEFAULT_DT,
+  DEFAULT_PRESET_ID,
   DRIVER_SLIDERS,
   PRESETS,
+  SCHEDULED_TAP,
   ROAD,
   VARIATION_SLIDER,
 } from "../src/entries/phantom-traffic-jam/parameters";
 import type { DriverParams, ExperimentConfig, Simulation, SliderSpec } from "../src/entries/phantom-traffic-jam/types";
 
-const JAM = PRESETS.find((p) => p.id === "jam")!.config;
-/** The jam preset from a perfectly even start: the matched partner of STEADY for the brake-tap trials. */
-const JAM_EVEN = { ...JAM, start: "even" as const };
-const STEADY_PRESET = PRESETS.find((p) => p.id === "steady")!.config;
-/** The steady preset from a perfectly even start, for tests that need an exact equilibrium. */
-const STEADY = { ...STEADY_PRESET, start: "even" as const };
+const preset = (id: string): ExperimentConfig => PRESETS.find((p) => p.id === id)!.config;
+/** The same experiment without its scheduled tap, so the tests decide what (if anything) the experimenter does. */
+const withoutTap = (config: ExperimentConfig): ExperimentConfig => ({
+  carCount: config.carCount,
+  driver: config.driver,
+  variation: config.variation,
+  start: config.start,
+  seed: config.seed,
+});
+const TAP_SHIPPED = preset("tap");
+const SLOW_SHIPPED = preset("slow");
+const MIXED_SHIPPED = preset("mixed");
+/** The "slow" experiment (reaction delay 0.8 s) started jumbled, no scheduled tap: the old jam-prone preset. */
+const JAM: ExperimentConfig = { ...withoutTap(SLOW_SHIPPED), start: "jumbled" };
+/** ...from a perfectly even start: the matched partner of STEADY for the brake-tap trials. */
+const JAM_EVEN: ExperimentConfig = { ...JAM, start: "even" };
+/** The "tap" experiment (reaction delay 0.4 s) started jumbled, no scheduled tap: the old steady preset. */
+const STEADY_PRESET: ExperimentConfig = { ...withoutTap(TAP_SHIPPED), start: "jumbled" };
+/** ...from a perfectly even start, for tests that need an exact equilibrium. */
+const STEADY: ExperimentConfig = { ...STEADY_PRESET, start: "even" };
 const PLAIN: DriverParams = {
   desiredSpeed: 20,
   timeGap: 1.5,
@@ -200,23 +219,42 @@ test.describe("parameters", () => {
     return Math.abs(steps - Math.round(steps)) < 1e-9 && display >= spec.min - 1e-9 && display <= spec.max + 1e-9;
   };
 
-  test("presets sit inside the slider domain on the step grid, first is the default", () => {
-    expect(PRESETS[0].config).toBe(DEFAULT_CONFIG);
-    expect(PRESETS.map((p) => p.id)).toEqual(expect.arrayContaining(["jam", "steady"]));
+  test("presets sit inside the slider domain on the step grid; the default is the slow experiment", () => {
+    expect(PRESETS.map((p) => [p.id, p.label])).toEqual([
+      ["tap", "One brake tap"],
+      ["slow", "Slow reactions"],
+      ["mixed", "Mixed drivers"],
+    ]);
+    expect(DEFAULT_PRESET_ID).toBe("slow");
+    expect(DEFAULT_CONFIG).toBe(PRESETS.find((p) => p.id === DEFAULT_PRESET_ID)!.config);
     for (const { config } of PRESETS) {
       expect(onGrid(config.carCount, CAR_COUNT_SLIDER)).toBe(true);
       expect(onGrid(config.variation, VARIATION_SLIDER)).toBe(true);
       for (const key of Object.keys(DRIVER_SLIDERS) as (keyof DriverParams)[]) {
         expect(onGrid(config.driver[key], DRIVER_SLIDERS[key]), key).toBe(true);
       }
-      expect(config.variation).toBe(0);
+      expect(config.variation).toBeLessThanOrEqual(VARIATION_SLIDER.max / VARIATION_SLIDER.displayPerSI);
+      expect(config.start).toBe("even");
     }
+    expect(TAP_SHIPPED.variation).toBe(0);
+    expect(SLOW_SHIPPED.variation).toBe(0);
+    expect(MIXED_SHIPPED.variation).toBeGreaterThan(0);
+    expect(TAP_SHIPPED.scheduledTap).toEqual(SCHEDULED_TAP);
+    expect(SLOW_SHIPPED.scheduledTap).toEqual(SCHEDULED_TAP);
+    expect(SCHEDULED_TAP).toEqual({ time: 5, car: 0 });
   });
 
-  test("the two presets differ only in reaction delay (and the jam one starts jumbled)", () => {
-    const differing = (Object.keys(JAM.driver) as (keyof DriverParams)[]).filter((k) => JAM.driver[k] !== STEADY.driver[k]);
-    expect(differing).toEqual(["reactionDelay"]);
-    expect(JAM.carCount).toBe(STEADY.carCount);
+  test("\"tap\" and \"slow\" differ in exactly one number: the reaction delay", () => {
+    const { reactionDelay: slowDelay, ...slowDriver } = SLOW_SHIPPED.driver;
+    const { reactionDelay: tapDelay, ...tapDriver } = TAP_SHIPPED.driver;
+    expect({ ...SLOW_SHIPPED, driver: slowDriver }).toEqual({ ...TAP_SHIPPED, driver: tapDriver });
+    expect([tapDelay, slowDelay]).toEqual([0.4, 0.8]);
+  });
+
+  test("\"mixed\" is \"slow\" with differing drivers and without the scheduled tap, nothing else", () => {
+    expect(MIXED_SHIPPED.scheduledTap).toBeUndefined();
+    expect("scheduledTap" in MIXED_SHIPPED).toBe(false);
+    expect({ ...MIXED_SHIPPED, variation: 0 }).toEqual(withoutTap(SLOW_SHIPPED));
   });
 
   test("the densest ring still leaves room beyond the minimum gap", () => {
@@ -795,11 +833,9 @@ test.describe("acceptance experiment: jams form without obstacles", () => {
     expect(Math.max(...g.map((x) => Math.abs(x - mean) / (mean + ROAD.vehicleLength)))).toBeLessThan(2 * JUMBLE_FRACTION);
   });
 
-  test("the presets differ only in reaction delay", () => {
-    const { reactionDelay: jamDelay, ...jamDriver } = JAM.driver;
-    const { reactionDelay: steadyDelay, ...steadyDriver } = STEADY_PRESET.driver;
-    expect({ ...JAM, driver: jamDriver }).toEqual({ ...STEADY_PRESET, driver: steadyDriver });
-    expect(jamDelay).toBeGreaterThan(steadyDelay);
+  test("the matched trial configs differ only in reaction delay", () => {
+    expect({ ...JAM, driver: { ...JAM.driver, reactionDelay: 0.4 } }).toEqual(STEADY_PRESET);
+    expect(JAM_EVEN.driver.reactionDelay).toBeGreaterThan(STEADY.driver.reactionDelay);
   });
 
   test("steady preset as shipped: the same jumbled start smooths out instead of jamming", () => {
@@ -809,5 +845,477 @@ test.describe("acceptance experiment: jams form without obstacles", () => {
     expect(r.jamTime).toBeNull();
     expect(r.stops).toBe(0);
     expect(r.lateMaxSpread).toBeLessThan(0.02);
+  });
+});
+
+/** Copy of every per-car array that defines a trajectory, for exact comparisons. */
+function snapshot(sim: Simulation) {
+  return {
+    position: Array.from(sim.position),
+    speed: Array.from(sim.speed),
+    travelled: Array.from(sim.travelled),
+    acceleration: Array.from(sim.acceleration),
+    brakeLight: Array.from(sim.brakeLight),
+    time: sim.time,
+    status: sim.status.kind,
+  };
+}
+
+test.describe("the shipped experiments", () => {
+  for (const dt of [DEFAULT_DT / 2, DEFAULT_DT, DEFAULT_DT * 2]) {
+    test(`"tap": the scheduled tap fades into a calm ring (dt = ${dt})`, () => {
+      const r = trial(TAP_SHIPPED, { dt, tap: false });
+      expect(r.status).toBe("running");
+      expect(r.peakSpread).toBeGreaterThan(0.2); // the tap really disturbed the flow
+      expect(r.peakSpread).toBeLessThan(1.2);
+      expect(r.spreadAt[60]).toBeLessThan(r.peakSpread / 2);
+      expect(r.spreadAt[120]).toBeLessThan(0.15);
+      expect(r.lateMaxSpread).toBeLessThan(0.02);
+      expect(r.minSpeed).toBeGreaterThan(2);
+      expect(r.stops).toBe(0);
+    });
+
+    test(`"slow": the same tap grows into stop-and-go waves that run backwards (dt = ${dt})`, () => {
+      const r = trial(SLOW_SHIPPED, { dt, tap: false });
+      expect(r.status).toBe("running");
+      expect(r.jamTime).not.toBeNull();
+      expect(r.jamTime!).toBeLessThan(70);
+      expect(r.spreadAt[120]).toBeGreaterThan(1.5);
+      expect(r.lateMeanSpread).toBeGreaterThan(1.5);
+      expect(r.minSpeed).toBeLessThan(0.1);
+      expect(Math.min(...r.stopsPerCar)).toBeGreaterThan(15);
+      expect(r.waveVelocity).not.toBeNull();
+      expect(r.waveVelocity!).toBeLessThan(-3);
+      expect(r.waveVelocity!).toBeGreaterThan(-12);
+      expect(r.minTravelledRate).toBeGreaterThan(2);
+    });
+
+    test(`"mixed": jams emerge with no tap, because the drivers differ (dt = ${dt})`, () => {
+      const r = trial(MIXED_SHIPPED, { dt, tap: false });
+      expect(r.status).toBe("running"); // no collision in 600 s
+      expect(r.jamTime).not.toBeNull();
+      expect(r.jamTime!).toBeLessThan(120); // measured 46-66 s over these dts
+      expect(r.lateMeanSpread).toBeGreaterThan(1.5);
+      expect(r.minSpeed).toBeLessThan(0.1);
+      expect(r.waveVelocity).not.toBeNull();
+      expect(r.waveVelocity!).toBeLessThan(-3);
+      expect(r.waveVelocity!).toBeGreaterThan(-12);
+    });
+
+    test(`the scheduled tap lands once, at the stated time (dt = ${dt})`, () => {
+      const sim = createSimulation(SLOW_SHIPPED, { dt });
+      run(sim, SCHEDULED_TAP.time - 2 * dt);
+      expect(sim.interventions).toEqual([]);
+      run(sim, 4 * dt);
+      expect(sim.interventions).toHaveLength(1);
+      const entry = sim.interventions[0];
+      expect(entry.kind).toBe("scheduled");
+      expect(entry.car).toBe(SCHEDULED_TAP.car);
+      expect(entry.time).toBeCloseTo(SCHEDULED_TAP.time, 9);
+      run(sim, 60);
+      expect(sim.interventions).toHaveLength(1);
+    });
+
+    test(`the scheduled tap is exactly a hand tap at that step (dt = ${dt})`, () => {
+      const scheduled = createSimulation(SLOW_SHIPPED, { dt });
+      const byHand = createSimulation(withoutTap(SLOW_SHIPPED), { dt });
+      const tapStep = Math.round(SCHEDULED_TAP.time / dt);
+      for (let k = 0; k < Math.round(90 / dt); k++) {
+        if (k === tapStep) tapBrake(byHand, SCHEDULED_TAP.car);
+        stepSimulation(scheduled);
+        stepSimulation(byHand);
+        if (k % 20 === 0) expect(snapshot(scheduled)).toEqual(snapshot(byHand));
+      }
+      expect(snapshot(scheduled)).toEqual(snapshot(byHand));
+      expect(byHand.interventions).toEqual([{ time: tapStep * dt, car: SCHEDULED_TAP.car, kind: "tap" }]);
+    });
+  }
+
+  test("a config without a scheduled tap logs nothing and behaves as before", () => {
+    const sim = createSimulation(withoutTap(SLOW_SHIPPED));
+    run(sim, 30);
+    expect(sim.interventions).toEqual([]);
+    expect(summarise(sim).speedSpread).toBeLessThan(1e-9); // identical drivers, even start, nobody touches the brake
+  });
+
+  test("scheduled tap at time 0 lands before the first step; an unusable car is ignored, not thrown on", () => {
+    const at0 = createSimulation({ ...STEADY, scheduledTap: { time: 0, car: 2 } });
+    expect(at0.interventions).toEqual([]);
+    stepSimulation(at0);
+    expect(at0.interventions).toEqual([{ time: 0, car: 2, kind: "scheduled" }]);
+    const byHand = createSimulation(STEADY);
+    tapBrake(byHand, 2);
+    run(byHand, 1);
+    run(at0, 1 - at0.dt);
+    expect(snapshot(at0)).toEqual(snapshot(byHand));
+
+    const plain = createSimulation(STEADY);
+    run(plain, 20);
+    for (const car of [STEADY.carCount, STEADY.carCount + 5, -1, 1.5]) {
+      const sim = createSimulation({ ...STEADY, scheduledTap: { time: 1, car } });
+      run(sim, 20);
+      expect(sim.interventions).toEqual([]);
+      expect(snapshot(sim)).toEqual(snapshot(plain));
+    }
+  });
+});
+
+test.describe("mixed drivers: honest margins", () => {
+  test("variation is what makes it jam: the same ring with identical drivers and no tap stays perfectly even", () => {
+    const r = trial({ ...MIXED_SHIPPED, variation: 0 }, { dt: DEFAULT_DT, tap: false, seconds: 300 });
+    expect(r.peakSpread).toBeLessThan(1e-6);
+    expect(r.jamTime).toBeNull();
+  });
+
+  test("across seeds 1-30 (measured: all jam, none collide in 600 s)", () => {
+    let jammed = 0;
+    let collided = 0;
+    let latest = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const r = trial({ ...MIXED_SHIPPED, seed }, { dt: DEFAULT_DT, tap: false });
+      if (r.status === "collision") collided++;
+      if (r.lateMeanSpread > 1.5 && r.minSpeed < 0.1) jammed++;
+      if (r.jamTime !== null) latest = Math.max(latest, r.jamTime);
+    }
+    expect(collided).toBe(0);
+    expect(jammed).toBeGreaterThanOrEqual(28); // measured 30 of 30; seeds 1-60: 60 of 60
+    expect(latest).toBeLessThan(200); // measured at most 196 s across seeds 1-60
+  });
+});
+
+test.describe("held brake", () => {
+  const nearlyEqual = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+  test("braking persists exactly while held, then control returns to the driver", () => {
+    const sim = createSimulation(STEADY);
+    run(sim, 2);
+    holdBrake(sim, 0);
+    const heldFor = 2;
+    const violations: string[] = [];
+    for (let k = 0; k < Math.round(heldFor / sim.dt); k++) {
+      stepSimulation(sim);
+      const r = readCar(sim, 0);
+      if (!r.tapActive || !r.brakeHeld) violations.push(`flags @${k}`);
+      if (!nearlyEqual(sim.acceleration[0], -TAP_DECELERATION)) violations.push(`accel ${sim.acceleration[0]} @${k}`);
+    }
+    expect(violations).toEqual([]);
+    releaseBrake(sim, 0);
+    const after = readCar(sim, 0);
+    expect(after.brakeHeld).toBe(false);
+    expect(after.tapActive).toBe(false); // the one-tap minimum ran out long ago
+    stepSimulation(sim);
+    expect(sim.acceleration[0]).toBeGreaterThan(0); // the driver, far from their leader, wants to speed up again
+  });
+
+  test("a very short hold still brakes for one tap's worth, exactly as a tap does", () => {
+    const held = createSimulation(STEADY);
+    const tapped = createSimulation(STEADY);
+    run(held, 2);
+    run(tapped, 2);
+    holdBrake(held, 0);
+    releaseBrake(held, 0);
+    tapBrake(tapped, 0);
+    expect(readCar(held, 0).brakeHeld).toBe(false);
+    expect(readCar(held, 0).tapActive).toBe(true);
+    run(held, 0.5);
+    run(tapped, 0.5);
+    expect(readCar(held, 0).tapActive).toBe(true);
+    run(held, TAP_DURATION - 0.5);
+    run(tapped, TAP_DURATION - 0.5);
+    expect(readCar(held, 0).tapActive).toBe(false);
+    run(held, 60);
+    run(tapped, 60);
+    expect(snapshot(held)).toEqual(snapshot(tapped));
+  });
+
+  for (const dt of [DEFAULT_DT / 2, DEFAULT_DT, DEFAULT_DT * 2]) {
+    test(`releases itself after HOLD_LIMIT of simulated time; a new hold is allowed (dt = ${dt})`, () => {
+      const sim = createSimulation(STEADY, { dt });
+      run(sim, 2);
+      const start = sim.time;
+      holdBrake(sim, 0);
+      let releasedAt: number | null = null;
+      for (let k = 0; k < Math.round((HOLD_LIMIT + 2) / dt); k++) {
+        stepSimulation(sim);
+        if (releasedAt === null && !readCar(sim, 0).brakeHeld) releasedAt = sim.time;
+      }
+      expect(releasedAt).not.toBeNull();
+      expect(releasedAt! - start).toBeCloseTo(HOLD_LIMIT, 9);
+      expect(readCar(sim, 0).tapActive).toBe(false);
+      expect(sim.acceleration[0]).toBeGreaterThan(-TAP_DECELERATION);
+      holdBrake(sim, 0);
+      expect(readCar(sim, 0).brakeHeld).toBe(true);
+      expect(sim.interventions.filter((e) => e.kind === "hold")).toHaveLength(2);
+      run(sim, HOLD_LIMIT - dt);
+      expect(readCar(sim, 0).brakeHeld).toBe(true);
+      stepSimulation(sim);
+      expect(readCar(sim, 0).brakeHeld).toBe(false);
+    });
+  }
+
+  test("never raises the request above the driver's own", () => {
+    const make = () => {
+      const sim = createSimulation({ ...STEADY, carCount: 8, driver: { ...STEADY.driver, reactionDelay: 0 } });
+      sim.speed.fill(0);
+      sim.speed[0] = 12;
+      sim.position[1] = sim.position[0] + ROAD.vehicleLength + 12; // closing fast on a stopped car
+      return sim;
+    };
+    const free = make();
+    const held = make();
+    holdBrake(held, 0);
+    stepSimulation(free);
+    stepSimulation(held);
+    expect(free.acceleration[0]).toBeLessThan(-TAP_DECELERATION - 1); // the driver already brakes harder than a tap
+    expect(held.acceleration[0]).toBe(free.acceleration[0]);
+    expect(held.speed[0]).toBe(free.speed[0]);
+  });
+
+  test("a hold of a full HOLD_LIMIT on the \"tap\" ring is a bounded disturbance: recovers, no collision", () => {
+    const sim = createSimulation(withoutTap(TAP_SHIPPED));
+    run(sim, 10);
+    holdBrake(sim, 0);
+    let minSpeed = Infinity;
+    let peak = 0;
+    let lateMax = 0;
+    for (let k = 0; k < Math.round(590 / sim.dt); k++) {
+      stepSimulation(sim);
+      const s = summarise(sim);
+      minSpeed = Math.min(minSpeed, s.minSpeed);
+      peak = Math.max(peak, s.speedSpread);
+      if (sim.time >= 300) lateMax = Math.max(lateMax, s.speedSpread);
+    }
+    expect(sim.status.kind).toBe("running");
+    expect(minSpeed).toBeLessThan(0.1); // the held car really came to a stop (measured: spread peak 2.4 m/s)
+    expect(peak).toBeLessThan(4);
+    expect(lateMax).toBeLessThan(0.05); // measured 0.017 from 300 s on
+    expect(readCar(sim, 0).brakeHeld).toBe(false);
+  });
+
+  test("the same hold on the \"slow\" ring: no collision, and the waves it already had carry on", () => {
+    const sim = createSimulation(withoutTap(SLOW_SHIPPED));
+    run(sim, 10);
+    holdBrake(sim, 0);
+    let late = 0;
+    let count = 0;
+    for (let k = 0; k < Math.round(590 / sim.dt); k++) {
+      stepSimulation(sim);
+      if (sim.time >= 300) {
+        late += summarise(sim).speedSpread;
+        count++;
+      }
+    }
+    expect(sim.status.kind).toBe("running");
+    expect(late / count).toBeGreaterThan(1.5); // measured 2.8 m/s
+  });
+
+  test("holding a car that is already held is a no-op: no second log entry, the limit is not extended", () => {
+    const once = createSimulation(STEADY);
+    const twice = createSimulation(STEADY);
+    run(once, 2);
+    run(twice, 2);
+    holdBrake(once, 0);
+    holdBrake(twice, 0);
+    run(once, 2);
+    run(twice, 2);
+    holdBrake(twice, 0);
+    run(once, HOLD_LIMIT - 2 + 1);
+    run(twice, HOLD_LIMIT - 2 + 1);
+    expect(readCar(twice, 0).brakeHeld).toBe(false);
+    expect(twice.interventions).toEqual(once.interventions);
+    expect(twice.interventions).toEqual([{ time: 2, car: 0, kind: "hold" }]);
+    expect(snapshot(twice)).toEqual(snapshot(once));
+  });
+
+  test("releaseBrake is idempotent and safe for any car, held or not", () => {
+    const control = createSimulation(STEADY);
+    const sim = createSimulation(STEADY);
+    for (const car of [0, 5, STEADY.carCount - 1, STEADY.carCount, -1, 2.5]) releaseBrake(sim, car);
+    run(sim, 20);
+    run(control, 20);
+    expect(snapshot(sim)).toEqual(snapshot(control));
+    expect(sim.interventions).toEqual([]);
+
+    holdBrake(sim, 3);
+    run(sim, 3);
+    releaseBrake(sim, 3);
+    const flags = readCar(sim, 3);
+    releaseBrake(sim, 3);
+    releaseBrake(sim, 3);
+    expect(readCar(sim, 3)).toEqual(flags);
+    expect(flags.brakeHeld).toBe(false);
+    for (const car of [STEADY.carCount, -1, 0.5]) {
+      holdBrake(sim, car);
+      tapBrake(sim, car);
+    }
+    expect(sim.interventions).toEqual([{ time: 20, car: 3, kind: "hold" }]);
+  });
+
+  test("several cars can be held at once, each released on its own", () => {
+    const sim = createSimulation(STEADY);
+    run(sim, 1);
+    holdBrake(sim, 0);
+    holdBrake(sim, 7);
+    run(sim, 1);
+    expect([0, 7, 3].map((c) => readCar(sim, c).brakeHeld)).toEqual([true, true, false]);
+    releaseBrake(sim, 0);
+    run(sim, 0.2);
+    expect([0, 7].map((c) => readCar(sim, c).brakeHeld)).toEqual([false, true]);
+    expect(readCar(sim, 7).tapActive).toBe(true);
+    expect(readCar(sim, 0).tapActive).toBe(false);
+  });
+
+  test("a tap during a hold changes nothing; after release it behaves as before", () => {
+    const plain = createSimulation(STEADY);
+    const tappedWhileHeld = createSimulation(STEADY);
+    for (const sim of [plain, tappedWhileHeld]) {
+      run(sim, 2);
+      holdBrake(sim, 0);
+      run(sim, 1.5);
+    }
+    tapBrake(tappedWhileHeld, 0);
+    for (const sim of [plain, tappedWhileHeld]) {
+      run(sim, 0.5);
+      releaseBrake(sim, 0); // a tap that had counted would still have 1 s - 0.5 s to run here
+      run(sim, 0.5);
+    }
+    expect(snapshot(tappedWhileHeld)).toEqual(snapshot(plain));
+    expect(tappedWhileHeld.interventions).toEqual(plain.interventions);
+    tapBrake(tappedWhileHeld, 0);
+    expect(readCar(tappedWhileHeld, 0).tapActive).toBe(true);
+    expect(tappedWhileHeld.interventions.map((e) => e.kind)).toEqual(["hold", "tap"]);
+  });
+
+  test("a hold can still end in a collision, which is reported and frozen, never repaired", () => {
+    const extreme: ExperimentConfig = {
+      carCount: 8,
+      driver: { desiredSpeed: 80 / 3.6, timeGap: 0.6, reactionDelay: 1.2, maxAcceleration: 3, comfortableBraking: 1 },
+      variation: 0,
+      start: "even",
+      seed: 7,
+    };
+    const calm = createSimulation(extreme);
+    run(calm, 40);
+    expect(calm.status.kind).toBe("running"); // without the hold this ring is fine
+    const sim = createSimulation(extreme);
+    run(sim, 10);
+    holdBrake(sim, 0);
+    run(sim, 30);
+    expect(sim.status.kind).toBe("collision");
+    const frozen = snapshot(sim);
+    const log = [...sim.interventions];
+    holdBrake(sim, 2);
+    releaseBrake(sim, 0);
+    tapBrake(sim, 3);
+    run(sim, 5);
+    expect(snapshot(sim)).toEqual(frozen);
+    expect(sim.interventions).toEqual(log);
+    expect(readCar(sim, 2).brakeHeld).toBe(false);
+  });
+
+  test("a frozen run (collision or invalid) ignores hold, release and tap", () => {
+    const sim = createSimulation(STEADY);
+    sim.speed[3] = Number.NaN;
+    stepSimulation(sim);
+    expect(sim.status.kind).toBe("invalid");
+    const frozen = snapshot(sim);
+    holdBrake(sim, 0);
+    tapBrake(sim, 1);
+    releaseBrake(sim, 0);
+    stepSimulation(sim);
+    expect(sim.interventions).toEqual([]);
+    expect(readCar(sim, 0).brakeHeld).toBe(false);
+    expect(readCar(sim, 1).tapActive).toBe(false);
+    expect(Object.is(snapshot(sim).time, frozen.time)).toBe(true);
+  });
+
+  test("deterministic, and storage order does not matter with holds and a tap in progress", () => {
+    const base = createSimulation({ ...JAM, variation: 0.1 });
+    const twin = createSimulation({ ...JAM, variation: 0.1 });
+    const n = base.carCount;
+    const order = Array.from({ length: n }, (_, k) => (k * 5 + 3) % n);
+    const permuted = permuteStorage(createSimulation({ ...JAM, variation: 0.1 }), order);
+    const slotOf = (car: number) => order.indexOf(car);
+    const sims = [base, twin, permuted];
+    const act = (step: number, f: (sim: Simulation, car: (c: number) => number) => void) => {
+      if (step < 0) return;
+      void step;
+      f(base, (c) => c);
+      f(twin, (c) => c);
+      f(permuted, slotOf);
+    };
+    for (let step = 0; step < 4000; step++) {
+      if (step === 100) act(step, (sim, car) => holdBrake(sim, car(4)));
+      if (step === 150) act(step, (sim, car) => holdBrake(sim, car(9))); // never released: ends at the limit
+      if (step === 180) act(step, (sim, car) => tapBrake(sim, car(1)));
+      if (step === 220) act(step, (sim, car) => releaseBrake(sim, car(4)));
+      if (step === 2000) act(step, (sim, car) => holdBrake(sim, car(9)));
+      for (const sim of sims) stepSimulation(sim);
+      if (step === 120) {
+        // Mid-hold: the permuted copy has carried the hold state over.
+        expect(readCar(permuted, slotOf(4)).brakeHeld).toBe(true);
+        expect(readCar(permuted, slotOf(9)).brakeHeld).toBe(false);
+      }
+    }
+    expect(snapshot(twin)).toEqual(snapshot(base));
+    expect(base.status.kind).toBe("running");
+    for (let car = 0; car < n; car++) {
+      const slot = slotOf(car);
+      expect(permuted.position[slot]).toBe(base.position[car]);
+      expect(permuted.speed[slot]).toBe(base.speed[car]);
+      expect(permuted.acceleration[slot]).toBe(base.acceleration[car]);
+      expect(permuted.travelled[slot]).toBe(base.travelled[car]);
+      expect(readCar(permuted, slot).brakeHeld).toBe(readCar(base, car).brakeHeld);
+    }
+    expect(permuted.interventions.map((e) => ({ ...e, car: order[e.car] }))).toEqual(base.interventions);
+    expect(base.interventions.map((e) => e.kind)).toEqual(["hold", "hold", "tap", "hold"]);
+  });
+
+  test("a scheduled tap is carried over by permuteStorage with its car remapped", () => {
+    const config = { ...STEADY, scheduledTap: { time: 1, car: 4 } };
+    const base = createSimulation(config);
+    const order = Array.from({ length: base.carCount }, (_, k) => (k * 5 + 3) % base.carCount);
+    const permuted = permuteStorage(base, order);
+    run(base, 2);
+    run(permuted, 2);
+    expect(base.interventions).toEqual([{ time: 1, car: 4, kind: "scheduled" }]);
+    expect(permuted.interventions).toEqual([{ time: 1, car: order.indexOf(4), kind: "scheduled" }]);
+    expect(permuted.speed[order.indexOf(4)]).toBe(base.speed[4]);
+  });
+});
+
+test.describe("intervention log", () => {
+  test("records taps, the schedule and holds in order, with the time they took effect", () => {
+    const sim = createSimulation({ ...STEADY, scheduledTap: { time: 3, car: 2 } });
+    expect(sim.interventions).toEqual([]);
+    run(sim, 1);
+    tapBrake(sim, 5);
+    run(sim, 1);
+    holdBrake(sim, 6);
+    run(sim, 1.5);
+    tapBrake(sim, 5);
+    run(sim, 1);
+    expect(sim.interventions).toEqual([
+      { time: 1, car: 5, kind: "tap" },
+      { time: 2, car: 6, kind: "hold" },
+      { time: 3, car: 2, kind: "scheduled" },
+      { time: 3.5, car: 5, kind: "tap" },
+    ]);
+    expect(sim.interventions.map((e) => e.time)).toEqual([...sim.interventions.map((e) => e.time)].sort((a, b) => a - b));
+  });
+
+  test("one entry per hold, none for no-ops", () => {
+    const sim = createSimulation(STEADY);
+    holdBrake(sim, 1);
+    run(sim, HOLD_LIMIT + 1);
+    expect(sim.interventions).toHaveLength(1); // not one per step
+    releaseBrake(sim, 1);
+    releaseBrake(sim, 4);
+    holdBrake(sim, 4);
+    holdBrake(sim, 4);
+    expect(sim.interventions.map((e) => [e.car, e.kind])).toEqual([
+      [1, "hold"],
+      [4, "hold"],
+    ]);
   });
 });

@@ -183,8 +183,8 @@ test("selecting a car and tapping its brakes lights its lamp, marks the history 
   await expect(car(page, 7)).toHaveAttribute("data-braking", "true");
 
   // The lit lamp must differ from an unlit one, and be big enough to see on a phone.
-  const lamp = (index: number) => car(page, index).locator('rect[class*="lamp"]').first();
-  const glow = (index: number) => car(page, index).locator('ellipse[class*="glow"]');
+  const lamp = (index: number) => car(page, index).locator('[data-part="lamp"]').first();
+  const glow = (index: number) => car(page, index).locator('[data-part="glow"]');
   const paint = (locator: Locator, property: string) => locator.evaluate((node, name) => getComputedStyle(node).getPropertyValue(name), property);
   const other = (await car(page, 6).getAttribute("data-braking")) === "false" ? 6 : 5;
   await expect(car(page, other)).toHaveAttribute("data-braking", "false");
@@ -272,8 +272,8 @@ test("keyboard: only the selected car is a tab stop and arrows walk along the tr
 
 test("parameters: delay changes live without restarting, road settings restart, presets and start apply", async ({ page }) => {
   await open(page);
-  const jamProne = button(page, "Jam-prone");
-  const steady = button(page, "Steady");
+  const jamProne = button(page, "Slow reactions");
+  const steady = button(page, "One brake tap");
   await expect(jamProne).toHaveAttribute("aria-pressed", "true");
   const delay = slider(page, "Reaction delay");
   const delayOutput = await outputOf(page, "Reaction delay");
@@ -313,11 +313,14 @@ test("parameters: delay changes live without restarting, road settings restart, 
   await jamProne.click();
   await expect(delayOutput).toHaveText("0.8 s");
 
-  // "Even" spaces the cars equally; the default start is jumbled.
+  // The experiments start even; "Slightly jumbled" offsets the cars, "Even" spaces them equally again.
   const gaps = async () => {
     const at = await positions(page);
     return at.map((position, index) => mod(at[(index + 1) % at.length] - position));
   };
+  await button(page, "Slightly jumbled").click();
+  await expect(button(page, "Slightly jumbled")).toHaveAttribute("aria-pressed", "true");
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
   const jumbled = await gaps();
   expect(Math.max(...jumbled) - Math.min(...jumbled)).toBeGreaterThan(0.5);
   await button(page, "Even").click();
@@ -371,7 +374,7 @@ test("the phenomenon as rendered: every car drives forward while the jam moves b
   await open(page);
   await button(page, "Four times speed").click();
   await button(page, "Play").click();
-  // Jam-prone jams unprompted from about 40 s of simulated time; by 60 s it is well formed.
+  // "Slow reactions" grows its one scheduled brake tap into waves within about 15 s; by 60 s they are well formed.
   await expect.poll(() => readTime(page), { timeout: 90_000, intervals: [250] }).toBeGreaterThanOrEqual(60);
   await button(page, "Pause").click();
   const t1 = await settled(page);
@@ -532,4 +535,232 @@ test("layout: no horizontal overflow, ring and brake button on screen together, 
     await expect.poll(painted).toBeGreaterThan(500);
     expect(await overflows(page)).toBe(false);
   }
+});
+
+// ---- Run ahead and the watch view ----
+
+import { SAMPLE_SECONDS } from "../src/entries/phantom-traffic-jam/history";
+import { DEFAULT_CONFIG, DEFAULT_DT } from "../src/entries/phantom-traffic-jam/parameters";
+import { createSimulation, stepSimulation } from "../src/entries/phantom-traffic-jam/simulation";
+
+const RUN_AHEAD_SECONDS = 60;
+const runAhead = (page: Page) => page.getByRole("button", { name: /^(Run ahead 60 s|Stop run-ahead)$/ });
+const samplesOf = async (page: Page) => Number(await history(page).getAttribute("data-samples"));
+/** History samples one run-ahead records: the recorder samples every `every` model steps. */
+const SAMPLES_PER_RUN_AHEAD = RUN_AHEAD_SECONDS / (Math.max(1, Math.round(SAMPLE_SECONDS / DEFAULT_DT)) * DEFAULT_DT);
+
+/** Press "Run ahead" and wait for it to hand back. */
+async function runAheadToEnd(page: Page) {
+  await runAhead(page).click();
+  await expect(button(page, "Run ahead 60 s")).toBeVisible({ timeout: 15_000 });
+}
+
+/** The page's default run stepped `steps` times in Node with the same model code, as front-bumper positions. */
+function modelPositions(steps: number): number[] {
+  const sim = createSimulation(DEFAULT_CONFIG);
+  for (let step = 0; step < steps; step += 1) stepSimulation(sim);
+  return Array.from(sim.position, (position) => mod(position));
+}
+
+/** Largest distance between drawn and modelled cars, m. */
+function worstDelta(drawn: number[], expected: number[]): number {
+  expect(drawn).toHaveLength(expected.length);
+  return Math.max(...drawn.map((position, index) => Math.abs(circularDelta(expected[index], position))));
+}
+
+/**
+ * Every car within a hundredth of a metre (the drawn transforms carry three
+ * decimals) of the model stepped `steps` times. `steps` may list neighbouring
+ * candidates when the page's 0.1 s readout cannot say which step it is on.
+ */
+async function expectModelState(page: Page, ...steps: number[]) {
+  const drawn = await positions(page);
+  const best = Math.min(...steps.map((count) => worstDelta(drawn, modelPositions(count))));
+  expect(best).toBeLessThan(0.01);
+}
+
+/**
+ * What this proves: run-ahead adds exactly 60.0 s of simulated time and the
+ * history samples that go with it, and the page then shows exactly the state
+ * the model reaches by ordinary fixed steps (stepped here in Node with the same
+ * code and default configuration). It also shows a run-ahead cut short and
+ * restarted lands on that same stepped state, so the per-frame slicing (which
+ * varies with wall-clock timing) never changes the result. It does not compare
+ * against wall-clock play in the page (landing that on an exact step is
+ * impractical); the model tests prove stepping itself is deterministic.
+ */
+test("run ahead: exactly 60 s of ordinary steps, then back to the chosen playback", async ({ page }) => {
+  await open(page);
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  // The attribute appears with the history's first paint.
+  await expect.poll(() => samplesOf(page)).toBeGreaterThan(0);
+  const samples = await samplesOf(page);
+
+  const ahead = runAhead(page);
+  await ahead.click();
+  // An ordinary button: focus stays on it while its label toggles.
+  await expect(ahead).toBeFocused();
+  await expect(button(page, "Run ahead 60 s")).toBeVisible({ timeout: 15_000 });
+  await expect(ahead).toBeFocused();
+  await expect(simTime(page)).toHaveText("t = 60.0 s");
+  // Paused before, paused after, at the new time.
+  await expect(button(page, "Play")).toBeVisible();
+  expect(await settled(page)).toBe(60);
+  await expect.poll(() => samplesOf(page)).toBe(samples + SAMPLES_PER_RUN_AHEAD);
+  await expectModelState(page, Math.round(RUN_AHEAD_SECONDS / DEFAULT_DT));
+
+  // Cut short part-way, then run ahead again: exactly 60 s on from where it stopped.
+  await ahead.click();
+  await button(page, "Stop run-ahead").click();
+  await expect(button(page, "Run ahead 60 s")).toBeVisible();
+  const stopped = await settled(page);
+  expect(stopped).toBeGreaterThan(60);
+  expect(stopped).toBeLessThan(120);
+  await expect(button(page, "Play")).toBeVisible();
+  await runAheadToEnd(page);
+  await expect(simTime(page)).toHaveText(`t = ${(stopped + RUN_AHEAD_SECONDS).toFixed(1)} s`);
+  // The readout rounds to 0.1 s, i.e. to within a step of the true time either way.
+  const landed = Math.round((stopped + RUN_AHEAD_SECONDS) / DEFAULT_DT);
+  await expectModelState(page, landed - 1, landed, landed + 1);
+
+  // Playing at 4×: still 4× and still playing afterwards.
+  await button(page, "Four times speed").click();
+  await button(page, "Play").click();
+  const from = await readTime(page);
+  await runAheadToEnd(page);
+  await expect(button(page, "Four times speed")).toHaveAttribute("aria-pressed", "true");
+  await expect(button(page, "Pause")).toBeVisible();
+  const after = await readTime(page);
+  expect(after).toBeGreaterThanOrEqual(from + RUN_AHEAD_SECONDS);
+  await expect.poll(() => readTime(page)).toBeGreaterThan(after + 1);
+
+  // Pause during a run-ahead stops it there and pauses.
+  await ahead.click();
+  await button(page, "Pause").click();
+  await expect(button(page, "Run ahead 60 s")).toBeVisible();
+  await expect(button(page, "Play")).toBeVisible();
+  const paused = await settled(page);
+  await page.waitForTimeout(300);
+  expect(await readTime(page)).toBe(paused);
+
+  // Reset during a run-ahead lands at 0 and, paused, stays there.
+  await ahead.click();
+  await button(page, "Reset").click();
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  await expect(button(page, "Run ahead 60 s")).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  await expect(button(page, "Play")).toBeVisible();
+});
+
+test("run ahead stops itself at a collision and is disabled while the run is frozen", async ({ page }) => {
+  test.setTimeout(60_000);
+  await open(page);
+  // The collision recipe from the collision test above.
+  await slider(page, "Cars on the ring").fill("30");
+  await expect(page.locator("g[data-car]")).toHaveCount(30);
+  await slider(page, "Following time gap").fill("0.6");
+  await slider(page, "Reaction delay").fill("1.2");
+  await slider(page, "Comfortable braking").fill("1");
+  await button(page, /^Tap brakes/).click();
+  await runAhead(page).click();
+  await expect(page.getByTestId("status")).toBeVisible({ timeout: 30_000 });
+  await expect(button(page, "Run ahead 60 s")).toBeDisabled();
+  const frozenAt = await settled(page);
+  expect(frozenAt).toBeLessThan(RUN_AHEAD_SECONDS);
+  await button(page, "Reset").click();
+  await expect(button(page, "Run ahead 60 s")).toBeEnabled();
+});
+
+/** Is the element exposed to assistive tech and reachable by Tab? */
+const exposed = (locator: Locator) => locator.evaluate((node) => node.checkVisibility() && !node.closest("[hidden],[inert],[aria-hidden='true']"));
+
+test("watch view hides the details, keeps the ring, transport, experiments and history, and loses nothing", async ({ page }) => {
+  // On desktop, a laptop-sized window: at 720 px tall the watch ring is bounded by the height
+  // (ring and transport together on screen) and comes out a little smaller than the normal one.
+  if (!test.info().project.use.isMobile) await page.setViewportSize({ width: 1280, height: 900 });
+  await open(page);
+  const watch = button(page, "Watch view");
+  await expect(watch).toHaveAttribute("aria-pressed", "false");
+  const ring = page.getByTestId("ring");
+  const ringBefore = (await ring.boundingBox())!;
+
+  // Move a slider and pick a car first; neither may be lost by toggling.
+  const delay = slider(page, "Reaction delay");
+  await delay.focus();
+  await page.keyboard.press("ArrowRight");
+  const delayValue = await delay.inputValue();
+  const delayById = page.locator(`input[id="${await delay.getAttribute("id")}"]`);
+  await car(page, 4).click();
+  await expect(page.getByTestId("car-line")).toContainText("Car 5");
+  const time = await readTime(page);
+
+  await watch.click();
+  await expect(watch).toHaveAttribute("aria-pressed", "true");
+  await expect(watch).toBeFocused();
+  // Readouts and parameter controls are gone from the accessibility tree and the tab order.
+  await expect(page.getByRole("slider")).toHaveCount(0);
+  await expect(page.locator("#ptj-traffic")).toBeHidden();
+  await expect(page.locator("#ptj-car")).toBeHidden();
+  expect(await exposed(delayById)).toBe(false);
+  // Tabbing forward from the toggle never lands in a hidden panel.
+  for (let i = 0; i < 6; i += 1) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest("[hidden]")))).toBe(false);
+  }
+  // What stays.
+  await expect(ring).toBeVisible();
+  await expect(page.getByRole("group", { name: "Playback", exact: true })).toBeVisible();
+  for (const name of ["Play", "Reset", "Run ahead 60 s", "Quarter speed", "Real time", "Four times speed", "Sixteen times speed"]) await expect(button(page, name)).toBeVisible();
+  await expect(button(page, /^Tap brakes · car 5$/)).toBeVisible();
+  await expect(page.getByRole("region", { name: /^Experiments/ }).getByRole("button")).not.toHaveCount(0);
+  await expect(page.getByRole("region", { name: /^Experiments/ })).toBeVisible();
+  await expect(history(page)).toBeVisible();
+  await expect(page.getByTestId("car-line")).toBeVisible();
+  await expect(page.getByTestId("car-line")).toContainText(/Car 5\s*\d+ km\/h · gap \d+\.\d m/);
+  await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeAttached();
+  expect(await readTime(page)).toBe(time);
+  expect(await overflows(page)).toBe(false);
+
+  if (!test.info().project.use.isMobile) {
+    // Desktop: the ring grows, and it fits in the viewport together with play/pause.
+    await ring.evaluate((node) => node.scrollIntoView({ block: "start" }));
+    const ringWatch = (await ring.boundingBox())!;
+    expect(ringWatch.width).toBeGreaterThan(ringBefore.width + 40);
+    const play = (await button(page, "Play").boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(ringWatch.y).toBeGreaterThanOrEqual(-1);
+    expect(play.y + play.height).toBeLessThanOrEqual(viewport.height + 1);
+  }
+
+  // Back again: nothing reset.
+  await watch.click();
+  await expect(watch).toHaveAttribute("aria-pressed", "false");
+  await expect(slider(page, "Reaction delay")).toHaveValue(delayValue);
+  await expect(car(page, 4)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#ptj-car")).toHaveText("Car 5");
+  expect(await readTime(page)).toBe(time);
+
+  // Narrowest phone, watch view: no horizontal overflow.
+  await page.setViewportSize({ width: 320, height: 640 });
+  await watch.click();
+  await expect(ring).toBeVisible();
+  expect(await overflows(page)).toBe(false);
+  const ringNarrow = (await ring.boundingBox())!;
+  const pauseNarrow = (await button(page, "Play").boundingBox())!;
+  expect(ringNarrow.x + ringNarrow.width).toBeLessThanOrEqual(320);
+  expect(pauseNarrow.x + pauseNarrow.width).toBeLessThanOrEqual(320);
+});
+
+test("watch view: focus inside a panel that hides moves to the toggle", async ({ page }) => {
+  await open(page);
+  const watch = button(page, "Watch view");
+  // Keyboard users reach the toggle and press it with focus elsewhere first; simulate focus in a slider then a keyboard press of the toggle.
+  await slider(page, "Reaction delay").focus();
+  await watch.evaluate((node) => {
+    // Activate without moving focus, as an assistive-tech click would.
+    (node as HTMLButtonElement).click();
+  });
+  await expect(watch).toHaveAttribute("aria-pressed", "true");
+  await expect(watch).toBeFocused();
 });

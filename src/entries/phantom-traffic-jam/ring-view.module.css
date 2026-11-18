@@ -1,0 +1,43 @@
+/* The ring road and its cars. Red is reserved for brake lights: nothing else here may be red. */
+.ringSvg {
+  --brake-on: #ff2a1a;
+  --brake-off: light-dark(#7a2a24, #6a2620);
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- Road ---- */
+.lane { fill: none; stroke: color-mix(in srgb, var(--rule) 26%, var(--surface)); }
+.kerb { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.post { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.postMajor { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.cutAcross { stroke: var(--ink); stroke-width: 1px; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.45; }
+.cutTick { stroke: var(--ink); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.cutLabel { fill: var(--text-muted); font-family: var(--font-mono); font-size: 2.4px; }
+.direction path { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+/* ---- Cars ---- */
+.car { cursor: pointer; outline: none; }
+.hit { fill: transparent; pointer-events: all; }
+/* A soft, direction-less contact shadow: no blur, no offset. */
+.shadow { fill: light-dark(rgb(23 25 29 / 0.16), rgb(0 0 0 / 0.38)); pointer-events: none; }
+.tyre { fill: light-dark(#17191d, #0b0c0e); }
+.body { stroke: var(--ink); stroke-width: 1px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.headlamp { fill: #fbf6e2; pointer-events: none; }
+.lamp { fill: var(--brake-off); }
+.glow { opacity: 0; pointer-events: none; }
+.glowStop { stop-color: var(--brake-on); }
+.car[data-braking="true"] .lamp { fill: var(--brake-on); }
+.car[data-braking="true"] .glow { opacity: 1; }
+.halo { fill: none; stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+.collided { fill: none; stroke: var(--error); stroke-width: 2px; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.focus { fill: none; stroke: var(--ink); stroke-width: 1.5px; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0; pointer-events: none; }
+.car:focus-visible .focus { opacity: 1; }
+
+/* ---- The selected car's roadside marker ---- */
+.marker { pointer-events: none; }
+.marker path, .marker rect { fill: var(--accent); }
+.marker text { fill: var(--surface); font-family: var(--font-mono); font-size: 2.6px; font-weight: 700; }

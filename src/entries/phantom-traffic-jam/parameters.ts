@@ -49,17 +49,33 @@ export const VARIATION_SLIDER: SliderSpec = {
   step: 5,
 };
 
-/**
- * The two presets differ in ONE parameter: reaction delay (0.4 s vs 0.8 s).
- * Everything else, including a 1.6 s time gap and 14 cars (~6 m/s flow, so a
- * brake tap is a modest disturbance), is shared. Linear string stability of
- * the IDM is lost when delay eats into the safety margin of the time gap:
- * with 0.4 s a perturbation decays, with 0.8 s it grows into stop-and-go waves.
- * Both start "jumbled", so the jam-prone ring jams without any tap and the
- * steady one smooths the same unevenness away.
- */
+/** The one scheduled tap the "tap" and "slow" experiments share: car 0 brakes lightly at 5 s. */
+export const SCHEDULED_TAP = { time: 5, car: 0 } as const;
 
-/** Population centre shared by both presets; the jam-prone one overrides the reaction delay. */
+/*
+ * The three experiments. Every one is 14 cars on the 230 m ring, a 1.6 s time
+ * gap, 60 km/h desired speed, a = 1.5 m/s², b = 2 m/s², seed 7, an even start
+ * (equal gaps, equal speeds). What differs:
+ *  - "tap":   reaction delay 0.4 s, identical drivers, one scheduled tap at 5 s.
+ *  - "slow":  as "tap" but reaction delay 0.8 s. That one number is the only
+ *             difference from "tap".
+ *  - "mixed": as "slow" but the drivers differ (variation 10%) and there is NO
+ *             scheduled tap. Variation scales all five driver parameters, the
+ *             reaction delay included (so delays run about 0.72-0.88 s).
+ *
+ * Measured with this code (dt = 0.05 s, 600 s; "jam" = mean speed spread over
+ * 300-600 s above 1.5 m/s). The reproducible numbers are in the model tests.
+ *  - "tap" and "slow" with the tap: calm and jam respectively (identical
+ *    drivers, so with no tap, either would stay perfectly even forever).
+ *  - "mixed" with seed 7: a jam is evident (spread above 1.5 m/s) at 58 s
+ *    (46-66 s with dt = 0.1-0.025 s) and persists to 600 s; no collision. Over 59 other seeds (1-60): 59 jammed
+ *    (first evident between 30 s and 104 s, median 51 s), 0 stayed calm,
+ *    0 collided.
+ *  - Why not "tap" plus variation: at 5, 10, 15 and 20% the 0.4 s ring
+ *    absorbed the tap and stayed calm on all 60 seeds tried, so it shows no
+ *    effect of differing drivers. "slow" without variation and without a tap
+ *    stays perfectly even.
+ */
 const BASE_DRIVER: DriverParams = {
   desiredSpeed: 60 / 3.6,
   timeGap: 1.6,
@@ -68,23 +84,31 @@ const BASE_DRIVER: DriverParams = {
   comfortableBraking: 2,
 };
 
+const TAP_CONFIG: ExperimentConfig = {
+  carCount: 14,
+  driver: BASE_DRIVER,
+  variation: 0,
+  start: "even",
+  seed: 7,
+  scheduledTap: SCHEDULED_TAP,
+};
+
+const SLOW_CONFIG: ExperimentConfig = { ...TAP_CONFIG, driver: { ...BASE_DRIVER, reactionDelay: 0.8 } };
+
+const MIXED_CONFIG: ExperimentConfig = {
+  carCount: SLOW_CONFIG.carCount,
+  driver: SLOW_CONFIG.driver,
+  variation: 0.1,
+  start: SLOW_CONFIG.start,
+  seed: SLOW_CONFIG.seed,
+};
+
 export const PRESETS: readonly Preset[] = [
-  {
-    id: "jam",
-    label: "Jam-prone",
-    config: {
-      carCount: 14,
-      driver: { ...BASE_DRIVER, reactionDelay: 0.8 },
-      variation: 0,
-      start: "jumbled",
-      seed: 7,
-    },
-  },
-  {
-    id: "steady",
-    label: "Steady",
-    config: { carCount: 14, driver: BASE_DRIVER, variation: 0, start: "jumbled", seed: 7 },
-  },
+  { id: "tap", label: "One brake tap", config: TAP_CONFIG },
+  { id: "slow", label: "Slow reactions", config: SLOW_CONFIG },
+  { id: "mixed", label: "Mixed drivers", config: MIXED_CONFIG },
 ];
 
-export const DEFAULT_CONFIG: ExperimentConfig = PRESETS[0].config;
+export const DEFAULT_PRESET_ID = "slow";
+
+export const DEFAULT_CONFIG: ExperimentConfig = SLOW_CONFIG;

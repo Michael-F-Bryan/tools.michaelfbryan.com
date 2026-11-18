@@ -12,8 +12,8 @@ import {
   TAP_DURATION,
 } from "./simulation";
 
-const JAM_DELAY = PRESETS.find((preset) => preset.id === "jam")?.config.driver.reactionDelay;
-const STEADY_DELAY = PRESETS.find((preset) => preset.id === "steady")?.config.driver.reactionDelay;
+const SLOW_DELAY = PRESETS.find((preset) => preset.id === "slow")?.config.driver.reactionDelay;
+const QUICK_DELAY = PRESETS.find((preset) => preset.id === "tap")?.config.driver.reactionDelay;
 
 const SOURCES = [
   {
@@ -136,8 +136,8 @@ export function Notes() {
             </p>
             <p>
               The geometry is fixed: a {ROAD.length} m ring, {ROAD.vehicleLength} m cars and a {ROAD.minimumGap} m
-              stopped gap. The two presets differ only in reaction delay, {STEADY_DELAY} s for Steady and{" "}
-              {JAM_DELAY} s for Jam-prone.
+              stopped gap. &ldquo;One brake tap&rdquo; and &ldquo;Slow reactions&rdquo; differ only in reaction
+              delay, {QUICK_DELAY} s against {SLOW_DELAY} s.
             </p>
           </Prose>
         </div>

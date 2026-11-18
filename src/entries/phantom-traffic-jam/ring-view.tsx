@@ -1,36 +1,111 @@
-import { memo, type KeyboardEvent, type Ref } from "react";
+import { memo, useId, type KeyboardEvent, type Ref } from "react";
 
 import { speedColour } from "./speed-scale";
-import styles from "./experiment.module.css";
+import styles from "./ring-view.module.css";
 import type { Simulation } from "./types";
 
 /** Lane width, m. Only the drawing uses it; the model has one lane and no width. */
 const LANE = 3.6;
-/** Drawn car width, m (the model only knows length). */
-const CAR_WIDTH = 1.9;
-/** Half the viewBox, m: room for the ring, its verges and the cut label. */
-const HALF_VIEW = 46;
+/** Drawn body width, m (the model only knows length). The tyres stand just proud of it. */
+const BODY_WIDTH = 1.84;
+/**
+ * Half the viewBox, m. The outermost things are the selection tab on the outer
+ * verge (≤ 43.2 m from the centre at 3 and 9 o'clock) and the verge posts; the
+ * cars themselves are drawn at true scale.
+ */
+const HALF_VIEW = 43.5;
+/** Verge posts every POST metres, heavier every MAJOR_POST metres (0 m is the cut). */
+const POST = 10;
+const MAJOR_POST = 50;
+
+/**
+ * The time readout sits over the ring's top-left corner. On the narrowest
+ * phone (ring ≈ 278 px) with a long time it covers x < -13 m, y < -34.8 m of
+ * this drawing; the selection tab moves inside the road there so it never
+ * paints over it.
+ */
+const READOUT_CORNER = { x: -13, y: -34.8 } as const;
 
 function ringRadius(sim: Simulation): number {
   return sim.road.length / (2 * Math.PI);
 }
 
+/** Angle (radians, from +x, clockwise on screen) of a point `distance` metres clockwise from the top of the ring. */
+function angleAt(sim: Simulation, distance: number): number {
+  return (distance / sim.road.length) * 2 * Math.PI - Math.PI / 2;
+}
+
+/** Where a car's centre sits: half a vehicle length behind its front bumper. */
+function carAngle(sim: Simulation, car: number): number {
+  return angleAt(sim, sim.position[car] - sim.road.vehicleLength / 2);
+}
+
 /** Where a car's centre sits and which way it points. Positions are front bumpers; cars drive clockwise, position 0 at the top. */
 function carTransform(sim: Simulation, car: number): string {
-  const { length, vehicleLength } = sim.road;
   const radius = ringRadius(sim);
-  const theta = ((sim.position[car] - vehicleLength / 2) / length) * 2 * Math.PI - Math.PI / 2;
+  const theta = carAngle(sim, car);
   const x = radius * Math.cos(theta);
   const y = radius * Math.sin(theta);
   return `translate(${x.toFixed(3)} ${y.toFixed(3)}) rotate(${((theta * 180) / Math.PI + 90).toFixed(2)})`;
 }
 
-/** Windscreen tint that stays visible on both ends of the speed scale. */
+/** Window tint that stays visible on both ends of the speed scale. */
 function glassFor(sim: Simulation, car: number, maxSpeed: number): string {
   return sim.speed[car] > maxSpeed * 0.55 ? "rgb(18 22 34 / 0.6)" : "rgb(255 255 255 / 0.62)";
 }
 
+/** Half-size of the upright number tab beside the selected car, m: wider for two digits. */
+function tabHalf(car: number): { w: number; h: number } {
+  return { w: car + 1 >= 10 ? 2.05 : 1.5, h: 1.5 };
+}
+
+type MarkerLayout = { pointer: string; pointerTransform: string; tabTransform: string; hideCutLabel: boolean };
+
+/**
+ * The roadside selection marker: a pointer on the verge aimed at the car's
+ * centre and an upright tab with its number, outside the kerb except where
+ * the time readout covers the corner, where both sit just inside the road.
+ */
+function markerLayout(sim: Simulation, car: number): MarkerLayout {
+  const radius = ringRadius(sim);
+  const outer = radius + LANE / 2;
+  const inner = radius - LANE / 2;
+  const theta = carAngle(sim, car);
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const { w, h } = tabHalf(car);
+  // Distance from the tab's centre to its edge facing the ring.
+  const support = w * Math.abs(cos) + h * Math.abs(sin);
+  const place = (r: number) => ({ x: r * cos, y: r * sin });
+  let tip = outer + 0.15;
+  let base = outer + 1.05;
+  let centre = place(base - 0.1 + support);
+  const covers = centre.x - w < READOUT_CORNER.x && centre.y - h < READOUT_CORNER.y;
+  if (covers) {
+    tip = inner - 0.15;
+    base = inner - 1.05;
+    centre = place(base + 0.1 - support);
+  }
+  // The "0 m" label sits just left of the cut tick, above the outer kerb.
+  const hideCutLabel = !covers && centre.x + w > -5.6 && centre.x - w < 0 && centre.y + h > -42;
+  return {
+    pointer: `M${tip.toFixed(2)} 0L${base.toFixed(2)} -0.75L${base.toFixed(2)} 0.75Z`,
+    pointerTransform: `rotate(${((theta * 180) / Math.PI).toFixed(2)})`,
+    tabTransform: `translate(${centre.x.toFixed(2)} ${centre.y.toFixed(2)})`,
+    hideCutLabel,
+  };
+}
+
 type CarNode = { g: SVGGElement; body: SVGElement; glass: SVGElement; transform: string; fill: string; tint: string; braking: string };
+
+type Attributes = Record<string, string>;
+
+/** Writes an attribute only when it changed since the last write through the same cache. */
+function write(node: Element, cache: Attributes, name: string, value: string): void {
+  if (cache[name] === value) return;
+  cache[name] = value;
+  node.setAttribute(name, value);
+}
 
 /**
  * Paints the current simulation state straight onto the ring's SVG nodes,
@@ -45,6 +120,25 @@ export function createRingPainter(svg: SVGSVGElement, sim: Simulation, maxSpeed:
     if (!body || !glass) continue;
     nodes[Number(g.dataset.car)] = { g, body, glass, transform: "", fill: "", tint: "", braking: "" };
   }
+
+  const pointer = svg.querySelector<SVGPathElement>('[data-part="pointer"]');
+  const tab = svg.querySelector<SVGGElement>('[data-part="tab"]');
+  const cutLabel = svg.querySelector<SVGTextElement>('[data-part="cut-label"]');
+  const pointerCache: Attributes = {};
+  const tabCache: Attributes = {};
+  const cutCache: Attributes = {};
+
+  let selected = -1;
+  let selectedTheta = Number.NaN;
+
+  function findSelected(): number {
+    if (selected >= 0 && nodes[selected]?.g.getAttribute("aria-pressed") === "true") return selected;
+    for (let car = 0; car < nodes.length; car += 1) {
+      if (nodes[car]?.g.getAttribute("aria-pressed") === "true") return car;
+    }
+    return -1;
+  }
+
   return {
     paint() {
       for (let car = 0; car < sim.carCount; car += 1) {
@@ -59,6 +153,26 @@ export function createRingPainter(svg: SVGSVGElement, sim: Simulation, maxSpeed:
         const braking = sim.brakeLight[car] ? "true" : "false";
         if (braking !== node.braking) node.g.setAttribute("data-braking", (node.braking = braking));
       }
+
+      const car = findSelected();
+      if (car !== selected) {
+        selected = car;
+        selectedTheta = Number.NaN;
+        // React re-rendered the marker for the new car; forget what was written before.
+        for (const cache of [pointerCache, tabCache, cutCache]) for (const key of Object.keys(cache)) delete cache[key];
+      }
+      if (car < 0) return;
+      const theta = carAngle(sim, car);
+      if (theta !== selectedTheta) {
+        selectedTheta = theta;
+        const layout = markerLayout(sim, car);
+        if (pointer) {
+          write(pointer, pointerCache, "d", layout.pointer);
+          write(pointer, pointerCache, "transform", layout.pointerTransform);
+        }
+        if (tab) write(tab, tabCache, "transform", layout.tabTransform);
+        if (cutLabel) write(cutLabel, cutCache, "opacity", layout.hideCutLabel ? "0" : "1");
+      }
     },
   };
 }
@@ -66,6 +180,60 @@ export function createRingPainter(svg: SVGSVGElement, sim: Simulation, maxSpeed:
 function polar(radius: number, degrees: number): string {
   const radians = (degrees * Math.PI) / 180;
   return `${(radius * Math.cos(radians)).toFixed(3)} ${(radius * Math.sin(radians)).toFixed(3)}`;
+}
+
+function arcPoint(radius: number, theta: number): string {
+  return `${(radius * Math.cos(theta)).toFixed(2)} ${(radius * Math.sin(theta)).toFixed(2)}`;
+}
+
+/** Radial verge posts at every POST metres except the cut at 0 m, which has its own tick. */
+function vergePosts(sim: Simulation, outer: number): { minor: string; major: string } {
+  let minor = "";
+  let major = "";
+  for (let distance = POST; distance < sim.road.length - 1e-9; distance += POST) {
+    const theta = angleAt(sim, distance);
+    const isMajor = Math.abs(distance % MAJOR_POST) < 1e-9;
+    const segment = `M${arcPoint(outer + 0.3, theta)}L${arcPoint(outer + (isMajor ? 2 : 1.2), theta)}`;
+    if (isMajor) major += segment;
+    else minor += segment;
+  }
+  return { minor, major };
+}
+
+/**
+ * One car seen from above, pointing along +x, centred on the origin: a
+ * squarer tail, a rounded slightly narrower nose, windscreen forward of the
+ * middle and a smaller rear window, tyres at the axles, pale headlamps and
+ * the brake lamps in the rear corners.
+ */
+function carShapes(length: number) {
+  const half = length / 2;
+  const w = BODY_WIDTH / 2;
+  const f = (value: number) => value.toFixed(2);
+  // Sides narrow slightly towards a rounded nose; the tail keeps small, square-ish corners.
+  const front = w - 0.06;
+  const body = [
+    `M${f(-half + 0.3)} ${-w}`,
+    `L${f(half - 1.15)} ${-front}`,
+    `C${f(half - 0.35)} ${f(-front + 0.02)} ${half} ${f(-front + 0.3)} ${half} ${f(-front + 0.6)}`,
+    `L${half} ${f(front - 0.6)}`,
+    `C${half} ${f(front - 0.3)} ${f(half - 0.35)} ${f(front - 0.02)} ${f(half - 1.15)} ${front}`,
+    `L${f(-half + 0.3)} ${w}`,
+    `Q${-half} ${w} ${-half} ${f(w - 0.3)}`,
+    `L${-half} ${f(-w + 0.3)}`,
+    `Q${-half} ${-w} ${f(-half + 0.3)} ${-w}Z`,
+  ].join("");
+  // Windscreen (front edge bowed forwards) and a narrower rear window, one path so one tint.
+  const screenBack = half - 1.85;
+  const screenFront = half - 1.15;
+  const rearFront = -half + 0.95;
+  const rearBack = -half + 0.5;
+  const glass = [
+    `M${screenBack.toFixed(2)} -0.66L${screenFront.toFixed(2)} -0.74Q${(screenFront + 0.22).toFixed(2)} 0 ${screenFront.toFixed(2)} 0.74L${screenBack.toFixed(2)} 0.66Z`,
+    `M${rearFront.toFixed(2)} -0.6L${rearBack.toFixed(2)} -0.64L${rearBack.toFixed(2)} 0.64L${rearFront.toFixed(2)} 0.6Z`,
+  ].join("");
+  const axles = [half - 1.15, -half + 1.05];
+  return { half, w, body, glass, axles };
 }
 
 type RingViewProps = Readonly<{
@@ -84,11 +252,16 @@ type RingViewProps = Readonly<{
  * playback loop then updates positions, colours and lights in place.
  */
 export const RingView = memo(function RingView({ sim, selected, collided, maxSpeed, onSelect, svgRef }: RingViewProps) {
+  const glowId = `ptj-glow-${useId().replace(/[^\w-]/g, "")}`;
   const radius = ringRadius(sim);
-  const length = sim.road.vehicleLength;
   const outer = radius + LANE / 2;
   const inner = radius - LANE / 2;
   const arrow = inner - 2.2;
+  const posts = vergePosts(sim, outer);
+  const shapes = carShapes(sim.road.vehicleLength);
+  const { half, w } = shapes;
+  const marker = selected >= 0 && selected < sim.carCount ? markerLayout(sim, selected) : null;
+  const tab = tabHalf(selected);
 
   /** Roving focus: only the selected car is a tab stop; arrows move to the car ahead or behind. */
   function keyDown(event: KeyboardEvent<SVGGElement>, car: number) {
@@ -116,14 +289,25 @@ export const RingView = memo(function RingView({ sim, selected, collided, maxSpe
       role="group"
       aria-label={`Ring road, ${Math.round(sim.road.length)} m round, with ${sim.carCount} cars driving clockwise`}
     >
+      <defs>
+        <radialGradient id={glowId}>
+          <stop offset="0" className={styles.glowStop} stopOpacity="0.75" />
+          <stop offset="0.5" className={styles.glowStop} stopOpacity="0.4" />
+          <stop offset="1" className={styles.glowStop} stopOpacity="0" />
+        </radialGradient>
+      </defs>
       <circle r={radius} className={styles.lane} strokeWidth={LANE} />
       <circle r={outer} className={styles.kerb} />
       <circle r={inner} className={styles.kerb} />
+      <g aria-hidden="true">
+        <path d={posts.minor} className={styles.post} />
+        <path d={posts.major} className={styles.postMajor} />
+      </g>
       {/* Where the road is cut to be unrolled into a straight line. */}
       <g className={styles.cut} aria-hidden="true">
         <line x1="0" x2="0" y1={-inner} y2={-outer} className={styles.cutAcross} />
-        <line x1="0" x2="0" y1={-outer - 0.4} y2={-outer - 2.8} className={styles.cutTick} />
-        <text x="0" y={-outer - 3.6} textAnchor="middle" className={styles.cutLabel}>
+        <line x1="0" x2="0" y1={-outer - 0.3} y2={-outer - 2.6} className={styles.cutTick} />
+        <text data-part="cut-label" x="-0.8" y={-outer - 0.7} textAnchor="end" className={styles.cutLabel} opacity={marker?.hideCutLabel ? 0 : 1}>
           0 m
         </text>
       </g>
@@ -149,39 +333,38 @@ export const RingView = memo(function RingView({ sim, selected, collided, maxSpe
               onKeyDown={(event) => keyDown(event, car)}
             >
               {/* Generous across the lane; along it, 30 cars leave only 7.7 m each. */}
-              <rect className={styles.hit} x={-length / 2 - 1.2} y={-4} width={length + 2.4} height={8} />
-              <ellipse className={styles.glow} cx={-length / 2} cy="0" rx="1.6" ry="1.9" />
+              <rect className={styles.hit} x={-half - 1.2} y={-4} width={half * 2 + 2.4} height={8} />
+              <ellipse data-part="glow" className={styles.glow} cx={-half - 0.35} cy="0" rx="1.75" ry="1.65" fill={`url(#${glowId})`} />
+              <rect className={styles.shadow} x={-half - 0.22} y={-w - 0.26} width={half * 2 + 0.44} height={2 * w + 0.52} rx="0.75" />
               {collided.includes(car) ? (
-                <rect className={styles.collided} x={-length / 2 - 1.5} y={-CAR_WIDTH / 2 - 1.5} width={length + 3} height={CAR_WIDTH + 3} rx="1.7" />
+                <rect className={styles.collided} x={-half - 1.5} y={-w - 1.5} width={half * 2 + 3} height={2 * w + 3} rx="1.7" />
               ) : null}
-              {isSelected ? (
-                <rect className={styles.halo} x={-length / 2 - 0.85} y={-CAR_WIDTH / 2 - 0.85} width={length + 1.7} height={CAR_WIDTH + 1.7} rx="1.3" />
-              ) : null}
-              <rect className={styles.focus} x={-length / 2 - 1.6} y={-CAR_WIDTH / 2 - 1.6} width={length + 3.2} height={CAR_WIDTH + 3.2} rx="1.8" />
-              <rect
-                data-part="body"
-                className={styles.body}
-                x={-length / 2}
-                y={-CAR_WIDTH / 2}
-                width={length}
-                height={CAR_WIDTH}
-                rx="0.75"
-                fill={speedColour(sim.speed[car], maxSpeed)}
-              />
-              <rect
-                data-part="glass"
-                x={length / 2 - 1.55}
-                y={-CAR_WIDTH / 2 + 0.28}
-                width="0.72"
-                height={CAR_WIDTH - 0.56}
-                rx="0.25"
-                fill={glassFor(sim, car, maxSpeed)}
-              />
-              <rect className={styles.lamp} x={-length / 2 + 0.06} y={-CAR_WIDTH / 2 + 0.06} width="0.55" height="0.62" rx="0.18" />
-              <rect className={styles.lamp} x={-length / 2 + 0.06} y={CAR_WIDTH / 2 - 0.68} width="0.55" height="0.62" rx="0.18" />
+              {isSelected ? <rect className={styles.halo} x={-half - 0.9} y={-w - 0.9} width={half * 2 + 1.8} height={2 * w + 1.8} rx="1.3" /> : null}
+              <rect className={styles.focus} x={-half - 1.6} y={-w - 1.6} width={half * 2 + 3.2} height={2 * w + 3.2} rx="1.8" />
+              {shapes.axles.flatMap((axle) =>
+                [-1, 1].map((side) => (
+                  <rect key={`${axle}${side}`} className={styles.tyre} x={axle - 0.36} y={side < 0 ? -w - 0.15 : w - 0.27} width="0.72" height="0.42" rx="0.12" />
+                )),
+              )}
+              <path data-part="body" className={styles.body} d={shapes.body} fill={speedColour(sim.speed[car], maxSpeed)} />
+              <path data-part="glass" d={shapes.glass} fill={glassFor(sim, car, maxSpeed)} />
+              <ellipse className={styles.headlamp} cx={half - 0.3} cy={-w + 0.47} rx="0.16" ry="0.22" />
+              <ellipse className={styles.headlamp} cx={half - 0.3} cy={w - 0.47} rx="0.16" ry="0.22" />
+              <rect data-part="lamp" className={styles.lamp} x={-half - 0.06} y={-w + 0.02} width="0.58" height="0.66" rx="0.16" />
+              <rect data-part="lamp" className={styles.lamp} x={-half - 0.06} y={w - 0.68} width="0.58" height="0.66" rx="0.16" />
             </g>
           );
         })}
+      </g>
+      {/* Always mounted (hidden only if nothing is selected) so the painter's node stays the live one. */}
+      <g data-testid="selection-marker" className={styles.marker} aria-hidden="true" display={marker ? undefined : "none"}>
+        <path data-part="pointer" d={marker?.pointer} transform={marker?.pointerTransform} />
+        <g data-part="tab" transform={marker?.tabTransform}>
+          <rect x={-tab.w} y={-tab.h} width={tab.w * 2} height={tab.h * 2} rx={tab.h * 0.8} />
+          <text textAnchor="middle" dy="0.36em">
+            {selected + 1}
+          </text>
+        </g>
       </g>
     </svg>
   );

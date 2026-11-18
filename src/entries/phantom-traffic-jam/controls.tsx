@@ -92,37 +92,44 @@ function density(carCount: number): string {
   return `${Math.round(perKm)} cars/km · ${gap.toFixed(1)} m gaps`;
 }
 
+type PresetsProps = Readonly<{ config: ExperimentConfig; onPreset: (config: ExperimentConfig) => void }>;
+
+/** The curated experiments: the one-tap main path, so they live with the transport rather than with the detail controls. */
+export function Presets({ config, onPreset }: PresetsProps) {
+  const id = useId();
+  const current = JSON.stringify(config);
+  return (
+    <section className={styles.experiments} aria-labelledby={id}>
+      <Label id={id} tone="muted">Experiments · restart the run</Label>
+      <div className={styles.presets}>
+        {PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={styles.button}
+            aria-pressed={JSON.stringify(preset.config) === current}
+            onClick={() => onPreset(preset.config)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 type ControlsProps = Readonly<{
   config: ExperimentConfig;
-  onPreset: (config: ExperimentConfig) => void;
   onRestartWith: (change: Partial<ExperimentConfig>) => void;
   onDriver: (key: DriverParamKey, si: number) => void;
   onVariation: (variation: number) => void;
 }>;
 
-export function Controls({ config, onPreset, onRestartWith, onDriver, onVariation }: ControlsProps) {
+export function Controls({ config, onRestartWith, onDriver, onVariation }: ControlsProps) {
   const idBase = useId();
-  const current = JSON.stringify(config);
 
   return (
     <div className={styles.controls}>
-      <section className={styles.group} aria-labelledby={`${idBase}-presets`}>
-        <Label id={`${idBase}-presets`} tone="muted">Presets</Label>
-        <div className={styles.presets}>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className={styles.button}
-              aria-pressed={JSON.stringify(preset.config) === current}
-              onClick={() => onPreset(preset.config)}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
       <section className={styles.group} aria-labelledby={`${idBase}-road`}>
         <Label id={`${idBase}-road`} tone="muted">Road · restarts the run</Label>
         <Slider spec={CAR_COUNT_SLIDER} value={config.carCount} hint={density(config.carCount)} onChange={(carCount) => onRestartWith({ carCount: Math.round(carCount) })} />
