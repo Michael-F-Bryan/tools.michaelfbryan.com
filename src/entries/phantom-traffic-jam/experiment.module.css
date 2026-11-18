@@ -1,0 +1,102 @@
+/* Phone: ring, transport, readouts, controls in one column. Wider: ring and transport on the left, the rest beside them. */
+.experiment { display: grid; gap: 24px; min-width: 0; }
+.stage, .side { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.side { gap: 24px; }
+@media (min-width: 52rem) {
+  .experiment { grid-template-columns: minmax(0, 38rem) minmax(17rem, 1fr); column-gap: 40px; align-items: start; }
+}
+
+/* ---- Ring ---- */
+.ring {
+  --brake-on: #ff2a1a;
+  --brake-off: #7d2e28;
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  border: 1px solid var(--rule-subtle);
+  background: var(--surface);
+}
+.ringSvg { display: block; width: 100%; height: 100%; overflow: visible; -webkit-tap-highlight-color: transparent; }
+.lane { fill: none; stroke: color-mix(in srgb, var(--rule) 26%, var(--surface)); }
+.kerb { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.cutAcross { stroke: var(--ink); stroke-width: 1px; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.45; }
+.cutTick { stroke: var(--ink); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.cutLabel { fill: var(--text-muted); font-family: var(--font-mono); font-size: 2.6px; }
+.direction path { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+.car { cursor: pointer; outline: none; }
+.hit { fill: transparent; pointer-events: all; }
+.body { stroke: var(--ink); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.lamp { fill: var(--brake-off); }
+.glow { fill: var(--brake-on); opacity: 0; pointer-events: none; }
+.car[data-braking="true"] .lamp { fill: var(--brake-on); }
+.car[data-braking="true"] .glow { opacity: 0.4; }
+.halo { fill: none; stroke: var(--accent); stroke-width: 2.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+.collided { fill: none; stroke: var(--error); stroke-width: 2px; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.focus { fill: none; stroke: var(--ink); stroke-width: 1.5px; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; opacity: 0; pointer-events: none; }
+.car:focus-visible .focus { opacity: 1; }
+
+/* The legend sits in the empty middle of the ring. */
+.legend { position: absolute; top: 50%; left: 50%; display: grid; gap: 4px; width: min(52%, 14rem); transform: translate(-50%, -50%); color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; line-height: 1.2; pointer-events: none; }
+.legendTitle { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.legendBar { display: block; height: 8px; border: 1px solid var(--ink); }
+.legendScale { position: relative; height: 1.2em; }
+.legendScale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.legendScale span:first-child { transform: none; }
+.legendScale span:last-child { transform: translateX(-100%); }
+.legendScale span::before { content: ""; position: absolute; top: -5px; left: 50%; height: 4px; border-left: 1px solid var(--ink); }
+.legendScale span:first-child::before { left: 0; }
+.legendScale span:last-child::before { left: auto; right: 0; }
+
+/* ---- Status ---- */
+.status { padding: 10px 12px; border: 1px solid var(--error); border-left-width: 4px; background: var(--surface); color: var(--ink); font-size: 14px; line-height: 1.4; }
+.status p { margin: 0; }
+.status p + p { margin-top: 2px; color: var(--text-secondary); }
+
+/* ---- Buttons ---- */
+.button { min-width: 44px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); cursor: pointer; font-size: 14px; line-height: 1.2; }
+.button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.button[aria-pressed="true"] { position: relative; border-color: var(--accent); background: var(--panel); color: var(--accent); font-weight: 700; }
+.button:disabled { border-color: var(--rule-subtle); color: var(--text-muted); cursor: not-allowed; }
+.button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: 2px; }
+.segmented { display: flex; }
+.segmented .button + .button { margin-left: -1px; }
+
+/* ---- Transport ---- */
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.play { min-width: 5.25rem; font-weight: 700; }
+.brake { flex: 1 1 11rem; border-color: var(--ink); font-weight: 700; }
+/* Simulated time sits in the ring's corner, beside what it describes. */
+.time { position: absolute; top: 8px; left: 10px; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+
+/* ---- Readouts ---- */
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 16px 24px; }
+.facts { display: grid; gap: 4px; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid var(--rule-subtle); }
+.facts div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.facts dt { color: var(--text-secondary); font-size: 14px; }
+.facts dt small { display: block; color: var(--text-muted); font-size: 12px; }
+.facts dd { margin: 0; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: pre; text-align: right; }
+.facts dd[data-active] { color: var(--accent); font-weight: 700; }
+
+/* ---- Controls ---- */
+.controls { display: grid; gap: 20px; }
+.group { display: grid; gap: 4px; }
+.group > :first-child { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-subtle); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; align-items: baseline; gap: 0 10px; padding-top: 4px; }
+.sliderName { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; font-size: 14px; }
+.sliderName small, .fieldName small { color: var(--text-muted); font-size: 12px; }
+.slider output { grid-area: value; color: var(--ink); font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.slider input { grid-area: track; width: 100%; min-width: 0; height: 36px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.slider input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+
+.field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding-top: 6px; }
+.fieldName { font-size: 14px; }
+.seed { display: flex; gap: 8px; }
+.seed input { width: 8.5rem; min-height: 44px; padding: 6px 10px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+.seed input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.details { margin-top: 8px; border-top: 1px solid var(--rule-subtle); }
+.details summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-size: 14px; font-weight: 700; }
+.details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
