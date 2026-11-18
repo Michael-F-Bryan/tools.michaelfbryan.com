@@ -1,0 +1,122 @@
+/*
+ * Phone: ring, transport, experiments, history, then readouts and controls in one column.
+ * Wider: ring, transport and history on the left, the details beside them.
+ * Watch view drops the details: the ring grows to what the viewport height allows
+ * (8rem left for the two transport rows under it and a little air) and the history sits beside it.
+ */
+.experiment { display: grid; grid-template-areas: "stage" "history" "side"; gap: 20px 40px; min-width: 0; }
+.stage, .side { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.stage { grid-area: stage; }
+.side { grid-area: side; gap: 24px; }
+.side[hidden] { display: none; }
+@media (min-width: 52rem) {
+  .experiment { grid-template-columns: minmax(0, 38rem) minmax(17rem, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "stage side" "history side"; align-items: start; }
+  .experiment[data-watch] {
+    grid-template-columns: minmax(0, max(20rem, calc(100dvh - 8rem))) minmax(16rem, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: "stage history";
+  }
+  .experiment[data-watch] .history { display: flex; flex-direction: column; align-self: stretch; }
+  .experiment[data-watch] .historyPlot { flex: 1 1 auto; min-height: 20rem; aspect-ratio: auto; }
+}
+
+/* ---- Ring ---- */
+.ring {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  border: 1px solid var(--rule-subtle);
+  background: var(--surface);
+}
+
+/* The legend sits in the empty middle of the ring. */
+.legend { position: absolute; top: 50%; left: 50%; display: grid; gap: 4px; width: min(52%, 14rem); transform: translate(-50%, -50%); color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; line-height: 1.2; pointer-events: none; }
+.legendTitle { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.legendBar { display: block; height: 8px; border: 1px solid var(--ink); }
+.legendScale { position: relative; height: 1.2em; }
+.legendScale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.legendScale span:first-child { transform: none; }
+.legendScale span:last-child { transform: translateX(-100%); }
+.legendScale span::before { content: ""; position: absolute; top: -5px; left: 50%; height: 4px; border-left: 1px solid var(--ink); }
+.legendScale span:first-child::before { left: 0; }
+.legendScale span:last-child::before { left: auto; right: 0; }
+.carLine { display: grid; gap: 1px; margin-top: 6px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.carName { color: var(--text-secondary); font-weight: 700; }
+
+/* ---- Status ---- */
+.status { padding: 10px 12px; border: 1px solid var(--error); border-left-width: 4px; background: var(--surface); color: var(--ink); font-size: 14px; line-height: 1.4; }
+.status p { margin: 0; }
+.status p + p { margin-top: 2px; color: var(--text-secondary); }
+
+/* ---- Buttons ---- */
+.button { min-width: 44px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); cursor: pointer; font-size: 14px; line-height: 1.2; }
+.button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.button[aria-pressed="true"] { position: relative; border-color: var(--accent); background: var(--panel); color: var(--accent); font-weight: 700; }
+.button:disabled { border-color: var(--rule-subtle); color: var(--text-muted); cursor: not-allowed; }
+.button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: 2px; }
+.segmented { display: flex; }
+.segmented .button + .button { margin-left: -1px; }
+
+/* ---- Transport ---- */
+/* Phones wrap it to three rows: play and rates; brake and reset; run ahead and the view toggle. */
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.play { min-width: 5.25rem; font-weight: 700; }
+.brake { flex: 1 1 11rem; border-color: var(--ink); font-weight: 700; touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.brake[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
+.ahead { display: inline-grid; align-items: center; justify-items: center; }
+.ahead > span { grid-area: 1 / 1; }
+.ahead > span[hidden] { display: block; visibility: hidden; }
+.ahead[data-active] { border-color: var(--accent); color: var(--accent); }
+.watch { margin-left: auto; }
+@media (max-width: 22rem) {
+  .transport .button { padding-inline: 10px; }
+}
+/* Simulated time sits in the ring's corner, beside what it describes. */
+.time { position: absolute; top: 8px; left: 10px; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+
+/* ---- Space-time history ---- */
+.history { grid-area: history; display: grid; gap: 6px; min-width: 0; margin: 0; }
+.historyPlot { position: relative; width: 100%; aspect-ratio: 3 / 4; border: 1px solid var(--rule-subtle); background: var(--surface); }
+.historyPlot canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+@media (min-width: 52rem) {
+  .historyPlot { aspect-ratio: 1; }
+}
+.historyKey { color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+
+/* ---- Readouts ---- */
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 16px 24px; }
+.facts { display: grid; gap: 4px; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid var(--rule-subtle); }
+.facts div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.facts dt { color: var(--text-secondary); font-size: 14px; }
+.facts dt small { display: block; color: var(--text-muted); font-size: 12px; }
+.facts dd { margin: 0; color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: pre; text-align: right; }
+.facts dd[data-active] { color: var(--accent); font-weight: 700; }
+.facts .sparkRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; }
+.sparkRow dd:last-child { grid-column: 1 / -1; }
+.spark { display: block; width: 100%; height: 28px; }
+
+/* ---- Controls ---- */
+.controls { display: grid; gap: 20px; }
+.experiments { display: grid; gap: 8px; margin-top: 6px; }
+.group { display: grid; gap: 4px; }
+.group > :first-child { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-subtle); }
+/* One row of three where it fits, otherwise stacked full width; each button states what its experiment is. */
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); gap: 8px; }
+.preset { display: grid; gap: 2px; justify-items: start; text-align: left; }
+.presetName { font-weight: 700; }
+.presetFacts { color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; font-weight: 400; }
+.preset[aria-pressed="true"] .presetFacts { color: var(--accent); }
+
+.slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "track track"; align-items: baseline; gap: 0 10px; padding-top: 4px; }
+.sliderName { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; font-size: 14px; }
+.sliderName small, .fieldName small { color: var(--text-muted); font-size: 12px; }
+.slider output { grid-area: value; color: var(--ink); font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.slider input { grid-area: track; width: 100%; min-width: 0; height: 36px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.slider input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+
+.field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding-top: 6px; }
+.fieldName { font-size: 14px; }
+.seed { display: flex; gap: 8px; }
+.seed input { width: 8.5rem; min-height: 44px; padding: 6px 10px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+.seed input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
