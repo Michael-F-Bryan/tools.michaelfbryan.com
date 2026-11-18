@@ -117,6 +117,13 @@ function setData(element: HTMLElement | null, name: string, value: number) {
 }
 
 const SPEED_BUCKETS = 40;
+/** Trace width, CSS px: thin from half the colour scale up, growing to the slow width at standstill. */
+const FAST_WIDTH = 1.25;
+const SLOW_WIDTH = 2.5;
+function traceWidth(fraction: number): number {
+  const slow = Math.min(1, Math.max(0, 1 - fraction / 0.5));
+  return FAST_WIDTH + (SLOW_WIDTH - FAST_WIDTH) * slow * slow * (3 - 2 * slow);
+}
 const GUTTER = 42;
 const TOP = 30;
 const BOTTOM = 22;
@@ -250,12 +257,14 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
   ctx.clip();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.lineWidth = 1.6;
-  buckets.forEach((path, bucket) => {
-    if (!path) return;
+  // Slow segments are drawn last and heavier, so jam bands stay readable on a dark plot.
+  for (let bucket = SPEED_BUCKETS - 1; bucket >= 0; bucket -= 1) {
+    const path = buckets[bucket];
+    if (!path) continue;
     ctx.strokeStyle = speedColour((bucket / (SPEED_BUCKETS - 1)) * maxSpeed, maxSpeed);
+    ctx.lineWidth = traceWidth(bucket / (SPEED_BUCKETS - 1));
     ctx.stroke(path);
-  });
+  }
   ctx.strokeStyle = palette.ink;
   ctx.lineWidth = 6;
   ctx.stroke(casing);

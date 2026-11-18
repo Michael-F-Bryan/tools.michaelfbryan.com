@@ -90,11 +90,21 @@ export const RingView = memo(function RingView({ sim, selected, collided, maxSpe
   const inner = radius - LANE / 2;
   const arrow = inner - 2.2;
 
+  /** Roving focus: only the selected car is a tab stop; arrows move to the car ahead or behind. */
   function keyDown(event: KeyboardEvent<SVGGElement>, car: number) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onSelect(car);
+      return;
     }
+    const ahead = event.key === "ArrowRight" || event.key === "ArrowUp";
+    const behind = event.key === "ArrowLeft" || event.key === "ArrowDown";
+    if (!ahead && !behind) return;
+    event.preventDefault();
+    const next = ahead ? sim.leader[car] : sim.leader.indexOf(car);
+    if (next < 0) return;
+    onSelect(next);
+    event.currentTarget.parentElement?.querySelector<SVGGElement>(`g[data-car="${next}"]`)?.focus();
   }
 
   return (
@@ -132,7 +142,7 @@ export const RingView = memo(function RingView({ sim, selected, collided, maxSpe
               className={styles.car}
               transform={carTransform(sim, car)}
               role="button"
-              tabIndex={0}
+              tabIndex={isSelected ? 0 : -1}
               aria-label={`Car ${car + 1}`}
               aria-pressed={isSelected}
               onClick={() => onSelect(car)}
