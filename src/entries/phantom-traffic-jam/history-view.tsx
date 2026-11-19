@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { markerLabel, newestTime, slotOf, type History } from "./history";
+import { markerLabel, newestTime, slotOf, type History, type HistoryLane } from "./history";
 import { speedColour, speedFraction } from "./speed-scale";
 import styles from "./experiment.module.css";
+import type { TrackId } from "./track";
 
 /** Tells the history canvases that the record changed (a sample or a marker). */
 export type HistoryFeed = Readonly<{ subscribe(listener: () => void): () => void; notify(): void }>;
@@ -132,8 +133,25 @@ const GUTTER = 42;
 const TOP = 30;
 const BOTTOM = 22;
 const RIGHT = 8;
+/** Between the main lane's panel and the ramp's, CSS px. */
+const PANEL_GAP = 16;
 const TICK_SECONDS = 30;
 const LABEL_GAP = 13;
+
+type Panel = Readonly<{ lane: HistoryLane; x0: number; x1: number }>;
+
+/** One panel per lane, side by side, widths in proportion to their lengths. */
+function layoutPanels(history: History, left: number, right: number): Panel[] {
+  const total = history.lanes.reduce((sum, lane) => sum + lane.length, 0);
+  const usable = right - left - PANEL_GAP * (history.lanes.length - 1);
+  let x = left;
+  return history.lanes.map((lane) => {
+    const width = (usable * lane.length) / total;
+    const panel = { lane, x0: x, x1: x + width };
+    x += width + PANEL_GAP;
+    return panel;
+  });
+}
 
 function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: number, palette: Palette, history: History, selected: number, maxSpeed: number) {
   const left = GUTTER;
@@ -143,11 +161,11 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
   const plotWidth = right - left;
   const plotHeight = bottom - top;
   if (plotWidth <= 20 || plotHeight <= 20) return;
-  const length = history.roadLength;
+  const panels = layoutPanels(history, left, right);
   const span = history.windowSeconds;
   const now = newestTime(history);
   const t0 = Math.max(0, now - span);
-  const x = (position: number) => left + (position / length) * plotWidth;
+  const x = (panel: Panel, position: number) => panel.x0 + (position / panel.lane.length) * (panel.x1 - panel.x0);
   const y = (time: number) => top + ((time - t0) / span) * plotHeight;
   const font = (size: number, weight = 400) => `${weight} ${size}px ${palette.mono}`;
 
@@ -162,8 +180,10 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
     ctx.strokeStyle = palette.ruleSubtle;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(left, ty);
-    ctx.lineTo(right, ty);
+    for (const panel of panels) {
+      ctx.moveTo(panel.x0, ty);
+      ctx.lineTo(panel.x1, ty);
+    }
     ctx.stroke();
     ctx.strokeStyle = palette.rule;
     ctx.beginPath();
@@ -179,48 +199,81 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
     ctx.fillText("now", left - 7, Math.min(bottom - 5, nowY));
   }
 
-  // The seam: both edges are the roadside cut on the ring.
-  ctx.strokeStyle = palette.ink;
-  ctx.globalAlpha = 0.45;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  for (const edge of [left + 0.5, right - 0.5]) {
-    ctx.moveTo(edge, top);
-    ctx.lineTo(edge, bottom);
+  // Bends (shaded) and the merge zone (tinted), behind the traces.
+  for (const panel of panels) {
+    ctx.fillStyle = palette.rule;
+    ctx.globalAlpha = 0.16;
+    for (const [from, to] of panel.lane.corners) ctx.fillRect(x(panel, from), top, x(panel, to) - x(panel, from), plotHeight);
+    if (history.zone) {
+      const [from, to] = panel.lane.name === "ramp" ? [history.zone.rampStart, history.zone.rampEnd] : [history.zone.mainStart, history.zone.mainEnd];
+      ctx.fillStyle = palette.accent;
+      ctx.globalAlpha = 0.1;
+      ctx.fillRect(x(panel, from), top, x(panel, to) - x(panel, from), plotHeight);
+    }
+    ctx.globalAlpha = 1;
   }
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (const edge of [left + 1, right - 1]) {
-    ctx.moveTo(edge, top - 2);
-    ctx.lineTo(edge, top - 8);
+
+  // Panel edges: the seam of a closed lane is the roadside cut at both edges; an open lane begins at the diverge and ends at its end.
+  for (const panel of panels) {
+    ctx.strokeStyle = palette.ink;
+    ctx.lineWidth = 1;
+    if (panel.lane.closed) {
+      ctx.globalAlpha = 0.45;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      for (const edge of [panel.x0 + 0.5, panel.x1 - 0.5]) {
+        ctx.moveTo(edge, top);
+        ctx.lineTo(edge, bottom);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (const edge of [panel.x0 + 1, panel.x1 - 1]) {
+        ctx.moveTo(edge, top - 2);
+        ctx.lineTo(edge, top - 8);
+      }
+      ctx.stroke();
+    } else {
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(panel.x0 + 0.5, top);
+      ctx.lineTo(panel.x0 + 0.5, bottom);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(panel.x1 - 1, top);
+      ctx.lineTo(panel.x1 - 1, bottom);
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = palette.ruleSubtle;
+    ctx.beginPath();
+    ctx.moveTo(panel.x0, top + 0.5);
+    ctx.lineTo(panel.x1, top + 0.5);
+    ctx.moveTo(panel.x0, bottom - 0.5);
+    ctx.lineTo(panel.x1, bottom - 0.5);
+    ctx.stroke();
   }
-  ctx.stroke();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = palette.ruleSubtle;
-  ctx.beginPath();
-  ctx.moveTo(left, top + 0.5);
-  ctx.lineTo(right, top + 0.5);
-  ctx.moveTo(left, bottom - 0.5);
-  ctx.lineTo(right, bottom - 0.5);
-  ctx.stroke();
 
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = palette.muted;
   ctx.font = font(11);
-  ctx.textAlign = "left";
-  ctx.fillText("0 m (cut)", left, top - 12);
-  ctx.textAlign = "right";
-  ctx.fillText(`${Math.round(length)} m = 0 m`, right, top - 12);
+  for (const panel of panels) {
+    ctx.textAlign = "left";
+    ctx.fillText(panel.lane.closed ? "0 m (cut)" : `${panel.lane.name} 0 m`, panel.x0, top - 12);
+    ctx.textAlign = "right";
+    ctx.fillText(panel.lane.closed ? `${Math.round(panel.lane.length)} m = 0 m` : `${Math.round(panel.lane.length)} m · end`, panel.x1, top - 12);
+  }
   ctx.font = font(10);
   ctx.textAlign = "left";
   ctx.fillText("time ↓", 2, height - 7);
   ctx.textAlign = "center";
   ctx.fillText("direction of travel →", left + plotWidth / 2, height - 7);
 
-  // Traces: every car, one stroke per speed colour.
+  // Traces: every car, one stroke per speed colour. A car's line breaks where it changes lane.
   const n = history.carCount;
   const buckets: (Path2D | undefined)[] = new Array(SPEED_BUCKETS);
   const casing = new Path2D();
@@ -230,6 +283,11 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
     for (let i = 1; i < history.count; i += 1) {
       const a = slotOf(history, i - 1);
       const b = slotOf(history, i);
+      const laneA = history.lane[a * n + car];
+      if (laneA !== history.lane[b * n + car]) continue;
+      const panel = panels[laneA];
+      if (!panel) continue;
+      const length = panel.lane.length;
       const p0 = history.position[a * n + car];
       const p1 = history.position[b * n + car];
       const ta = history.time[a];
@@ -239,25 +297,25 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
       const target = isSelected ? selectedBuckets : buckets;
       const path = (target[bucket] ??= new Path2D());
       const segments: [number, number, number, number][] = [];
-      if (p1 < p0 - length / 2) {
+      if (panel.lane.closed && p1 < p0 - length / 2) {
         // Crossed the cut: leave at the right edge, re-enter at the left at the interpolated time.
         const f = (length - p0) / (p1 + length - p0);
         const tc = ta + f * (tb - ta);
         segments.push([p0, ta, length, tc], [0, tc, p1, tb]);
-      } else if (p1 <= p0 + length / 2) {
+      } else if (!panel.lane.closed || p1 <= p0 + length / 2) {
         segments.push([p0, ta, p1, tb]);
       }
       for (const [xa, ya, xb, yb] of segments) {
         for (const target of isSelected ? [path, casing] : [path]) {
-          target.moveTo(x(xa), y(ya));
-          target.lineTo(x(xb), y(yb));
+          target.moveTo(x(panel, xa), y(ya));
+          target.lineTo(x(panel, xb), y(yb));
         }
       }
     }
   }
   ctx.save();
   ctx.beginPath();
-  ctx.rect(left, top, plotWidth, plotHeight);
+  for (const panel of panels) ctx.rect(panel.x0, top, panel.x1 - panel.x0, plotHeight);
   ctx.clip();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -278,6 +336,23 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
     ctx.strokeStyle = speedColour((bucket / (SPEED_BUCKETS - 1)) * maxSpeed, maxSpeed);
     ctx.stroke(path);
   });
+  // Merges: a small diamond where each car arrived in the main lane.
+  const mainPanel = panels[0];
+  for (const merge of history.merges) {
+    const mx = x(mainPanel, merge.position);
+    const my = y(merge.time);
+    ctx.beginPath();
+    ctx.moveTo(mx, my - 4.5);
+    ctx.lineTo(mx + 4.5, my);
+    ctx.lineTo(mx, my + 4.5);
+    ctx.lineTo(mx - 4.5, my);
+    ctx.closePath();
+    ctx.fillStyle = palette.surface;
+    ctx.fill();
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
   ctx.restore();
 
   // Markers, newest first so the latest label wins a collision.
@@ -312,7 +387,8 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
       ctx.setLineDash([]);
       label(marker.label, my - 4, "right", palette.secondary);
     } else {
-      const mx = x(marker.position);
+      const panel = panels[marker.lane] ?? mainPanel;
+      const mx = x(panel, marker.position);
       ctx.strokeStyle = palette.accent;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -337,18 +413,25 @@ function drawSpaceTime(ctx: CanvasRenderingContext2D, width: number, height: num
   }
 }
 
-type HistoryViewProps = Readonly<{ history: History; feed: HistoryFeed; selected: number; maxSpeed: number }>;
+type HistoryViewProps = Readonly<{ history: History; feed: HistoryFeed; selected: number; maxSpeed: number; track: TrackId }>;
+
+const CAPTIONS: Record<TrackId, string> = {
+  ring: "Each line is one car, moving right. Where cars slow, their lines kink dark; the kinks line up into jams that drift left.",
+  b: "The circuit unrolled from the spine's foot. Each line is one car, moving right; the shaded bands are the bends, where every line darkens and bunches.",
+  merge: "Left, the ring unrolled at the cut; right, the ramp from where it leaves the ring to its end. A car's line jumps to the ramp panel when it takes the ramp and back (◇) when it merges; the tinted band is the merge zone.",
+};
 
 /**
- * The ring unrolled at the cut: position across, simulated time down. Each
- * car's line runs rightwards; a jam is a band of slow (dark) segments that
- * drifts leftwards as time goes on.
+ * The track unrolled: position across (one panel per lane), simulated time
+ * down. Each car's line runs rightwards; a jam is a band of slow (dark)
+ * segments that drifts leftwards as time goes on.
  */
-export function HistoryView({ history, feed, selected, maxSpeed }: HistoryViewProps) {
+export function HistoryView({ history, feed, selected, maxSpeed, track }: HistoryViewProps) {
   const draw = useCallback<Draw>(
     (ctx, width, height, palette, canvas) => {
       setData(canvas.parentElement, "samples", history.count);
       setData(canvas.parentElement, "markers", history.markers.length);
+      setData(canvas.parentElement, "merges", history.merges.length);
       setText(canvas.parentElement, "markerLabels", history.markers.map(markerLabel).join("|"));
       drawSpaceTime(ctx, width, height, palette, history, selected, maxSpeed);
     },
@@ -356,16 +439,17 @@ export function HistoryView({ history, feed, selected, maxSpeed }: HistoryViewPr
   );
   const canvasRef = useHistoryCanvas(draw, feed);
   const minutes = history.windowSeconds / 60;
+  const lanes = history.lanes.length > 1 ? "the ring and the ramp side by side" : "position along the road";
   return (
     <figure className={styles.history}>
       <div className={styles.historyPlot} data-testid="history">
         <canvas
           ref={canvasRef}
           role="img"
-          aria-label={`Space-time history of the last ${minutes} minutes: position round the ring from the 0 m cut across, simulated time downwards, one line per car coloured by speed, with brake interventions and setting changes marked.`}
+          aria-label={`Space-time history of the last ${minutes} minutes: ${lanes} across, simulated time downwards, one line per car coloured by speed, with bends shaded, merges, brake interventions and setting changes marked.`}
         />
       </div>
-      <figcaption className={styles.historyKey}>Each line is one car, moving right. Where cars slow, their lines kink dark; the kinks line up into jams that drift left.</figcaption>
+      <figcaption className={styles.historyKey}>{CAPTIONS[track]}</figcaption>
     </figure>
   );
 }

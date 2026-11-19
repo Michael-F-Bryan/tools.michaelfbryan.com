@@ -11,7 +11,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The Playwright suite alone takes 9-14 minutes on pull requests (two
+    # workers, a dev server, retries on flaky catalogue navigations); with
+    # setup, lint, type-check and build the job sits at the old 15-minute
+    # limit and was cancelled mid-build.
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository

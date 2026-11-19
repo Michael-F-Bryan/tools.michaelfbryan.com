@@ -5,16 +5,20 @@
  * for display only.
  *
  * The model is layered so each question has one answer:
+ *   geometry    — the track: lanes, bends and the ramp's junction (track.ts)
  *   perception  — what a driver can see, and how stale it is (reaction delay)
  *   driver      — observation + parameters -> requested acceleration (pure)
+ *   merging     — a ramp driver's decision to move over, and a main-road
+ *                 driver's decision to make room (local rules, same snapshot)
  *   intervention— an experimenter's brake tap overriding one driver's request
  *   vehicle     — physical limits and integration of the request into motion
  * Rendering and playback live outside the model entirely.
  */
+import type { Track, TrackId } from "./track";
 
-/** The fixed road and vehicle geometry. Not adjustable in this version. */
+/** Vehicle geometry and the main lane's length. Not adjustable. */
 export type Road = Readonly<{
-  /** Ring circumference, m. */
+  /** Main lane length (ring circumference, or the B's lap), m. */
   length: number;
   /** Bumper-to-bumper vehicle length, m. */
   vehicleLength: number;
@@ -42,7 +46,7 @@ export type DriverParams = Readonly<{
 
 export type DriverParamKey = keyof DriverParams;
 
-/** What a driver perceives: their own speed and the car ahead. */
+/** What a driver perceives: their own speed and the car ahead (or the end of their lane). */
 export type Observation = Readonly<{
   /** Own speed, m/s. */
   speed: number;
@@ -54,9 +58,23 @@ export type Observation = Readonly<{
 
 export type StartArrangement = "even" | "jumbled";
 
+/** How drivers behave at the on-ramp (the merge track). */
+export type MergingParams = Readonly<{
+  /**
+   * How far a main-road driver goes to let a ramp car in ahead of them: they
+   * brake up to this fraction of their comfortable braking for it. 0 never
+   * makes room; 1 treats the ramp car as if it were already in front.
+   */
+  cooperation: number;
+  /** Braking a merge may ask of the merging driver or the car behind them, m/s². */
+  acceptableBraking: number;
+  /** Fraction of cars that use the ramp (fixed per car for the whole run). Restarts. */
+  rampShare: number;
+}>;
+
 /** Everything needed to reproduce a run from t = 0. */
 export type ExperimentConfig = Readonly<{
-  /** Cars on the ring; with a fixed ring this is the density control. */
+  /** Cars on the track; with fixed roads this is the density control. */
   carCount: number;
   /** Centre of the driver population. */
   driver: DriverParams;
@@ -76,24 +94,41 @@ export type ExperimentConfig = Readonly<{
    * outcome: what the traffic does with it is up to the drivers.
    */
   scheduledTap?: Readonly<{ time: number; car: number }>;
+  /** Which road. Absent means the original ring. */
+  track?: TrackId;
+  /** Sideways acceleration every driver accepts in a bend, m/s² (sets corner speeds). Absent means the default. */
+  cornering?: number;
+  /** Merge behaviour. Absent means the defaults. Only the merge track reads it. */
+  merging?: MergingParams;
 }>;
 
 export type SimulationStatus =
   | Readonly<{ kind: "running" }>
   /** Two cars overlapped. The run is frozen at this instant, not repaired. */
   | Readonly<{ kind: "collision"; time: number; follower: number; leader: number }>
-  /** A non-finite or otherwise impossible value appeared. */
+  /** A non-finite or otherwise impossible value appeared (including a car driven off the end of the ramp). */
   | Readonly<{ kind: "invalid"; time: number; reason: string }>;
+
+/** A ramp car moved over into the main lane. */
+export type MergeEvent = Readonly<{
+  time: number;
+  car: number;
+  /** Main-lane metres where it arrived. */
+  position: number;
+}>;
 
 /**
  * A running experiment. Arrays are indexed by car identity, which never
- * changes; `leader[i]` names the car directly ahead of car `i`, so nothing
- * depends on where a car happens to sit in the arrays.
+ * changes; `leader[i]` names the car directly ahead of car `i` along its
+ * lane (-1 when nothing is ahead before the lane ends), recomputed from the
+ * cars' physical order after every step, so nothing depends on where a car
+ * happens to sit in the arrays.
  *
  * Treat as read-only outside `simulation.ts`.
  */
 export type Simulation = {
   readonly road: Road;
+  readonly track: Track;
   readonly carCount: number;
   /** Fixed integration step, s. */
   readonly dt: number;
@@ -103,7 +138,11 @@ export type Simulation = {
   steps: number;
   status: SimulationStatus;
   readonly leader: Int32Array;
-  /** Front-bumper position along the ring, m, always in [0, road.length). */
+  /** Which lane of the track each car is on (0 = main). */
+  readonly lane: Uint8Array;
+  /** 1 for cars that take the ramp whenever they reach it, 0 for cars that stay on the main road. */
+  readonly route: Uint8Array;
+  /** Front-bumper position along the car's lane, m; in [0, lane length) on a closed lane. */
   readonly position: Float64Array;
   /** Total distance driven since the start, m (never wraps). */
   readonly travelled: Float64Array;
@@ -113,14 +152,21 @@ export type Simulation = {
   readonly acceleration: Float64Array;
   /** 1 while the brake light is lit. Derived from realised deceleration, not pedal pressure. */
   readonly brakeLight: Uint8Array;
+  /** Simulated time each car last merged into the main lane, or -Infinity. For drawing the move; the model is done with it. */
+  readonly mergedAt: Float64Array;
   /** Each driver's current parameters (population centre scaled by their fixed offsets). */
   readonly drivers: readonly DriverParams[];
+  /** Lateral acceleration accepted in bends, m/s². */
+  readonly cornering: number;
+  readonly merging: MergingParams;
   /**
    * Every experimenter intervention so far, oldest first, appended by the
    * model when it takes effect (a tap, the scheduled tap, or the start of a
    * held brake). Read-only for the page, which uses it to mark the history.
    */
   readonly interventions: readonly Intervention[];
+  /** Every merge so far, oldest first. */
+  readonly merges: readonly MergeEvent[];
 };
 
 export type Intervention = Readonly<{
@@ -134,9 +180,15 @@ export type Intervention = Readonly<{
 /** A snapshot of one car for the details panel. */
 export type CarReadout = Readonly<{
   car: number;
+  /** -1 when nothing is ahead before the lane ends. */
   leader: number;
+  lane: number;
+  /** On the ramp, inside the merge zone, not yet merged. */
+  inZone: boolean;
+  /** Corner speed where the car is, m/s, or Infinity on an unlimited stretch. */
+  limit: number;
   speed: number;
-  /** Actual bumper-to-bumper gap right now, m. */
+  /** Actual bumper-to-bumper gap right now (to the lane end if there is no leader), m. */
   gap: number;
   /** IDM s*: the gap this driver currently wants, from what they perceive, m. */
   desiredGap: number;
@@ -156,6 +208,12 @@ export type TrafficSummary = Readonly<{
   speedSpread: number;
   minSpeed: number;
   maxSpeed: number;
+  /** Cars that passed the end of the merge zone on the main lane over the last minute, per minute (merge track; else 0). */
+  flow: number;
+  /** Merges so far. */
+  merges: number;
+  /** Ramp cars in the merge zone that are stopped (or nearly), waiting for a gap. */
+  waiting: number;
 }>;
 
 /** A slider's domain, expressed in the units shown to the reader. */
@@ -177,38 +235,3 @@ export type Preset = Readonly<{
   label: string;
   config: ExperimentConfig;
 }>;
-
-/*
- * Functions the model exports (see the named files):
- *
- * driver.ts
- *   desiredGap(observation: Observation, params: DriverParams, road: Road): number
- *   desiredAcceleration(observation: Observation, params: DriverParams, road: Road): number
- *
- * simulation.ts
- *   createSimulation(config: ExperimentConfig, options?: { dt?: number }): Simulation
- *   stepSimulation(sim: Simulation): void          // one fixed step; no-op unless status is "running"
- *   setDrivers(sim: Simulation, driver: DriverParams, variation: number): void   // live change, no reset
- *   tapBrake(sim: Simulation, car: number): void   // experimenter's brake tap on one car (fixed short duration)
- *   holdBrake(sim: Simulation, car: number): void  // experimenter starts holding this car's brake: at least one
- *                                                  // tap's worth, then for as long as held, up to HOLD_LIMIT seconds
- *   releaseBrake(sim: Simulation, car: number): void // experimenter lets go; the driver has control again once any
- *                                                  // remaining tap minimum has run out. Safe to call when not held.
- *   HOLD_LIMIT: number                             // s of simulated time after which a held brake releases itself
- *   readCar(sim: Simulation, car: number): CarReadout
- *   summarise(sim: Simulation): TrafficSummary
- *
- * parameters.ts
- *   ROAD: Road
- *   DEFAULT_DT: number
- *   DRIVER_SLIDERS: Record<DriverParamKey, SliderSpec>
- *   CAR_COUNT_SLIDER: SliderSpec
- *   VARIATION_SLIDER: SliderSpec          // display unit "%"; displayPerSI 100
- *   PRESETS: readonly Preset[]            // the curated experiments, in display order:
- *                                         //   id "tap"   "One brake tap"   (quick drivers; the tap fades)
- *                                         //   id "slow"  "Slow reactions"  (same, but a longer reaction delay; the tap grows)
- *                                         //   id "mixed" "Mixed drivers"   (drivers differ; variation > 0)
- *   DEFAULT_PRESET_ID: string             // "slow": the page opens on the experiment that shows the phenomenon
- *   DEFAULT_CONFIG: ExperimentConfig      // === the config of the preset with DEFAULT_PRESET_ID
- *   SCHEDULED_TAP: { time: number; car: number }   // the one scheduled tap the experiments share
- */

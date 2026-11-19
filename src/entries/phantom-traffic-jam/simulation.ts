@@ -1,6 +1,6 @@
 /**
- * Ring-road traffic: IDM drivers (driver.ts) with an explicit reaction delay,
- * stepped synchronously.
+ * Traffic on a closed track: IDM drivers (driver.ts) with an explicit
+ * reaction delay, stepped synchronously, on one of three roads (track.ts).
  *
  * Sources
  *  - IDM: Treiber, Hennecke & Helbing (2000), https://arxiv.org/abs/cond-mat/0002177
@@ -10,24 +10,37 @@
  *    reaction time is used: the stimuli (speed, gap, speed difference) are
  *    evaluated at t − τ, linearly interpolated when τ is not a multiple of dt
  *    (their Sec. 2.1), then advanced with v += a·dt, x += v·dt + a·dt²/2 (Eq. 21).
+ *  - Merge safety: the safety criterion of MOBIL, Kesting, Treiber & Helbing
+ *    (2007), https://www.akesting.de/download/MOBIL_TGF07.pdf: the car that
+ *    would end up behind must not be asked to brake harder than b_safe,
+ *    predicted with the car-following model itself. MOBIL's incentive
+ *    criterion is for optional lane changes; a ramp car has to merge, so here
+ *    it merges as soon as the safety criterion holds, and the rules for
+ *    adjusting speed to a gap and for making room are this model's own
+ *    (see `decideMerges` and `cooperate`), not part of MOBIL.
  *
- * Layers, one function each: perceive (history) -> desiredAcceleration
- * (driver.ts) -> applyTap (intervention) -> integrate (vehicle). All cars
- * request from the same pre-step state and then advance together; cars are
- * addressed by identity through `leader[i]`, never by array order.
+ * Layers, one function each: perceive (history) -> desiredAcceleration +
+ * cornerAcceleration (driver.ts) -> decideMerges/cooperate (merging) ->
+ * applyTap (intervention) -> integrate (vehicle). Every driver decides from
+ * the same pre-step state; then every car moves and every accepted merge is
+ * committed together; then the cars' order along each lane is re-read. Cars
+ * are addressed by identity, never by array order.
  *
  * Nothing random happens after initialisation, and a failed run is frozen
  * rather than repaired.
  */
-import { ACCELERATION_EXPONENT, desiredAcceleration, desiredGap } from "./driver";
-import { DEFAULT_DT, ROAD } from "./parameters";
+import { ACCELERATION_EXPONENT, cornerAcceleration, desiredAcceleration, desiredGap } from "./driver";
+import { DEFAULT_CORNERING, DEFAULT_DT, DEFAULT_MERGING, ROAD } from "./parameters";
 import { createRandom } from "./random";
+import { cornersAhead, limitAt, positiveMod, trackFor, type Lane, type Track } from "./track";
 import type {
   CarReadout,
   DriverParamKey,
   DriverParams,
   ExperimentConfig,
   Intervention,
+  MergeEvent,
+  MergingParams,
   Observation,
   Simulation,
   TrafficSummary,
@@ -72,6 +85,22 @@ export const JUMBLE_FRACTION = 0.13;
 /** History kept for perception, s. Longer delays (beyond the slider range) are clamped. */
 export const HISTORY_SECONDS = 3;
 
+/** How far ahead drivers read the road for bends, m. Beyond the longest comfortable braking distance from the fastest slider speed. */
+export const CORNER_HORIZON = 120;
+
+/**
+ * A merge also needs this much clear road, m, in front and behind in the main
+ * lane. The braking criterion alone already implies far more at any speed
+ * difference; this keeps "no overlap" true by construction at crawling speeds.
+ */
+export const MERGE_CLEARANCE = 2;
+
+/** A ramp car in the merge zone below this speed, m/s, counts as waiting. */
+export const WAITING_SPEED = 0.5;
+
+/** Flow past the merge is counted over this window, s. */
+export const FLOW_WINDOW = 60;
+
 const DRIVER_KEYS: readonly DriverParamKey[] = [
   "desiredSpeed",
   "timeGap",
@@ -82,6 +111,9 @@ const DRIVER_KEYS: readonly DriverParamKey[] = [
 
 /** Smallest fraction of the centre value a varied parameter may take. */
 const MIN_PARAMETER_FRACTION = 0.1;
+
+const MAIN = 0;
+const RAMP = 1;
 
 /** `Simulation` plus the private state behind it. */
 export type InternalSimulation = Simulation & {
@@ -99,6 +131,10 @@ export type InternalSimulation = Simulation & {
   scheduledCar: number;
   /** Mutable backing of `Simulation.interventions`. */
   log: Intervention[];
+  /** Mutable backing of `Simulation.merges`. */
+  mergeLog: MergeEvent[];
+  /** Simulated times at which a car passed the end of the merge zone on the main lane, within FLOW_WINDOW. */
+  crossings: number[];
   /** Ring buffer of perceived state, slot (step mod capacity) * carCount + car. */
   historySpeed: Float64Array;
   historyGap: Float64Array;
@@ -106,20 +142,14 @@ export type InternalSimulation = Simulation & {
   historyCapacity: number;
   /** Scratch: this step's requested acceleration per car. */
   request: Float64Array;
+  /** Scratch: 1 for a car whose merge was accepted this step. */
+  accepted: Uint8Array;
+  /** Scratch: car ids sorted by lane and position. */
+  order: number[];
 };
 
 function internal(sim: Simulation): InternalSimulation {
   return sim as InternalSimulation;
-}
-
-function positiveMod(x: number, length: number): number {
-  const r = x % length;
-  return r < 0 ? r + length : r;
-}
-
-/** Bumper-to-bumper gap from `follower` to `leader` given front-bumper positions. */
-function ringGap(follower: number, leader: number, length: number, vehicleLength: number): number {
-  return positiveMod(leader - follower, length) - vehicleLength;
 }
 
 function driverFromOffsets(
@@ -156,10 +186,43 @@ export function equilibriumSpeed(params: DriverParams, gap: number, minimumGap: 
   return (low + high) / 2;
 }
 
+/**
+ * Which cars use the ramp: `share` of them, spread evenly through the car
+ * numbers (car 0 never, so the followed car stays on the main road), fixed
+ * for the run. Only the merge track has a ramp.
+ */
+function assignRoutes(track: Track, n: number, share: number): Uint8Array {
+  const route = new Uint8Array(n);
+  if (!track.junction) return route;
+  const count = Math.round(Math.min(Math.max(0, share), 1) * n);
+  for (let car = 0; car < n; car++) {
+    if (Math.floor(((car + 1) * count) / n) > Math.floor((car * count) / n)) route[car] = RAMP;
+  }
+  return route;
+}
+
+/**
+ * The speed a car may start at where it stands: the even-spacing equilibrium,
+ * capped by the bend it is in and by what the bends ahead allow at comfortable
+ * braking, so a run on a track with corners begins settled, not mid-skid.
+ */
+function startSpeedAt(lane: Lane, position: number, equilibrium: number, params: DriverParams, cornering: number): number {
+  let speed = Math.min(equilibrium, limitAt(lane, position, cornering));
+  for (const corner of cornersAhead(lane, position, CORNER_HORIZON, cornering)) {
+    speed = Math.min(speed, Math.sqrt(corner.limit ** 2 + 2 * params.comfortableBraking * corner.distance));
+  }
+  return speed;
+}
+
 export function createSimulation(config: ExperimentConfig, options: { dt?: number } = {}): Simulation {
   const dt = options.dt ?? DEFAULT_DT;
   const n = config.carCount;
-  const { length, vehicleLength, minimumGap } = ROAD;
+  const track = trackFor(config.track ?? "ring");
+  const main = track.lanes[MAIN];
+  const { vehicleLength, minimumGap } = ROAD;
+  const road = track.id === "ring" ? ROAD : { length: main.length, vehicleLength, minimumGap };
+  const cornering = config.cornering ?? DEFAULT_CORNERING;
+  const merging = config.merging ?? DEFAULT_MERGING;
   const random = createRandom(config.seed);
 
   // Draw order is fixed so that `start` never changes the driver offsets.
@@ -168,35 +231,41 @@ export function createSimulation(config: ExperimentConfig, options: { dt?: numbe
   const jumble = new Float64Array(n);
   for (let i = 0; i < n; i++) jumble[i] = random.range(-1, 1);
 
-  const spacing = length / n;
+  const spacing = main.length / n;
   const spareRoom = Math.max(0, spacing - vehicleLength - minimumGap);
   const position = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const offset = config.start === "jumbled" ? jumble[i] * JUMBLE_FRACTION * spareRoom : 0;
-    position[i] = positiveMod(i * spacing + offset, length);
+    position[i] = positiveMod(i * spacing + offset, main.length);
   }
-  const leader = new Int32Array(n);
-  for (let i = 0; i < n; i++) leader[i] = (i + 1) % n;
 
-  const startSpeed = equilibriumSpeed(config.driver, spacing - vehicleLength, minimumGap);
+  const equilibrium = equilibriumSpeed(config.driver, spacing - vehicleLength, minimumGap);
+  const speed = new Float64Array(n);
+  for (let i = 0; i < n; i++) speed[i] = startSpeedAt(main, position[i], equilibrium, config.driver, cornering);
   const historyCapacity = Math.ceil(HISTORY_SECONDS / dt) + 2;
 
   const scheduledStep = scheduleStep(config, dt);
 
   const sim: InternalSimulation = {
-    road: ROAD,
+    road,
+    track,
     carCount: n,
     dt,
     time: 0,
     steps: 0,
     status: { kind: "running" },
-    leader,
+    leader: new Int32Array(n),
+    lane: new Uint8Array(n),
+    route: assignRoutes(track, n, merging.rampShare),
     position,
     travelled: new Float64Array(n),
-    speed: new Float64Array(n).fill(startSpeed),
+    speed,
     acceleration: new Float64Array(n),
     brakeLight: new Uint8Array(n),
+    mergedAt: new Float64Array(n).fill(-Infinity),
     drivers: [],
+    cornering,
+    merging,
     centre: config.driver,
     variation: config.variation,
     offsets,
@@ -206,14 +275,21 @@ export function createSimulation(config: ExperimentConfig, options: { dt?: numbe
     scheduledCar: scheduledStep < 0 ? -1 : (config.scheduledTap?.car ?? -1),
     log: [],
     interventions: [],
+    mergeLog: [],
+    merges: [],
+    crossings: [],
     historySpeed: new Float64Array(historyCapacity * n),
     historyGap: new Float64Array(historyCapacity * n),
     historyClosing: new Float64Array(historyCapacity * n),
     historyCapacity,
     request: new Float64Array(n),
+    accepted: new Uint8Array(n),
+    order: [],
   };
   (sim as { interventions: readonly Intervention[] }).interventions = sim.log;
+  (sim as { merges: readonly MergeEvent[] }).merges = sim.mergeLog;
   setDrivers(sim, config.driver, config.variation);
+  updateLeaders(sim);
   recordHistory(sim);
   return sim;
 }
@@ -240,6 +316,16 @@ export function setDrivers(sim: Simulation, driver: DriverParams, variation: num
   (s as { drivers: readonly DriverParams[] }).drivers = Array.from({ length: s.carCount }, (_, car) =>
     driverFromOffsets(driver, variation, s.offsets, car),
   );
+}
+
+/** Live change of the cornering comfort. No reset. */
+export function setCornering(sim: Simulation, lateral: number): void {
+  (sim as { cornering: number }).cornering = lateral;
+}
+
+/** Live change of merge behaviour. The ramp share is fixed per run and ignored here. */
+export function setMerging(sim: Simulation, merging: Pick<MergingParams, "cooperation" | "acceptableBraking">): void {
+  (sim as { merging: MergingParams }).merging = { ...sim.merging, cooperation: merging.cooperation, acceptableBraking: merging.acceptableBraking };
 }
 
 function isValidCar(sim: Simulation, car: number): boolean {
@@ -283,18 +369,77 @@ export function releaseBrake(sim: Simulation, car: number): void {
   internal(sim).holdStepsLeft[car] = 0;
 }
 
+// --- Geometry along lanes --------------------------------------------------
+
+function laneOf(sim: Simulation, car: number): Lane {
+  return sim.track.lanes[sim.lane[car]];
+}
+
+/** Bumper-to-bumper gap from a car at `follower` to one at `leader`, both metres along `lane`. */
+function laneGap(lane: Lane, follower: number, leader: number, vehicleLength: number): number {
+  const ahead = lane.closed ? positiveMod(leader - follower, lane.length) : leader - follower;
+  return ahead - vehicleLength;
+}
+
+/**
+ * Gap along the lane to the car ahead; with nothing ahead on an open lane,
+ * to the lane's end; alone on a closed lane, a full lap back to itself.
+ */
 function gapOf(sim: Simulation, car: number): number {
-  return ringGap(sim.position[car], sim.position[sim.leader[car]], sim.road.length, sim.road.vehicleLength);
+  const lane = laneOf(sim, car);
+  const ahead = sim.leader[car];
+  if (ahead < 0) return lane.length - sim.position[car];
+  if (ahead === car) return lane.length - sim.road.vehicleLength;
+  return laneGap(lane, sim.position[car], sim.position[ahead], sim.road.vehicleLength);
+}
+
+/** Main-lane metres beside ramp metre `s` in the merge zone. */
+function alignedMain(sim: Simulation, s: number): number {
+  const { junction } = sim.track;
+  if (!junction) return s;
+  return positiveMod(junction.zoneMainStart + (s - junction.zoneStart) * junction.zoneScale, sim.track.lanes[MAIN].length);
+}
+
+function inZone(sim: Simulation, car: number): boolean {
+  const { junction } = sim.track;
+  return Boolean(junction) && sim.lane[car] === RAMP && sim.position[car] >= junction!.zoneStart;
+}
+
+/**
+ * Re-read who is ahead of whom from positions, per lane. Order is physical
+ * (position, then car number only to break an exact tie, which is itself an
+ * overlap the status check will report).
+ */
+function updateLeaders(sim: Simulation): void {
+  const s = internal(sim);
+  const n = s.carCount;
+  const order = s.order;
+  order.length = 0;
+  for (let car = 0; car < n; car++) order.push(car);
+  order.sort((a, b) => s.lane[a] - s.lane[b] || s.position[a] - s.position[b] || a - b);
+  let laneStart = 0;
+  for (let k = 0; k < n; k++) {
+    const car = order[k];
+    const last = k === n - 1 || s.lane[order[k + 1]] !== s.lane[car];
+    if (!last) {
+      s.leader[car] = order[k + 1];
+    } else {
+      s.leader[car] = s.track.lanes[s.lane[car]].closed ? order[laneStart] : -1;
+      laneStart = k + 1;
+    }
+  }
 }
 
 // --- Perception ---------------------------------------------------------
 
 /** What `car` can see right now, read straight from the state. */
 function observeNow(sim: Simulation, car: number): Observation {
+  const ahead = sim.leader[car];
   return {
     speed: sim.speed[car],
     gap: gapOf(sim, car),
-    closingSpeed: sim.speed[car] - sim.speed[sim.leader[car]],
+    // The end of a lane stands still.
+    closingSpeed: sim.speed[car] - (ahead < 0 ? 0 : sim.speed[ahead]),
   };
 }
 
@@ -307,6 +452,21 @@ function recordHistory(sim: Simulation): void {
     s.historySpeed[base + car] = seen.speed;
     s.historyGap[base + car] = seen.gap;
     s.historyClosing[base + car] = seen.closingSpeed;
+  }
+}
+
+/**
+ * A driver who has just merged has been watching the gap they moved into, so
+ * their memory of "the car ahead" is of that car, not of the ramp: overwrite
+ * their stored gaps with the current one. (The car behind them gets no such
+ * favour: it sees the newcomer one reaction delay late.)
+ */
+function refreshPerception(sim: Simulation, car: number): void {
+  const s = internal(sim);
+  const seen = observeNow(s, car);
+  for (let row = 0; row < s.historyCapacity; row++) {
+    s.historyGap[row * s.carCount + car] = seen.gap;
+    s.historyClosing[row * s.carCount + car] = seen.closingSpeed;
   }
 }
 
@@ -342,6 +502,148 @@ export function perceive(sim: Simulation, car: number): Observation {
   };
 }
 
+// --- Driver ----------------------------------------------------------------
+
+/** The driver's request for the road ahead on their own lane: IDM following, capped by the bend they are in and braking for the bends to come. */
+function roadRequest(sim: Simulation, car: number): number {
+  const s = internal(sim);
+  const lane = laneOf(s, car);
+  const params = s.drivers[car];
+  const limit = limitAt(lane, s.position[car], s.cornering);
+  const inBend = limit < params.desiredSpeed ? { ...params, desiredSpeed: limit } : params;
+  const following = desiredAcceleration(perceive(s, car), inBend, s.road);
+  const bends = cornerAcceleration(s.speed[car], cornersAhead(lane, s.position[car], CORNER_HORIZON, s.cornering), params);
+  return Math.min(following, bends);
+}
+
+// --- Merging ---------------------------------------------------------------
+
+/** A car as seen from the main lane: who it is, main-lane metres and speed. Ramp cars in the zone appear at their aligned position. */
+type Occupant = Readonly<{ car: number; position: number; speed: number }>;
+
+/** The nearest occupant ahead of and behind main-lane metre `at` (the same one, or none, when the lane has one or no cars). */
+function neighbours(sim: Simulation, occupants: readonly Occupant[], at: number): { ahead: Occupant | null; behind: Occupant | null } {
+  const length = sim.track.lanes[MAIN].length;
+  let ahead: Occupant | null = null;
+  let behind: Occupant | null = null;
+  let aheadBy = Infinity;
+  let behindBy = Infinity;
+  for (const other of occupants) {
+    const forward = positiveMod(other.position - at, length);
+    if (forward < aheadBy) {
+      aheadBy = forward;
+      ahead = other;
+    }
+    const backward = positiveMod(at - other.position, length);
+    if (backward < behindBy) {
+      behindBy = backward;
+      behind = other;
+    }
+  }
+  return { ahead, behind };
+}
+
+type Gaps = Readonly<{ ahead: Occupant | null; behind: Occupant | null; front: number; rear: number }>;
+
+/** Where a ramp car in the zone would sit in the main lane, and the gaps it would have. */
+function gapsFor(sim: Simulation, occupants: readonly Occupant[], car: number, position: number): Gaps {
+  const at = alignedMain(sim, position);
+  const { ahead, behind } = neighbours(sim, occupants, at);
+  const length = sim.track.lanes[MAIN].length;
+  const { vehicleLength } = sim.road;
+  const front = ahead ? positiveMod(ahead.position - at, length) - vehicleLength : Infinity;
+  const rear = behind ? positiveMod(at - behind.position, length) - vehicleLength : Infinity;
+  return { ahead, behind, front, rear };
+}
+
+/** What the car behind would do, by its own car-following model, if `car` were in front of it at these gaps. */
+function predictedBehind(sim: Simulation, gaps: Gaps, carSpeed: number): number {
+  const behind = gaps.behind;
+  if (!behind) return Infinity;
+  return desiredAcceleration({ speed: behind.speed, gap: gaps.rear, closingSpeed: behind.speed - carSpeed }, sim.drivers[behind.car], sim.road);
+}
+
+/** What `car` itself would do once in the lane. */
+function predictedOwn(sim: Simulation, gaps: Gaps, car: number): number {
+  const ahead = gaps.ahead;
+  if (!ahead) return Infinity;
+  return desiredAcceleration({ speed: sim.speed[car], gap: gaps.front, closingSpeed: sim.speed[car] - ahead.speed }, sim.drivers[car], sim.road);
+}
+
+/** MOBIL's safety criterion, with a clearance floor: the merge asks no one for more than acceptable braking and overlaps nothing. */
+function isSafe(sim: Simulation, gaps: Gaps, car: number): boolean {
+  const limit = -sim.merging.acceptableBraking;
+  return gaps.front > MERGE_CLEARANCE && gaps.rear > MERGE_CLEARANCE && predictedOwn(sim, gaps, car) >= limit && predictedBehind(sim, gaps, sim.speed[car]) >= limit;
+}
+
+/**
+ * Everything to do with the ramp, from the pre-step snapshot:
+ *
+ * 1. Each ramp driver in the merge zone keeps to its own lane's rules (the
+ *    car ahead on the ramp, the lane's end, the bends) and in addition
+ *    adjusts speed for the gap it is aiming at: it will not run into the
+ *    main-lane car it means to slot in behind (treated as a leader by IDM),
+ *    and if the car behind that gap would have to brake harder than
+ *    acceptable and is faster (it is coming through), it eases off at half
+ *    its comfortable braking to fall in behind that car instead. At equal
+ *    speed it holds its course: the ramp car is ahead, so a main-road driver
+ *    who is making room follows it, and one who is not simply passes or is
+ *    passed. Both easing off at once would be the "after you" standstill.
+ * 2. It asks to merge when the gap is safe: MOBIL's safety criterion for the
+ *    car behind, the same test on itself, and clear road either side.
+ *    Merging is mandatory, so there is no incentive test.
+ * 3. Main-lane drivers may cooperate: the one directly behind a zone car's
+ *    aligned position treats it as a car ahead, braking for it up to
+ *    `cooperation` × their comfortable braking.
+ * 4. Requests from several ramp cars in one step are settled in road order,
+ *    the car furthest along the zone first, each later one judged against
+ *    the lane as it will be with the earlier ones in it. Two cars can
+ *    therefore never be granted the same bit of road in one step.
+ *
+ * Cross-lane judgements use the current snapshot: a driver looking over
+ * their shoulder sees where cars are now. The reaction delay still governs
+ * how every driver follows the car in front, so the car behind a newcomer
+ * reacts to it late, and a merge that was safe by the criterion can still
+ * end in a collision on this model's terms. That is reported, not prevented.
+ */
+function decideMerges(sim: Simulation): void {
+  const s = internal(sim);
+  const { junction } = s.track;
+  s.accepted.fill(0);
+  if (!junction) return;
+  const n = s.carCount;
+  const occupants: Occupant[] = [];
+  const candidates: number[] = [];
+  for (let car = 0; car < n; car++) {
+    if (s.lane[car] === MAIN) occupants.push({ car, position: s.position[car], speed: s.speed[car] });
+    else if (inZone(s, car)) candidates.push(car);
+  }
+  if (candidates.length === 0) return;
+  // Furthest along the zone first.
+  candidates.sort((a, b) => s.position[b] - s.position[a] || a - b);
+  const { cooperation } = s.merging;
+  for (const car of candidates) {
+    const gaps = gapsFor(s, occupants, car, s.position[car]);
+    // 1. Speed for the gap.
+    if (gaps.ahead && gaps.front > 0) s.request[car] = Math.min(s.request[car], predictedOwn(s, gaps, car));
+    const behindWould = predictedBehind(s, gaps, s.speed[car]);
+    if (gaps.behind && gaps.rear > 0 && behindWould < -s.merging.acceptableBraking && gaps.behind.speed > s.speed[car]) {
+      s.request[car] = Math.min(s.request[car], -s.drivers[car].comfortableBraking / 2);
+    }
+    // 3. Room from behind, if the main-lane driver is willing.
+    if (cooperation > 0 && gaps.behind && gaps.rear > 0) {
+      const behind = gaps.behind.car;
+      const yielding = Math.max(behindWould, -cooperation * s.drivers[behind].comfortableBraking);
+      s.request[behind] = Math.min(s.request[behind], yielding);
+    }
+    // 2 and 4. Move over if safe, against the lane as it will be.
+    if (isSafe(s, gaps, car)) {
+      s.accepted[car] = 1;
+      occupants.push({ car, position: alignedMain(s, s.position[car]), speed: s.speed[car] });
+    }
+  }
+}
+
 // --- Intervention -------------------------------------------------------
 
 /** An active tap caps the driver's request; it never raises it. */
@@ -363,11 +665,15 @@ function isHeld(sim: Simulation, car: number): boolean {
  * Advance one car by `request` over dt with the ballistic update. The request
  * is clamped to the physical braking limit; speed never goes below zero (a
  * stop inside the step is handled exactly). Returns the realised acceleration.
+ * The car follows its route: a ramp user reaching the diverge on the main
+ * lane carries straight on to the ramp; a car granted a merge arrives beside
+ * where it got to in the zone. Nothing else moves a car between lanes.
  */
-function integrate(sim: Simulation, car: number, request: number): number {
-  const { dt } = sim;
+function integrate(sim: Simulation, car: number, request: number, merge: boolean): number {
+  const s = internal(sim);
+  const { dt } = s;
   const a = Math.max(request, -PHYSICAL_BRAKING_LIMIT);
-  const v = sim.speed[car];
+  const v = s.speed[car];
   let distance: number;
   let newSpeed: number;
   if (v + a * dt < 0) {
@@ -377,9 +683,30 @@ function integrate(sim: Simulation, car: number, request: number): number {
     newSpeed = v + a * dt;
     distance = v * dt + 0.5 * a * dt * dt;
   }
-  sim.speed[car] = newSpeed;
-  (sim.travelled as Float64Array)[car] += distance;
-  sim.position[car] = positiveMod(sim.position[car] + distance, sim.road.length);
+  s.speed[car] = newSpeed;
+  (s.travelled as Float64Array)[car] += distance;
+  const lane = laneOf(s, car);
+  const { junction } = s.track;
+  const from = s.position[car];
+  let to = from + distance;
+  if (lane.closed) to = positiveMod(to, lane.length);
+  if (junction && s.lane[car] === MAIN) {
+    const toDiverge = positiveMod(junction.divergeAt - from, lane.length);
+    if (s.route[car] === RAMP && distance > 0 && toDiverge <= distance) {
+      s.lane[car] = RAMP;
+      to = distance - toDiverge;
+    } else {
+      const zoneEnd = positiveMod(junction.zoneMainEnd, lane.length);
+      if (distance > 0 && positiveMod(zoneEnd - from, lane.length) <= distance) s.crossings.push(s.time + dt);
+    }
+  } else if (junction && merge) {
+    if (from < junction.zoneEnd && to >= junction.zoneEnd) s.crossings.push(s.time + dt);
+    s.lane[car] = MAIN;
+    to = alignedMain(s, to);
+    s.mergedAt[car] = s.time + dt;
+    s.mergeLog.push({ time: s.time + dt, car, position: to });
+  }
+  s.position[car] = to;
   return (newSpeed - v) / dt;
 }
 
@@ -407,16 +734,15 @@ export function stepSimulation(sim: Simulation): void {
     log(s, s.scheduledCar, "scheduled");
   }
 
-  // 1. Everyone decides from the same pre-step state.
-  for (let car = 0; car < n; car++) {
-    const driverRequest = desiredAcceleration(perceive(s, car), s.drivers[car], s.road);
-    s.request[car] = applyTap(s, car, driverRequest);
-  }
+  // 1. Everyone decides from the same pre-step state: the road, then the ramp, then the experimenter.
+  for (let car = 0; car < n; car++) s.request[car] = roadRequest(s, car);
+  decideMerges(s);
+  for (let car = 0; car < n; car++) s.request[car] = applyTap(s, car, s.request[car]);
 
-  // 2. Then everyone moves.
+  // 2. Then everyone moves, and accepted merges are committed with the move.
   for (let car = 0; car < n; car++) {
     const wasStopped = s.speed[car] === 0;
-    const realised = integrate(s, car, s.request[car]);
+    const realised = integrate(s, car, s.request[car], s.accepted[car] === 1);
     s.acceleration[car] = realised;
     const heldStationary = wasStopped && s.speed[car] === 0 && s.request[car] <= 0;
     updateBrakeLight(s, car, realised, heldStationary);
@@ -426,6 +752,9 @@ export function stepSimulation(sim: Simulation): void {
 
   s.steps += 1;
   s.time = s.steps * s.dt;
+  updateLeaders(s);
+  for (let car = 0; car < n; car++) if (s.accepted[car] === 1) refreshPerception(s, car);
+  while (s.crossings.length && s.crossings[0] < s.time - FLOW_WINDOW) s.crossings.shift();
   recordHistory(s);
   checkStatus(s);
 }
@@ -439,9 +768,14 @@ function checkStatus(sim: Simulation): void {
       sim.status = { kind: "invalid", time: sim.time, reason: `Car ${car + 1} has a non-finite value` };
       return;
     }
+    const lane = laneOf(sim, car);
+    if (!lane.closed && sim.position[car] > lane.length) {
+      sim.status = { kind: "invalid", time: sim.time, reason: `Car ${car + 1} drove off the end of the ramp` };
+      return;
+    }
   }
   for (let car = 0; car < sim.carCount; car++) {
-    if (gapOf(sim, car) <= 0) {
+    if (sim.leader[car] >= 0 && gapOf(sim, car) <= 0) {
       sim.status = { kind: "collision", time: sim.time, follower: car, leader: sim.leader[car] };
       return;
     }
@@ -455,6 +789,9 @@ export function readCar(sim: Simulation, car: number): CarReadout {
   return {
     car,
     leader: sim.leader[car],
+    lane: sim.lane[car],
+    inZone: inZone(sim, car),
+    limit: limitAt(laneOf(sim, car), sim.position[car], sim.cornering),
     speed: sim.speed[car],
     gap: gapOf(sim, car),
     desiredGap: desiredGap(perceived, sim.drivers[car], sim.road),
@@ -466,20 +803,30 @@ export function readCar(sim: Simulation, car: number): CarReadout {
 }
 
 export function summarise(sim: Simulation): TrafficSummary {
-  const n = sim.carCount;
+  const s = internal(sim);
+  const n = s.carCount;
   let sum = 0;
   let min = Infinity;
   let max = -Infinity;
+  let waiting = 0;
   for (let car = 0; car < n; car++) {
-    const v = sim.speed[car];
+    const v = s.speed[car];
     sum += v;
     min = Math.min(min, v);
     max = Math.max(max, v);
+    if (v < WAITING_SPEED && inZone(s, car)) waiting += 1;
   }
   const mean = sum / n;
   let variance = 0;
-  for (let car = 0; car < n; car++) variance += (sim.speed[car] - mean) ** 2;
-  return { meanSpeed: mean, speedSpread: Math.sqrt(variance / n), minSpeed: min, maxSpeed: max };
+  for (let car = 0; car < n; car++) variance += (s.speed[car] - mean) ** 2;
+  const window = Math.min(FLOW_WINDOW, Math.max(s.time, s.dt));
+  const flow = s.track.junction ? (s.crossings.length * 60) / window : 0;
+  return { meanSpeed: mean, speedSpread: Math.sqrt(variance / n), minSpeed: min, maxSpeed: max, flow, merges: s.mergeLog.length, waiting };
+}
+
+/** Main-lane metres beside a ramp car in the merge zone (for drawing the move over). */
+export function alignedPosition(sim: Simulation, position: number): number {
+  return alignedMain(sim, position);
 }
 
 /**
@@ -503,26 +850,35 @@ export function permuteStorage(sim: Simulation, order: readonly number[]): Simul
   order.forEach((car, slot) => {
     for (let k = 0; k < keys; k++) offsets[slot * keys + k] = s.offsets[car * keys + k];
   });
+  const remap = (car: number) => (car < 0 ? car : (slotOf.get(car) as number));
   const copy: InternalSimulation = {
     ...s,
     status: s.status,
-    leader: Int32Array.from(order, (car) => slotOf.get(s.leader[car]) as number),
+    leader: Int32Array.from(order, (car) => remap(s.leader[car])),
+    lane: Uint8Array.from(order, (car) => s.lane[car]),
+    route: Uint8Array.from(order, (car) => s.route[car]),
     position: perCar(s.position),
     travelled: perCar(s.travelled),
     speed: perCar(s.speed),
     acceleration: perCar(s.acceleration),
     brakeLight: Uint8Array.from(order, (car) => s.brakeLight[car]),
+    mergedAt: perCar(s.mergedAt),
     drivers: order.map((car) => s.drivers[car]),
     offsets,
     tapRemaining: perCar(s.tapRemaining),
     holdStepsLeft: Int32Array.from(order, (car) => s.holdStepsLeft[car]),
     scheduledCar: s.scheduledCar < 0 ? -1 : (slotOf.get(s.scheduledCar) as number),
     log: s.log.map((entry) => ({ ...entry, car: slotOf.get(entry.car) as number })),
+    mergeLog: s.mergeLog.map((entry) => ({ ...entry, car: slotOf.get(entry.car) as number })),
+    crossings: [...s.crossings],
     historySpeed: perCarHistory(s.historySpeed),
     historyGap: perCarHistory(s.historyGap),
     historyClosing: perCarHistory(s.historyClosing),
     request: new Float64Array(n),
+    accepted: new Uint8Array(n),
+    order: [],
   };
   (copy as { interventions: readonly Intervention[] }).interventions = copy.log;
+  (copy as { merges: readonly MergeEvent[] }).merges = copy.mergeLog;
   return copy;
 }

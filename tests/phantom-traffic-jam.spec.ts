@@ -1060,24 +1060,33 @@ test("brake button: pointer and Space hold while down, a bare click taps, blur l
 
 // ---- Experiments ----
 
-const EXPECTED_FACTS = ["delay 0.4 s · tap at 5 s", "delay 0.8 s · tap at 5 s", "delay 0.8 s · ±10% · no tap"];
+/** Every experiment states only what differs from the others; the three ring experiments share everything but delay, variation and the tap. */
+const EXPECTED_FACTS = [
+  "ring · 14 cars · delay 0.4 s · tap at 5 s",
+  "ring · 14 cars · delay 0.8 s · tap at 5 s",
+  "ring · 14 cars · delay 0.8 s · ±10% · no tap",
+  "B circuit · 14 cars · delay 0.4 s · no tap",
+  "ring + on-ramp · 18 cars · delay 0.4 s · no tap · 50% cooperation",
+];
 const experiments = (page: Page) => page.getByRole("region", { name: "Experiments", exact: true }).getByRole("button");
+/** aria-pressed of every experiment button, with only `pressed` (if any) true. */
+const pressedPattern = (pressed?: number) => PRESETS.map((_, index) => (index === pressed ? "true" : "false"));
 
 test("experiments describe themselves; the default is slow reactions following car 1; a changed setting un-presses", async ({ page }) => {
   await open(page);
-  await expect(experiments(page)).toHaveCount(3);
+  await expect(experiments(page)).toHaveCount(5);
   expect(await experiments(page).locator("span:first-child").allTextContents()).toEqual(PRESETS.map((preset) => preset.label));
-  expect(PRESETS.map((preset) => preset.label)).toEqual(["One brake tap", "Slow reactions", "Mixed drivers"]);
+  expect(PRESETS.map((preset) => preset.label)).toEqual(["One brake tap", "Slow reactions", "Mixed drivers", "B circuit", "On-ramp merge"]);
   const facts = await experiments(page).locator("span:last-child").allTextContents();
   expect(facts).toEqual(EXPECTED_FACTS);
   // The two tap experiments differ in exactly one stated fact, the delay, as their configs do.
   const [tapFacts, slowFacts] = facts.map((line) => line.split(" · "));
   expect(tapFacts.filter((fact, index) => fact !== slowFacts[index])).toEqual(["delay 0.4 s"]);
   expect({ ...PRESETS[0].config, driver: { ...PRESETS[0].config.driver, reactionDelay: 0 } }).toEqual({ ...PRESETS[1].config, driver: { ...PRESETS[1].config.driver, reactionDelay: 0 } });
-  await expect(experiments(page).nth(1)).toHaveAccessibleName(/^Slow reactions\s*delay 0\.8 s · tap at 5 s$/);
+  await expect(experiments(page).nth(1)).toHaveAccessibleName(/^Slow reactions\s*ring · 14 cars · delay 0\.8 s · tap at 5 s$/);
 
   // Opening the page: slow reactions, car 1 followed, the opening tap on.
-  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "true", "false"]);
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(pressedPattern(1));
   await expect(car(page, 0)).toHaveAttribute("aria-pressed", "true");
   await expect(button(page, "Hold to brake · car 1")).toBeVisible();
   await expect(button(page, "Car 1 at 5 s")).toHaveAttribute("aria-pressed", "true");
@@ -1085,7 +1094,7 @@ test("experiments describe themselves; the default is slow reactions following c
 
   // Any change of setting means the run no longer is one of the experiments.
   await slider(page, "Following time gap").fill("1.7");
-  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "false", "false"]);
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(pressedPattern());
   await slider(page, "Following time gap").fill("1.6");
   await expect(experiments(page).nth(1)).toHaveAttribute("aria-pressed", "true");
 });
@@ -1106,7 +1115,7 @@ test("experiments: one brake tap fades; without its opening tap nothing happens 
   await button(page, "None").click();
   await expect(button(page, "None")).toHaveAttribute("aria-pressed", "true");
   await expect(simTime(page)).toHaveText("t = 0.0 s");
-  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(["false", "false", "false"]);
+  expect(await experiments(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-pressed")))).toEqual(pressedPattern());
   await runAheadToEnd(page);
   await expect(history(page)).toHaveAttribute("data-markers", "0");
   await expect.poll(() => spread(page)).toBeLessThan(0.1);
@@ -1127,4 +1136,86 @@ test("experiments: slow reactions jam from the one tap; mixed drivers jam with n
   await expect(simTime(page)).toHaveText("t = 180.0 s");
   await expect(history(page)).toHaveAttribute("data-markers", "0");
   await expect.poll(() => spread(page)).toBeGreaterThan(5);
+});
+
+// ---- Tracks: the B circuit and the on-ramp ----
+
+const trackButton = (page: Page, name: string) => page.getByRole("group", { name: "Track" }).getByRole("button", { name, exact: true });
+const bends = (page: Page) => page.locator('[data-part="corner"]');
+
+test("the B circuit: five bends drawn with their speeds, cars brake for them, readouts and the history follow the road", async ({ page }) => {
+  await open(page);
+  await experiments(page).nth(3).click();
+  await expect(experiments(page).nth(3)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("ring")).toHaveAttribute("data-track", "b");
+  await expect(page.getByTestId("ring")).toHaveAccessibleName(/^B-shaped circuit, 271 m round with five bends/);
+  await expect(bends(page)).toHaveCount(5);
+  // Bend speeds come from the cornering comfort: 20 m lobes at 3 m/s² take sqrt(60) m/s = 28 km/h.
+  await expect(page.locator('[data-part="bend-speeds"] text')).toHaveText(["18", "28", "15", "28", "18"]);
+  await expect(slider(page, "Cornering comfort")).toBeVisible();
+  await expect(slider(page, "Cooperation")).toHaveCount(0);
+  await expect(page.getByTestId("car-road")).toHaveText("circuit");
+  await expect(page.getByTestId("history")).toBeVisible();
+
+  // After a minute the cars are strung out by the bends: some are braking, speeds are spread, nobody has crashed.
+  await runAheadToEnd(page);
+  await expect(simTime(page)).toHaveText("t = 60.0 s");
+  expect(await litCars(page)).toBeGreaterThan(0);
+  await expect.poll(() => spread(page)).toBeGreaterThan(3);
+  await expect(page.getByTestId("status")).toHaveCount(0);
+  // The selected car's gap is to the car ahead by road, never across the map, and arrows still walk along the traffic.
+  await expect(page.locator("dt", { hasText: /^Gap to car \d+$/ })).toBeVisible();
+  await car(page, 0).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(car(page, 1)).toHaveAttribute("aria-pressed", "true");
+
+  // Cornering comfort applies live and is marked on the history; the ring has no bends and no such slider.
+  await slider(page, "Cornering comfort").fill("4");
+  await expect(page.locator('[data-part="bend-speeds"] text').first()).toHaveText("20");
+  await expect.poll(() => markerLabels(page)).toEqual(["cornering 3 → 4 m/s²"]);
+  await trackButton(page, "Ring").click();
+  await expect(page.getByTestId("ring")).toHaveAttribute("data-track", "ring");
+  await expect(bends(page)).toHaveCount(0);
+  await expect(slider(page, "Cornering comfort")).toHaveCount(0);
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  expect(await overflows(page)).toBe(false);
+});
+
+test("the on-ramp: ramp users leave the ring, merge back in the zone, and the readouts count flow, merges and waiting", async ({ page }) => {
+  test.setTimeout(60_000);
+  await open(page);
+  await experiments(page).nth(4).click();
+  await expect(experiments(page).nth(4)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("ring")).toHaveAttribute("data-track", "merge");
+  await expect(page.locator("g[data-car]")).toHaveCount(18);
+  await expect(page.locator('[data-part="lane"]')).toHaveCount(2);
+  await expect(page.locator('[data-part="junction"]')).toHaveCount(1);
+  await expect(slider(page, "Cooperation")).toBeVisible();
+  await expect(slider(page, "Acceptable merge braking")).toBeVisible();
+  await expect(slider(page, "Ramp users")).toBeVisible();
+  await expect(page.getByTestId("merges")).toHaveText("0");
+  await expect(page.getByTestId("waiting")).toHaveText("0");
+
+  // By a minute in, some cars are on the ramp (drawn on lane 1) and the first merges have happened.
+  await runAheadToEnd(page);
+  await expect(page.locator('g[data-car][data-lane="1"]').first()).toBeVisible();
+  await expect.poll(async () => Number(await page.getByTestId("merges").textContent())).toBeGreaterThan(0);
+  await expect(page.getByTestId("flow")).toHaveText(/^\d+ cars\/min$/);
+  await expect(page.getByTestId("history")).toHaveAttribute("data-merges", /^[1-9]\d*$/);
+  // Selecting a ramp car: its road is the ramp, and with nothing ahead its gap is to the lane end.
+  const rampCar = page.locator('g[data-car][data-lane="1"]').first();
+  await rampCar.dispatchEvent("click");
+  await expect(page.getByTestId("car-road")).toHaveText(/^ramp/);
+  await expect(page.locator("dt", { hasText: /^Gap to (car \d+|the lane end)$/ })).toBeVisible();
+  await expect(page.getByTestId("status")).toHaveCount(0);
+
+  // Cooperation is live and marked; ramp share restarts the run.
+  await slider(page, "Cooperation").fill("100");
+  await expect.poll(() => markerLabels(page)).toEqual(["cooperation 50 → 100%"]);
+  await slider(page, "Ramp users").fill("0");
+  await expect(simTime(page)).toHaveText("t = 0.0 s");
+  await runAheadToEnd(page);
+  await expect(page.locator('g[data-car][data-lane="1"]')).toHaveCount(0);
+  await expect(page.getByTestId("merges")).toHaveText("0");
+  expect(await overflows(page)).toBe(false);
 });

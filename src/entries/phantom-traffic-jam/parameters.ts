@@ -2,10 +2,11 @@
  * Road, slider domains and presets. Everything here is SI internally; slider
  * min/max/step are in display units (see SliderSpec).
  */
-import type { DriverParamKey, DriverParams, ExperimentConfig, Preset, Road, SliderSpec } from "./types";
+import { RING_LENGTH, type TrackId } from "./track";
+import type { DriverParamKey, DriverParams, ExperimentConfig, MergingParams, Preset, Road, SliderSpec } from "./types";
 
 /** Ring road after Sugiyama et al. (2008), New J. Phys. 10, 033001: 230 m circumference. */
-export const ROAD: Road = { length: 230, vehicleLength: 4.5, minimumGap: 2 };
+export const ROAD: Road = { length: RING_LENGTH, vehicleLength: 4.5, minimumGap: 2 };
 
 /** Fixed integration step, s. Small against the shortest delay and wave time scales. */
 export const DEFAULT_DT = 0.05;
@@ -39,6 +40,33 @@ export const CAR_COUNT_SLIDER: SliderSpec = {
   max: 30, // 7.7 m per car: still 1.2 m of room beyond minimumGap
   step: 1,
 };
+
+/** The same slider on the other tracks (both main lanes are longer than the ring, so the densest case stays roomier). */
+export const TRACK_CAR_COUNT_SLIDER: SliderSpec = { ...CAR_COUNT_SLIDER, label: "Cars on the track" };
+
+export function carCountSlider(track: TrackId): SliderSpec {
+  return track === "ring" ? CAR_COUNT_SLIDER : TRACK_CAR_COUNT_SLIDER;
+}
+
+/*
+ * Cornering: the sideways acceleration drivers accept sets each bend's speed,
+ * v = sqrt(a_lat × radius). 1.5 m/s² is cautious, 4 m/s² brisk (about 0.4 g).
+ * Shared by every driver; it is a road-reading rule, not a personality.
+ */
+export const CORNERING_SLIDER: SliderSpec = { label: "Cornering comfort", unit: "m/s²", displayPerSI: 1, min: 1.5, max: 4, step: 0.5 };
+export const DEFAULT_CORNERING = 3;
+
+/*
+ * Merging. Cooperation is how hard a main-road driver will brake, as a share
+ * of their comfortable braking, to let a ramp car in ahead of them.
+ * Acceptable braking is the most a merge may ask of the merging driver or
+ * the car behind them (the MOBIL safety criterion's b_safe). The ramp share
+ * is fixed per car for a run.
+ */
+export const COOPERATION_SLIDER: SliderSpec = { label: "Cooperation", unit: "%", displayPerSI: 100, min: 0, max: 100, step: 10 };
+export const ACCEPTABLE_BRAKING_SLIDER: SliderSpec = { label: "Acceptable merge braking", unit: "m/s²", displayPerSI: 1, min: 1, max: 4, step: 0.5 };
+export const RAMP_SHARE_SLIDER: SliderSpec = { label: "Ramp users", unit: "%", displayPerSI: 100, min: 0, max: 50, step: 10 };
+export const DEFAULT_MERGING: MergingParams = { cooperation: 0.5, acceptableBraking: 3, rampShare: 0.3 };
 
 export const VARIATION_SLIDER: SliderSpec = {
   label: "Driver variation",
@@ -103,10 +131,41 @@ const MIXED_CONFIG: ExperimentConfig = {
   seed: SLOW_CONFIG.seed,
 };
 
+/*
+ * The two road experiments use the quicker (0.4 s) drivers of "tap", no tap,
+ * identical drivers and an even start, so what they show is the road.
+ *  - "corners": 14 cars on the B circuit. Cars brake before each bend and
+ *               pull away after it; the bunching that results is the road's.
+ *  - "merge":   18 cars on the ring with the on-ramp, 30% of them ramp
+ *               users, half-cooperative main-road drivers.
+ */
+const CORNERS_CONFIG: ExperimentConfig = {
+  carCount: 14,
+  driver: BASE_DRIVER,
+  variation: 0,
+  start: "even",
+  seed: 7,
+  track: "b",
+  cornering: DEFAULT_CORNERING,
+};
+
+const MERGE_CONFIG: ExperimentConfig = {
+  carCount: 18,
+  driver: BASE_DRIVER,
+  variation: 0,
+  start: "even",
+  seed: 7,
+  track: "merge",
+  cornering: DEFAULT_CORNERING,
+  merging: DEFAULT_MERGING,
+};
+
 export const PRESETS: readonly Preset[] = [
   { id: "tap", label: "One brake tap", config: TAP_CONFIG },
   { id: "slow", label: "Slow reactions", config: SLOW_CONFIG },
   { id: "mixed", label: "Mixed drivers", config: MIXED_CONFIG },
+  { id: "corners", label: "B circuit", config: CORNERS_CONFIG },
+  { id: "merge", label: "On-ramp merge", config: MERGE_CONFIG },
 ];
 
 export const DEFAULT_PRESET_ID = "slow";

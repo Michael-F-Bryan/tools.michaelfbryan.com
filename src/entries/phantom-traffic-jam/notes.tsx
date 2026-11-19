@@ -3,16 +3,18 @@ import type { ReactNode } from "react";
 import { Prose } from "@/components/prose";
 import { Section } from "@/components/section";
 
-import { DEFAULT_CONFIG, DEFAULT_DT, ROAD } from "./parameters";
+import { CORNER_BRAKING_ONSET } from "./driver";
+import { DEFAULT_CONFIG, DEFAULT_CORNERING, DEFAULT_DT, DEFAULT_MERGING, ROAD } from "./parameters";
 import {
   BRAKE_LIGHT_OFF,
   BRAKE_LIGHT_ON,
   HOLD_LIMIT,
+  MERGE_CLEARANCE,
   PHYSICAL_BRAKING_LIMIT,
   TAP_DECELERATION,
   TAP_DURATION,
 } from "./simulation";
-
+import { cornerLimit, trackFor } from "./track";
 
 const SOURCES = [
   {
@@ -29,6 +31,11 @@ const SOURCES = [
     href: "https://arxiv.org/abs/cond-mat/0404736",
     title: "Delays, inaccuracies and anticipation in microscopic traffic models",
     detail: "Treiber, Kesting & Helbing (2006), Physica A 360, 71",
+  },
+  {
+    href: "https://www.akesting.de/download/MOBIL_TGF07.pdf",
+    title: "General lane-changing model MOBIL for car-following models",
+    detail: "Kesting, Treiber & Helbing (2007), Transportation Research Record 1999, 86",
   },
 ] as const;
 
@@ -47,9 +54,14 @@ function Equation({ children }: Readonly<{ children: ReactNode }>) {
 }
 
 const sub = (text: string) => <sub>{text}</sub>;
+const kmh = (ms: number) => Math.round(ms * 3.6);
 
 /** Written notes beneath the experiment: definitions, the model, its limits, sources. */
 export function Notes() {
+  const b = trackFor("b");
+  const merge = trackFor("merge");
+  const junction = merge.junction!;
+  const zoneLength = Math.round(junction.zoneMainEnd - junction.zoneMainStart);
   return (
     <div className="mt-16 space-y-16 sm:mt-20">
       <Section id="ptj-model" kicker="Notes" title="The driver model">
@@ -87,8 +99,8 @@ export function Notes() {
               one reaction delay earlier, which is the finite-reaction-time part of the Human Driver Model in
               Treiber, Kesting &amp; Helbing (2006), without its estimation errors or anticipation. All cars
               decide from the same instant and then all move, in fixed {DEFAULT_DT} s steps whatever the
-              playback speed; &ldquo;Run ahead&rdquo; takes the same steps, only faster. The geometry is
-              fixed: a {ROAD.length} m ring, {ROAD.vehicleLength} m cars and a {ROAD.minimumGap} m stopped gap.
+              playback speed; &ldquo;Run ahead&rdquo; takes the same steps, only faster. Vehicles are{" "}
+              {ROAD.vehicleLength} m long with a {ROAD.minimumGap} m stopped gap; the ring is {ROAD.length} m round.
             </p>
             <p>
               Comfortable braking is a driver preference; the vehicle&rsquo;s separate, fixed physical limit is{" "}
@@ -108,6 +120,69 @@ export function Notes() {
         </div>
       </Section>
 
+      <Section id="ptj-bends" kicker="Roads" title="Bends: the B circuit">
+        <Prose>
+          <p>
+            A road here is a chain of straights and arcs; a car&rsquo;s state is one number, metres along its
+            lane, and gaps are measured along the lane, never across the map. The B circuit is{" "}
+            {Math.round(b.lanes[0].length)} m round with five bends, and its waist passes within a lane&rsquo;s
+            width of its spine while the two are over a hundred metres apart by road: a car there has no
+            idea the other is near, and nor should it.
+          </p>
+          <p>
+            Every bend has a speed, &radic;(<var>a</var><sub>lat</sub>&middot;<var>r</var>), from its radius and
+            the sideways acceleration drivers accept (&ldquo;Cornering comfort&rdquo;, {DEFAULT_CORNERING} m/s&sup2;
+            by default: {kmh(cornerLimit(1 / 20, DEFAULT_CORNERING))} km/h round the lobes,{" "}
+            {kmh(cornerLimit(1 / 5.5, DEFAULT_CORNERING))} km/h through the waist). Inside a bend the desired speed
+            is capped at it. Ahead of a bend the driver works out the steady braking that would just reach
+            its speed at its start, <var>b</var><sub>kin</sub> = (<var>v</var>&sup2; &minus; <var>v</var><sub>bend</sub>&sup2;)/2<var>d</var>,
+            and once that reaches {CORNER_BRAKING_ONSET * 100}% of their comfortable braking asks for
+            &minus;<var>b</var><sub>kin</sub>&sup2;/<var>b</var>: IDM&rsquo;s own strategy for a slower car ahead,
+            gentle at first and firming up towards <var>b</var>, so braking begins well before the bend and the
+            car arrives close to its speed, then pulls away once out. The road is known in advance, so the
+            reaction delay applies to traffic, not to bends. The ring keeps its original idealisation of no
+            cornering at all, so its experiments stay comparable with the published ones.
+          </p>
+        </Prose>
+      </Section>
+
+      <Section id="ptj-merging" kicker="Roads" title="Merging: the on-ramp">
+        <Prose>
+          <p>
+            On the merge track a fixed share of cars leave the ring at a slip road, cut across the inside, and
+            must get back on from a {zoneLength} m stretch beside the ring (the merge zone, in blue) before their
+            lane ends. The convention is give-way: the ring has right of way, a ramp driver may only move over
+            into a gap that works, and a ramp driver who never finds one stops at the end of the lane and waits.
+            Nothing is teleported or nudged into place.
+          </p>
+          <p>
+            &ldquo;Works&rdquo; is the safety criterion of MOBIL (Kesting, Treiber &amp; Helbing, 2007): the
+            ring car that would end up behind must not be asked to brake harder than an acceptable amount
+            (&ldquo;Acceptable merge braking&rdquo;, {DEFAULT_MERGING.acceptableBraking} m/s&sup2; by default),
+            predicted with its own car-following model from the gap and closing speed it would then have; the
+            same test is applied to the merging car, and both gaps must be at least the {MERGE_CLEARANCE} m
+            stopped gap. MOBIL&rsquo;s incentive criterion decides whether an optional lane change is worth it;
+            a ramp car has no option, so it is not used here, and the rest of the merge behaviour is this
+            page&rsquo;s own, not MOBIL: a ramp driver in the zone will not run into the ring car they mean to
+            slot in behind, eases off to fall in behind a faster car that will not make room, and otherwise holds
+            their course. A ring driver may cooperate: the one directly behind a zone car treats it as a car in
+            front, braking for it up to &ldquo;Cooperation&rdquo; &times; their comfortable braking (0% never
+            makes room; 100% is a zipper). When several ramp cars ask to move over in the same step they are
+            settled furthest-along first, each judged against the ring as it will be with the earlier ones in it.
+          </p>
+          <p>
+            Drivers look across lanes at where cars are now; the reaction delay still governs how everyone
+            follows the car in front. So the ring driver behind a newcomer reacts to it late, and a merge that
+            passed the criterion can still end in a collision on this model&rsquo;s terms, which is reported
+            like any other. With everyone keeping the default {DEFAULT_CONFIG.driver.timeGap} s following gap
+            and no cooperation, there is no gap in ring traffic that satisfies the criterion at any sensible
+            density: nobody gets in, and the ramp queues. That is the model being consistent, not a fault;
+            turn cooperation up, or the following gap down, and watch what the merging then does to the flow
+            past the zone.
+          </p>
+        </Prose>
+      </Section>
+
       <Section id="ptj-limits" kicker="Limits" title="What this does not show">
         <Prose>
           <p>
@@ -115,17 +190,19 @@ export function Notes() {
             at which jams appear belong to this model and these parameters.
           </p>
           <p>
-            There is one lane, no overtaking and identical vehicle lengths. The ring is one-dimensional, with no
-            cornering limits. Sugiyama et al. put 22 cars on a 230 m track; the default here uses fewer (
-            {DEFAULT_CONFIG.carCount}) and a longer time gap, so it shows the same phenomenon without
-            reproducing that experiment.
+            There is one lane per road, no overtaking and identical vehicle lengths. Lane changes are
+            instantaneous in the model and only drawn as a slide; there is no lateral dynamics, no tyre model
+            and no skidding, so a car that enters a bend too fast simply brakes harder. Sugiyama et al. put 22
+            cars on a 230 m track; the default here uses fewer ({DEFAULT_CONFIG.carCount}) and a longer time
+            gap, so it shows the same phenomenon without reproducing that experiment.
           </p>
           <p>
             Delay, and in &ldquo;Mixed drivers&rdquo; fixed per-driver differences, are the only human
             imperfections modelled. Real drivers also misjudge and anticipate, and Treiber et al. (2006) argue
             that anticipation largely offsets reaction time. With delay alone, a long delay against a short time
             gap makes cars collide, and holding a brake in dense, fast traffic can too; the run then stops and
-            says so instead of separating them.
+            says so instead of separating them. The same goes for a ramp car that cannot stop before its lane
+            ends.
           </p>
         </Prose>
       </Section>
