@@ -8,6 +8,7 @@
  * observation is (see simulation.ts). Time gap and reaction delay are
  * separate parameters.
  */
+import type { Corner } from "./track";
 import type { DriverParams, Observation, Road } from "./types";
 
 /** IDM free-acceleration exponent δ. */
@@ -34,4 +35,45 @@ export function desiredAcceleration(observation: Observation, params: DriverPara
   const freeRoadTerm = (observation.speed / params.desiredSpeed) ** ACCELERATION_EXPONENT;
   const interactionTerm = (wantedGap / gap) ** 2;
   return params.maxAcceleration * (1 - freeRoadTerm - interactionTerm);
+}
+
+/**
+ * A car already in a bend and over its speed brakes as if the limit started
+ * this far ahead, m. (The free-road term, with v0 capped at the bend's speed,
+ * does most of the in-bend correction; this stops a badly late car coasting.)
+ */
+export const INSIDE_CORNER_DISTANCE = 5;
+
+/**
+ * A driver starts braking for a bend once making it would take at least
+ * this fraction of their comfortable braking. Until then the bend is too far
+ * to matter and they drive for the road in front of them.
+ */
+export const CORNER_BRAKING_ONSET = 0.5;
+
+/**
+ * Braking for the bends ahead, or +Infinity when none is close enough to
+ * matter; the driver's request is the lesser of this and car-following.
+ *
+ * For each bend at distance d whose speed v_c is below the current speed v,
+ * the steady deceleration that would just reach v_c at its start is
+ * b_kin = (v² − v_c²) / (2d). Once b_kin reaches CORNER_BRAKING_ONSET × b the
+ * driver asks for −b_kin²/b: the same braking strategy as IDM's interaction
+ * term for a slower car ahead (Treiber et al. 2000). Braking below what is
+ * needed lets b_kin grow, so the request firms up towards b and settles
+ * there: the car arrives at the bend close to its speed, having braked
+ * progressively rather than all at once. The road is known in advance, so
+ * no reaction delay applies to this term. A car already in a bend and over
+ * its speed brakes as if the limit began INSIDE_CORNER_DISTANCE ahead.
+ */
+export function cornerAcceleration(speed: number, corners: readonly Corner[], params: DriverParams): number {
+  let request = Infinity;
+  for (const corner of corners) {
+    if (speed <= corner.limit) continue;
+    const distance = Math.max(corner.distance, INSIDE_CORNER_DISTANCE);
+    const needed = (speed * speed - corner.limit * corner.limit) / (2 * distance);
+    if (needed < CORNER_BRAKING_ONSET * params.comfortableBraking) continue;
+    request = Math.min(request, -(needed * needed) / params.comfortableBraking);
+  }
+  return request;
 }

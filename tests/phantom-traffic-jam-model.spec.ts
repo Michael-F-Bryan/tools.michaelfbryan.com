@@ -224,6 +224,8 @@ test.describe("parameters", () => {
       ["tap", "One brake tap"],
       ["slow", "Slow reactions"],
       ["mixed", "Mixed drivers"],
+      ["corners", "B circuit"],
+      ["merge", "On-ramp merge"],
     ]);
     expect(DEFAULT_PRESET_ID).toBe("slow");
     expect(DEFAULT_CONFIG).toBe(PRESETS.find((p) => p.id === DEFAULT_PRESET_ID)!.config);
