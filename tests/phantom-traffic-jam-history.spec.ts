@@ -52,7 +52,7 @@ test("keeps a bounded rolling window and prunes markers that fall out of it", ()
   const history = createHistory(sim, { windowSeconds: 10 });
   tapBrake(sim, 3);
   expect(syncInterventions(history, sim)).toBe(true);
-  expect(history.markers).toEqual([{ kind: "intervention", action: "tap", time: 0, car: 3, position: sim.position[3] }]);
+  expect(history.markers).toEqual([{ kind: "intervention", action: "tap", time: 0, car: 3, lane: 0, position: sim.position[3] }]);
   for (let step = 0; step < 15 / sim.dt; step += 1) {
     stepSimulation(sim);
     recordSample(history, sim);

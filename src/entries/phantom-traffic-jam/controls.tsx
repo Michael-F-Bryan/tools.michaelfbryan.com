@@ -3,9 +3,23 @@ import { useId, useState } from "react";
 import { Label } from "@/components/label";
 
 import { decimalsOf, formatDisplay, toDisplay } from "./format";
-import { CAR_COUNT_SLIDER, DRIVER_SLIDERS, PRESETS, ROAD, SCHEDULED_TAP, VARIATION_SLIDER } from "./parameters";
+import {
+  ACCEPTABLE_BRAKING_SLIDER,
+  carCountSlider,
+  COOPERATION_SLIDER,
+  CORNERING_SLIDER,
+  DEFAULT_CORNERING,
+  DEFAULT_MERGING,
+  DRIVER_SLIDERS,
+  PRESETS,
+  RAMP_SHARE_SLIDER,
+  ROAD,
+  SCHEDULED_TAP,
+  VARIATION_SLIDER,
+} from "./parameters";
+import { TRACK_IDS, trackFor, type TrackId } from "./track";
 import styles from "./experiment.module.css";
-import type { DriverParamKey, ExperimentConfig, Preset, SliderSpec, StartArrangement } from "./types";
+import type { DriverParamKey, ExperimentConfig, MergingParams, Preset, SliderSpec, StartArrangement } from "./types";
 
 /** At most a short phrase per control; the labels themselves come from the model. */
 const DRIVER_HINTS: Record<DriverParamKey, string> = {
@@ -22,6 +36,11 @@ const STARTS: readonly { value: StartArrangement; label: string }[] = [
   { value: "even", label: "Even" },
   { value: "jumbled", label: "Slightly jumbled" },
 ];
+
+/** The track a config runs on; absent means the original ring. */
+export const trackOf = (config: ExperimentConfig): TrackId => config.track ?? "ring";
+export const corneringOf = (config: ExperimentConfig): number => config.cornering ?? DEFAULT_CORNERING;
+export const mergingOf = (config: ExperimentConfig): MergingParams => config.merging ?? DEFAULT_MERGING;
 
 function Slider({ spec, value, hint, onChange }: Readonly<{ spec: SliderSpec; value: number; hint?: string; onChange: (si: number) => void }>) {
   const id = useId();
@@ -83,9 +102,10 @@ function SeedField({ seed, onSeed }: Readonly<{ seed: number; onSeed: (seed: num
   );
 }
 
-function density(carCount: number): string {
-  const perKm = carCount / (ROAD.length / 1000);
-  const gap = ROAD.length / carCount - ROAD.vehicleLength;
+function density(carCount: number, track: TrackId): string {
+  const length = trackFor(track).lanes[0].length;
+  const perKm = carCount / (length / 1000);
+  const gap = length / carCount - ROAD.vehicleLength;
   return `${Math.round(perKm)} cars/km · ${gap.toFixed(1)} m gaps`;
 }
 
@@ -108,6 +128,7 @@ const OPENING_TAP_LABEL = `Car ${SCHEDULED_TAP.car + 1} at ${SCHEDULED_TAP.time}
  * buttons sees exactly what differs and can trust that nothing else does.
  */
 const FACTS: readonly { differs: (a: ExperimentConfig, b: ExperimentConfig) => boolean; text: (config: ExperimentConfig) => string | null }[] = [
+  { differs: (a, b) => trackOf(a) !== trackOf(b), text: (c) => (trackOf(c) === "ring" ? "ring" : trackOf(c) === "b" ? "B circuit" : "ring + on-ramp") },
   { differs: (a, b) => a.carCount !== b.carCount, text: (c) => `${c.carCount} cars` },
   ...(["reactionDelay", "timeGap", "desiredSpeed", "maxAcceleration", "comfortableBraking"] as const).map((key) => ({
     differs: (a: ExperimentConfig, b: ExperimentConfig) => a.driver[key] !== b.driver[key],
@@ -118,6 +139,7 @@ const FACTS: readonly { differs: (a: ExperimentConfig, b: ExperimentConfig) => b
   { differs: (a, b) => a.start !== b.start, text: (c) => (c.start === "even" ? "even start" : "jumbled start") },
   { differs: (a, b) => a.seed !== b.seed, text: (c) => `seed ${c.seed}` },
   { differs: (a, b) => !sameConfig(a.scheduledTap, b.scheduledTap), text: (c) => (c.scheduledTap ? `tap at ${c.scheduledTap.time} s` : "no tap") },
+  { differs: (a, b) => !sameConfig(a.merging, b.merging), text: (c) => (c.merging ? `${formatDisplay(COOPERATION_SLIDER, c.merging.cooperation)} cooperation` : null) },
 ];
 
 /** "delay 0.8 s · ±10% · no tap": generated from the configs, so it cannot drift from them. */
@@ -159,16 +181,44 @@ type ControlsProps = Readonly<{
   onRestartWith: (change: Partial<ExperimentConfig>) => void;
   onDriver: (key: DriverParamKey, si: number) => void;
   onVariation: (variation: number) => void;
+  onCornering: (lateral: number) => void;
+  onMerging: (key: "cooperation" | "acceptableBraking", value: number) => void;
 }>;
 
-export function Controls({ config, onRestartWith, onDriver, onVariation }: ControlsProps) {
+export function Controls({ config, onRestartWith, onDriver, onVariation, onCornering, onMerging }: ControlsProps) {
   const idBase = useId();
+  const track = trackOf(config);
+  const merging = mergingOf(config);
 
   return (
     <div className={styles.controls}>
       <section className={styles.group} aria-labelledby={`${idBase}-road`}>
         <Label id={`${idBase}-road`} tone="muted">Road · restarts the run</Label>
-        <Slider spec={CAR_COUNT_SLIDER} value={config.carCount} hint={density(config.carCount)} onChange={(carCount) => onRestartWith({ carCount: Math.round(carCount) })} />
+        <div className={styles.field} role="group" aria-labelledby={`${idBase}-track`}>
+          <span id={`${idBase}-track`} className={styles.fieldName}>Track</span>
+          <div className={styles.segmented}>
+            {TRACK_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={styles.button}
+                aria-pressed={track === id}
+                onClick={() => onRestartWith({ track: id === "ring" ? undefined : id })}
+              >
+                {trackFor(id).label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Slider spec={carCountSlider(track)} value={config.carCount} hint={density(config.carCount, track)} onChange={(carCount) => onRestartWith({ carCount: Math.round(carCount) })} />
+        {track === "merge" ? (
+          <Slider
+            spec={RAMP_SHARE_SLIDER}
+            value={merging.rampShare}
+            hint="share of cars that take the ramp"
+            onChange={(rampShare) => onRestartWith({ merging: { ...merging, rampShare } })}
+          />
+        ) : null}
         <div className={styles.field} role="group" aria-labelledby={`${idBase}-start`}>
           <span id={`${idBase}-start`} className={styles.fieldName}>Start</span>
           <div className={styles.segmented}>
@@ -203,7 +253,16 @@ export function Controls({ config, onRestartWith, onDriver, onVariation }: Contr
         {DRIVER_ORDER.map((key) => (
           <Slider key={key} spec={DRIVER_SLIDERS[key]} value={config.driver[key]} hint={DRIVER_HINTS[key]} onChange={(si) => onDriver(key, si)} />
         ))}
-        <Slider spec={VARIATION_SLIDER} value={config.variation} hint="spreads every setting above" onChange={onVariation} />
+        {track !== "ring" ? (
+          <Slider spec={CORNERING_SLIDER} value={corneringOf(config)} hint="sideways g they accept in a bend" onChange={onCornering} />
+        ) : null}
+        {track === "merge" ? (
+          <>
+            <Slider spec={COOPERATION_SLIDER} value={merging.cooperation} hint="how hard ring drivers brake to let a ramp car in" onChange={(value) => onMerging("cooperation", value)} />
+            <Slider spec={ACCEPTABLE_BRAKING_SLIDER} value={merging.acceptableBraking} hint="most a merge may ask of anyone" onChange={(value) => onMerging("acceptableBraking", value)} />
+          </>
+        ) : null}
+        <Slider spec={VARIATION_SLIDER} value={config.variation} hint="spreads every driver setting above" onChange={onVariation} />
         <SeedField seed={config.seed} onSeed={(seed) => onRestartWith({ seed })} />
       </section>
     </div>

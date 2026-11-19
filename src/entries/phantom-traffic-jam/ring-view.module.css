@@ -20,7 +20,14 @@
 
 /* ---- Road ---- */
 .lane { fill: none; stroke: color-mix(in srgb, var(--rule) 26%, var(--surface)); }
+/* Bends drivers slow for: a shade darker, with their speed (km/h) on the inside. */
+.corner { fill: none; stroke: color-mix(in srgb, var(--rule) 44%, var(--surface)); }
+.bendSpeed { fill: var(--text-muted); font-family: var(--font-mono); font-size: calc(2.2px * var(--label-scale)); }
 .kerb { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+/* The merge zone: a broken line where the ramp runs beside the ring, and the ramp's end. */
+.zoneLine { fill: none; stroke: var(--accent); stroke-width: 1.5px; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; opacity: 0.8; }
+.laneEnd { fill: none; stroke: var(--ink); stroke-width: 2.5px; vector-effect: non-scaling-stroke; }
+.laneEndFill { fill: none; stroke: color-mix(in srgb, var(--ink) 30%, transparent); }
 .post { fill: none; stroke: var(--rule); stroke-width: 1px; vector-effect: non-scaling-stroke; }
 .postMajor { fill: none; stroke: var(--text-muted); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .cutAcross { stroke: var(--ink); stroke-width: 1px; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.45; }

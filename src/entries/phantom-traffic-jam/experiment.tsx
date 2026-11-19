@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 
 import { Label } from "@/components/label";
 
-import { Controls, Presets } from "./controls";
+import { Controls, corneringOf, mergingOf, Presets, trackOf } from "./controls";
 import { kmh, metres, seconds, signed, toDisplay } from "./format";
 import { createHistory, noteChange, recordSample, syncInterventions, type History } from "./history";
 import { createHistoryFeed, HistoryView, Sparkline } from "./history-view";
-import { DEFAULT_CONFIG, DRIVER_SLIDERS, VARIATION_SLIDER } from "./parameters";
+import { ACCEPTABLE_BRAKING_SLIDER, COOPERATION_SLIDER, CORNERING_SLIDER, DEFAULT_CONFIG, DRIVER_SLIDERS, VARIATION_SLIDER } from "./parameters";
 import { createRingPainter, RingView } from "./ring-view";
-import { createSimulation, holdBrake, readCar, releaseBrake, setDrivers, stepSimulation, summarise, tapBrake } from "./simulation";
+import { createSimulation, holdBrake, readCar, releaseBrake, setCornering, setDrivers, setMerging, stepSimulation, summarise, tapBrake } from "./simulation";
 import { MAX_SPEED, SPEED_TICKS_KMH, speedFraction, speedGradient } from "./speed-scale";
 import styles from "./experiment.module.css";
 import type { CarReadout, DriverParamKey, ExperimentConfig, Simulation, SimulationStatus, SliderSpec, TrafficSummary } from "./types";
@@ -320,6 +320,26 @@ export function Experiment() {
     setSnapshot(snapshotOf(sim, selected));
   }
 
+  function changeCornering(lateral: number) {
+    const from = corneringOf(config);
+    setConfig({ ...config, cornering: lateral });
+    setCornering(sim, lateral);
+    noteChange(history, { time: sim.time, key: "cornering", from, to: lateral, describe: describeChange("cornering", CORNERING_SLIDER) }, performance.now());
+    feed.notify();
+    setSnapshot(snapshotOf(sim, selected));
+  }
+
+  function changeMerging(key: "cooperation" | "acceptableBraking", value: number) {
+    const current = mergingOf(config);
+    const next = { ...current, [key]: value };
+    setConfig({ ...config, merging: next });
+    setMerging(sim, next);
+    const spec = key === "cooperation" ? COOPERATION_SLIDER : ACCEPTABLE_BRAKING_SLIDER;
+    noteChange(history, { time: sim.time, key, from: current[key], to: value, describe: describeChange(key === "cooperation" ? "cooperation" : "merge braking", spec) }, performance.now());
+    feed.notify();
+    setSnapshot(snapshotOf(sim, selected));
+  }
+
   /*
    * The brake button is press-and-hold too: pointer or Space/Enter down holds
    * the selected car's brake, up lets go (a quick press is one tap's worth).
@@ -408,15 +428,17 @@ export function Experiment() {
   const collided = useMemo(() => (status.kind === "collision" ? [status.follower, status.leader] : []), [status]);
   const { summary, car } = snapshot;
   const brakeShown = brakeState(car, running);
+  const track = trackOf(config);
+  const laneName = sim.track.lanes[car.lane]?.name ?? "road";
 
   return (
     <div className={styles.experiment} data-watch={watch || undefined}>
       <div className={styles.stage}>
-        <div className={styles.ring} ref={ringRef}>
+        <div className={styles.ring} ref={ringRef} data-legend={sim.track.legend}>
           <output className={styles.time} data-testid="sim-time" aria-label="Simulated time">
             t = {seconds(snapshot.time)}
           </output>
-          <RingView sim={sim} selected={selected} collided={collided} maxSpeed={MAX_SPEED} onSelect={select} onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} svgRef={svgRef} />
+          <RingView sim={sim} selected={selected} collided={collided} maxSpeed={MAX_SPEED} cornering={corneringOf(config)} onSelect={select} onHoldStart={onHoldStart} onHoldEnd={onHoldEnd} svgRef={svgRef} />
           <div className={styles.legend}>
             <span className={styles.legendTitle}>Speed · km/h</span>
             <span className={styles.legendBar} style={{ background: speedGradient() }} />
@@ -496,8 +518,8 @@ export function Experiment() {
         <Presets config={config} onPreset={(next) => restart(next, selected)} />
       </div>
 
-      {/* The space-time history: the ring unrolled at the 0 m cut. */}
-      <HistoryView history={history} feed={feed} selected={selected} maxSpeed={MAX_SPEED} />
+      {/* The space-time history: the road unrolled at the 0 m cut, one panel per lane. */}
+      <HistoryView history={history} feed={feed} selected={selected} maxSpeed={MAX_SPEED} track={track} />
 
       <div className={styles.side} ref={sideRef} hidden={watch}>
         <div className={styles.readouts}>
@@ -518,17 +540,45 @@ export function Experiment() {
                   <Sparkline history={history} feed={feed} values="speedSpread" max={MAX_SPREAD} label={`Speed spread over the last ${history.windowSeconds / 60} minutes, on a fixed 0 to ${Math.round(MAX_SPREAD * 3.6)} km/h scale`} />
                 </dd>
               </div>
+              {track === "merge" ? (
+                <>
+                  <div>
+                    <dt>Flow past the merge <small>(last minute)</small></dt>
+                    <dd data-testid="flow">{summary.flow.toFixed(0)} cars/min</dd>
+                  </div>
+                  <div>
+                    <dt>Merges</dt>
+                    <dd data-testid="merges">{summary.merges}</dd>
+                  </div>
+                  <div>
+                    <dt>Waiting on the ramp</dt>
+                    <dd data-testid="waiting">{summary.waiting}</dd>
+                  </div>
+                </>
+              ) : null}
             </dl>
           </section>
           <section aria-labelledby="ptj-car">
             <Label id="ptj-car" tone="muted">Car {car.car + 1}</Label>
             <dl className={styles.facts}>
+              {track !== "ring" ? (
+                <div>
+                  <dt>Road</dt>
+                  <dd data-testid="car-road">{car.inZone ? `${laneName} · merge zone` : laneName}</dd>
+                </div>
+              ) : null}
               <div>
                 <dt>Speed</dt>
                 <dd>{kmh(car.speed)}</dd>
               </div>
+              {Number.isFinite(car.limit) ? (
+                <div>
+                  <dt>Bend speed here</dt>
+                  <dd data-testid="bend-speed">{kmh(car.limit)}</dd>
+                </div>
+              ) : null}
               <div>
-                <dt>Gap to car {car.leader + 1}</dt>
+                <dt>{car.leader < 0 ? "Gap to the lane end" : `Gap to car ${car.leader + 1}`}</dt>
                 <dd>{metres(car.gap)}</dd>
               </div>
               <div>
@@ -554,6 +604,8 @@ export function Experiment() {
           onRestartWith={(change) => restart({ ...config, ...change }, selected)}
           onDriver={changeDriver}
           onVariation={changeVariation}
+          onCornering={changeCornering}
+          onMerging={changeMerging}
         />
       </div>
     </div>

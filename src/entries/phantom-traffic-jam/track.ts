@@ -64,7 +64,7 @@ export type Track = Readonly<{
   junction?: Junction;
   /** Half the square viewBox in metres, and where to leave room for the legend. */
   halfView: number;
-  legend: "centre" | "right";
+  legend: "centre" | "left";
 }>;
 
 /** Drawn lane width, m. The model has no width; it also sets how far the ramp sits beside the ring. */
@@ -203,9 +203,10 @@ export function bTrack(): Track {
     { length: shoulder, curvature: 0, corner: false },
     { length: quarter, curvature: 1 / corner, corner: true },
   ];
-  // Spine bottom; the B is 91 m tall and 37 m wide at the centreline, placed left of centre with the legend to its right.
-  const start: Pose = { x: -40, y: (spine + 2 * corner) / 2 - corner, heading: -Math.PI / 2 };
-  return { id: "b", label: "B circuit", lanes: [buildLane(0, "circuit", true, start, segments)], halfView: 49, legend: "right" };
+  // Spine bottom; the B is 91 m tall and 37 m wide at the centreline, placed right of centre (clear of the
+  // time readout in the top-left corner) with the legend to its left.
+  const start: Pose = { x: 4, y: (spine + 2 * corner) / 2 - corner, heading: -Math.PI / 2 };
+  return { id: "b", label: "B circuit", lanes: [buildLane(0, "circuit", true, start, segments)], halfView: 49, legend: "left" };
 }
 
 /*

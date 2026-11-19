@@ -29,8 +29,9 @@
   background: var(--surface);
 }
 
-/* The legend sits in the empty middle of the ring. */
+/* The legend sits in the empty middle of the ring, or beside the B circuit, which is drawn to the right. */
 .legend { position: absolute; top: 50%; left: 50%; display: grid; gap: 4px; width: min(52%, 14rem); transform: translate(-50%, -50%); color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; line-height: 1.2; pointer-events: none; }
+.ring[data-legend="left"] .legend { left: 26%; width: min(42%, 12rem); }
 .legendTitle { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .legendBar { display: block; height: 8px; border: 1px solid var(--ink); }
 .legendScale { position: relative; height: 1.2em; }
